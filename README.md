@@ -54,8 +54,6 @@ jobs:
    - `.goreleaser.yaml` for binary releases
    - `.goreleaser.docker.yaml` for Docker releases
 
-See the [connector-templates](https://github.com/ConductorOne/connector-templates) repository for base GoReleaser configurations.
-
 #### Input Parameters
 
 The release workflow accepts the following input parameters:
