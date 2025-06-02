@@ -48,12 +48,13 @@ jobs:
         with:
           go-version: 1.24.x
 
-      - name: Generate gon configs
+      - name: Generate gon and goreleaser configs
         env:
           REPO_NAME: ${{ github.event.repository.name }}
         run: |
           envsubst < _workflows/.gon-amd64-template.json > _workflows/.gon-amd64.json
           envsubst < _workflows/.gon-arm64-template.json > _workflows/.gon-arm64.json
+          envsubst < _workflows/.goreleaser-template.yaml > _workflows/.goreleaser.yaml
 
       - name: Set up Gon
         run: brew tap conductorone/gon && brew install conductorone/gon/gon
@@ -108,6 +109,14 @@ jobs:
         uses: actions/setup-go@v5
         with:
           go-version: 1.24.x
+
+      - name: Generate gon and goreleaser configs
+        env:
+          REPO_NAME: ${{ github.event.repository.name }}
+        run: |
+          envsubst < _workflows/.gon-amd64-template.json > _workflows/.gon-amd64.json
+          envsubst < _workflows/.gon-arm64-template.json > _workflows/.gon-arm64.json
+          envsubst < _workflows/.goreleaser-docker-template.yaml > _workflows/.goreleaser.docker.yaml
 
       - name: Docker Login
         uses: docker/login-action@v3
