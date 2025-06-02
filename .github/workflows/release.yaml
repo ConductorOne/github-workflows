@@ -32,12 +32,9 @@ jobs:
       - name: Checkout caller repo
         uses: actions/checkout@v4
         with:
+          path: _caller
           repository: ${{ inputs.repository }}
           fetch-depth: 0
-
-      - name: Update gitignore
-        run: |
-          echo "_workflows/" >> .gitignore
 
       - name: Checkout connector-workflows
         uses: actions/checkout@v4
@@ -70,8 +67,9 @@ jobs:
       - name: Run GoReleaser
         uses: goreleaser/goreleaser-action@v6
         with:
+          workdir: _caller
           version: "~> v2.5"
-          args: release --clean --config _workflows/.goreleaser.yaml
+          args: release --clean --config ../_workflows/.goreleaser.yaml
         env:
           GITHUB_TOKEN: ${{ secrets.RELENG_GITHUB_TOKEN }}
           AC_PASSWORD: ${{ secrets.AC_PASSWORD }}
@@ -95,12 +93,9 @@ jobs:
       - name: Checkout caller repo
         uses: actions/checkout@v4
         with:
+          path: _caller
           repository: ${{ inputs.repository }}
           fetch-depth: 0
-
-      - name: Update gitignore
-        run: |
-          echo "_workflows/" >> .gitignore
 
       - name: Checkout connector-workflows
         uses: actions/checkout@v4
@@ -127,8 +122,9 @@ jobs:
       - name: Run GoReleaser
         uses: goreleaser/goreleaser-action@v6
         with:
+          workdir: _caller
           version: "~> v2.5"
-          args: release --clean --config _workflows/.goreleaser.docker.yaml
+          args: release --clean --config ../_workflows/.goreleaser.docker.yaml
         env:
           GITHUB_TOKEN: ${{ secrets.RELENG_GITHUB_TOKEN }}
 
