@@ -35,6 +35,10 @@ jobs:
           repository: ${{ inputs.repository }}
           fetch-depth: 0
 
+      - name: Update gitignore
+        run: |
+          echo "_workflows/" >> .gitignore
+
       - name: Checkout connector-workflows
         uses: actions/checkout@v4
         with:
@@ -93,6 +97,10 @@ jobs:
         with:
           repository: ${{ inputs.repository }}
           fetch-depth: 0
+
+      - name: Update gitignore
+        run: |
+          echo "_workflows/" >> .gitignore
 
       - name: Checkout connector-workflows
         uses: actions/checkout@v4
