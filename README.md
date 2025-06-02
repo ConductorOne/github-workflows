@@ -31,9 +31,7 @@ jobs:
   release:
     uses: ConductorOne/connector-workflows/.github/workflows/release.yaml@main
     with:
-      repository: ${{ github.repository }}
       tag: ${{ github.ref_name }}
-      aws_role_arn: "arn:aws:iam::ACCOUNT_ID:role/YOUR_ROLE_NAME"
     secrets:
       RELENG_GITHUB_TOKEN: ${{ secrets.RELENG_GITHUB_TOKEN }}
       APPLE_SIGNING_KEY_P12: ${{ secrets.APPLE_SIGNING_KEY_P12 }}
@@ -58,11 +56,9 @@ jobs:
 
 The release workflow accepts the following input parameters:
 
-| Parameter      | Required | Description                                                         |
-| -------------- | -------- | ------------------------------------------------------------------- |
-| `repository`   | Yes      | The GitHub repository name (e.g., "ConductorOne/baton-github-test") |
-| `tag`          | Yes      | The release tag (e.g., "v1.0.0")                                    |
-| `aws_role_arn` | Yes      | The AWS role ARN to use for AWS operations                          |
+| Parameter | Required | Description                      |
+| --------- | -------- | -------------------------------- |
+| `tag`     | Yes      | The release tag (e.g., "v1.0.0") |
 
 ## Development
 
