@@ -1,4 +1,4 @@
-# Connector Workflows
+# Github Workflows
 
 This repository contains shared GitHub Actions workflows for ConductorOne connectors.
 
@@ -29,7 +29,7 @@ on:
 
 jobs:
   release:
-    uses: ConductorOne/connector-workflows/.github/workflows/release.yaml@main
+    uses: ConductorOne/github-workflows/.github/workflows/release.yaml@v1
     with:
       tag: ${{ github.ref_name }}
     secrets:
@@ -74,11 +74,11 @@ To modify these workflows:
 The workflows are versioned using Git tags. When using the workflows in your repository, you can specify a specific version:
 
 ```yaml
-uses: ConductorOne/connector-workflows/.github/workflows/release.yaml@v1.0.0
+uses: ConductorOne/github-workflows/.github/workflows/release.yaml@v1.0.0
 ```
 
 Or use the latest version from a branch:
 
 ```yaml
-uses: ConductorOne/connector-workflows/.github/workflows/release.yaml@main
+uses: ConductorOne/github-workflows/.github/workflows/release.yaml@main
 ```
