@@ -38,7 +38,7 @@ jobs:
       - name: Checkout connector-workflows
         uses: actions/checkout@v4
         with:
-          path: _shared
+          path: _workflows
           repository: ConductorOne/connector-workflows
           fetch-depth: 0
 
@@ -51,8 +51,8 @@ jobs:
         env:
           REPO_NAME: ${{ github.event.repository.name }}
         run: |
-          envsubst < _shared/.gon-amd64-template.json > _shared/.gon-amd64.json
-          envsubst < _shared/.gon-arm64-template.json > _shared/.gon-arm64.json
+          envsubst < _workflows/.gon-amd64-template.json > _workflows/.gon-amd64.json
+          envsubst < _workflows/.gon-arm64-template.json > _workflows/.gon-arm64.json
 
       - name: Set up Gon
         run: brew tap conductorone/gon && brew install conductorone/gon/gon
@@ -67,7 +67,7 @@ jobs:
         uses: goreleaser/goreleaser-action@v6
         with:
           version: "~> v2.5"
-          args: release --clean --config _shared/.goreleaser.yaml
+          args: release --clean --config _workflows/.goreleaser.yaml
         env:
           GITHUB_TOKEN: ${{ secrets.RELENG_GITHUB_TOKEN }}
           AC_PASSWORD: ${{ secrets.AC_PASSWORD }}
@@ -97,7 +97,7 @@ jobs:
       - name: Checkout connector-workflows
         uses: actions/checkout@v4
         with:
-          path: _shared
+          path: _workflows
           repository: ConductorOne/connector-workflows
           fetch-depth: 0
 
@@ -120,7 +120,7 @@ jobs:
         uses: goreleaser/goreleaser-action@v6
         with:
           version: "~> v2.5"
-          args: release --clean --config _shared/.goreleaser.docker.yaml
+          args: release --clean --config _workflows/.goreleaser.docker.yaml
         env:
           GITHUB_TOKEN: ${{ secrets.RELENG_GITHUB_TOKEN }}
 
