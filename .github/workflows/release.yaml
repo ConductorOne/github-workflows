@@ -29,7 +29,13 @@ jobs:
   goreleaser:
     runs-on: macos-latest
     steps:
-      - name: Checkout
+      - name: Checkout caller repo
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ inputs.repository }}
+          fetch-depth: 0
+
+      - name: Checkout connector-workflows
         uses: actions/checkout@v4
         with:
           path: _shared
@@ -82,7 +88,13 @@ jobs:
       - name: Login to Amazon ECR
         uses: aws-actions/amazon-ecr-login@v2
 
-      - name: Checkout
+      - name: Checkout caller repo
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ inputs.repository }}
+          fetch-depth: 0
+
+      - name: Checkout connector-workflows
         uses: actions/checkout@v4
         with:
           path: _shared
