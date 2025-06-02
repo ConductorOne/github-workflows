@@ -1,0 +1,84 @@
+version: 2
+project_name: "${REPO_NAME}"
+builds:
+  - binary: "${REPO_NAME}"
+    env:
+      - CGO_ENABLED=0
+    id: linux
+    main: ./cmd/${REPO_NAME}
+    goos:
+      - linux
+    goarch:
+      - amd64
+      - arm64
+  - binary: "${REPO_NAME}"
+    env:
+      - CGO_ENABLED=0
+    id: macos-amd64
+    main: ./cmd/${REPO_NAME}
+    goos:
+      - darwin
+    goarch:
+      - amd64
+    hooks:
+      post:
+        - gon .gon-amd64.json
+        - mv dist/${REPO_NAME}-darwin-amd64.signed.zip dist/macos-amd64_darwin_amd64_v1/${REPO_NAME}
+  - binary: "${REPO_NAME}"
+    env:
+      - CGO_ENABLED=0
+    id: macos-arm64
+    main: ./cmd/${REPO_NAME}
+    goos:
+      - darwin
+    goarch:
+      - arm64
+    hooks:
+      post:
+        - gon .gon-arm64.json
+        - mv dist/${REPO_NAME}-darwin-arm64.signed.zip dist/macos-arm64_darwin_arm64_v8.0/${REPO_NAME}
+archives:
+  - id: linux-archive
+    builds:
+      - linux
+    format: tar.gz
+    name_template: "{{ .ProjectName }}-v{{ .Version }}-{{ .Os }}-{{ .Arch }}"
+    files:
+      - none*
+  - id: darwin-archive
+    builds:
+      - macos-amd64
+      - macos-arm64
+    format: binary
+    name_template: "{{ .ProjectName }}-v{{ .Version }}-{{ .Os }}-{{ .Arch }}.zip"
+    files:
+      - none*
+release:
+  ids:
+    - linux-archive
+    - darwin-archive
+snapshot:
+  name_template: "{{ incpatch .Version }}-dev"
+checksum:
+  ids:
+    - linux-archive
+  extra_files:
+    - glob: ./dist/*-darwin-amd64.zip
+    - glob: ./dist/*-darwin-arm64.zip
+brews:
+  - repository:
+      owner: conductorone
+      name: homebrew-baton
+    directory: Formula
+    homepage: https://conductorone.com
+    test: |
+      system "#{bin}/${REPO_NAME} -v"
+    install: |-
+      bin.install "${REPO_NAME}"
+changelog:
+  filters:
+    exclude:
+      - "^docs:"
+      - typo
+      - lint
+      - Merge pull request

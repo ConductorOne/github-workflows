@@ -32,12 +32,20 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
         with:
+          path: _shared
           fetch-depth: 0
 
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
+
+      - name: Generate gon configs
+        env:
+          REPO_NAME: ${{ github.event.repository.name }}
+        run: |
+          envsubst < _shared/.gon-amd64-template.json > _shared/.gon-amd64.json
+          envsubst < _shared/.gon-arm64-template.json > _shared/.gon-arm64.json
 
       - name: Set up Gon
         run: brew tap conductorone/gon && brew install conductorone/gon/gon
@@ -52,7 +60,7 @@ jobs:
         uses: goreleaser/goreleaser-action@v6
         with:
           version: "~> v2.5"
-          args: release --clean
+          args: release --clean --config _shared/.goreleaser.yaml
         env:
           GITHUB_TOKEN: ${{ secrets.RELENG_GITHUB_TOKEN }}
           AC_PASSWORD: ${{ secrets.AC_PASSWORD }}
@@ -97,7 +105,7 @@ jobs:
         uses: goreleaser/goreleaser-action@v6
         with:
           version: "~> v2.5"
-          args: release --clean -f .goreleaser.docker.yaml
+          args: release --clean --config _shared/.goreleaser.docker.yaml
         env:
           GITHUB_TOKEN: ${{ secrets.RELENG_GITHUB_TOKEN }}
 
