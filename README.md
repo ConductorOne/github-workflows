@@ -1,16 +1,18 @@
 # Github Workflows
 
-This repository contains shared GitHub Actions workflows for ConductorOne connectors.
+This repository contains shared GitHub workflows for ConductorOne connector repositories.
 
 ## Available Workflows
 
 ### Release Workflow
 
-The release workflow handles the release process for connectors, including:
+The release workflow handles the release process for connector repos, including:
 
+- Rendering the latest goreleaser and gon configuration files from template
 - Building binaries for multiple platforms
 - Creating GitHub releases
 - Building and pushing Docker images
+- Building and pushing ECR images
 - Recording releases in the release tracking system
 
 #### Usage
@@ -29,7 +31,7 @@ on:
 
 jobs:
   release:
-    uses: ConductorOne/github-workflows/.github/workflows/release.yaml@v1
+    uses: ConductorOne/github-workflows/.github/workflows/release.yaml@main
     with:
       tag: ${{ github.ref_name }}
     secrets:
@@ -48,9 +50,7 @@ jobs:
    - `AC_PASSWORD`: Apple Connect password
    - `AC_PROVIDER`: Apple Connect provider
 
-3. Configure your GoReleaser files:
-   - `.goreleaser.yaml` for binary releases
-   - `.goreleaser.docker.yaml` for Docker releases
+3. Remove all GoReleaser and gon files from your repository, if they were previously created there.
 
 #### Input Parameters
 
