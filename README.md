@@ -31,7 +31,7 @@ on:
 
 jobs:
   release:
-    uses: ConductorOne/github-workflows/.github/workflows/release.yaml@main
+    uses: ConductorOne/github-workflows/.github/workflows/release.yaml@v1
     with:
       tag: ${{ github.ref_name }}
     secrets:
@@ -65,20 +65,20 @@ The release workflow accepts the following input parameters:
 To modify these workflows:
 
 1. Make your changes in this repository
-2. Test the changes in a connector repository
+2. Test the changes in a connector repository _pointing at your branch_
 3. Create a pull request for review
 4. Once approved, merge to main
+5. Tag the release: `git tag v1.1.0`
+6. Push the tag: `git push origin v1.1.0`
+7. Update the major version tag `git tag -f v1 v1.1.0`
+8. Push the major version tag `git push origin v1 --force`
 
 ## Versioning
 
-The workflows are versioned using Git tags. When using the workflows in your repository, you can specify a specific version:
+The workflows are versioned using Git tags. When testing a new version of the workflows in your repository, you can specify a specific version:
 
 ```yaml
-uses: ConductorOne/github-workflows/.github/workflows/release.yaml@v1.0.0
+uses: ConductorOne/github-workflows/.github/workflows/release.yaml@my-branch
 ```
 
-Or use the latest version from a branch:
-
-```yaml
-uses: ConductorOne/github-workflows/.github/workflows/release.yaml@main
-```
+Github does not resolve semantic versioning - tags must match exactly.  The major version must _float_.
