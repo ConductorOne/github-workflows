@@ -152,7 +152,7 @@ jobs:
         run: |
           TMPFILE=$(mktemp)
           aws lambda invoke \
-          --function-name "${{ github.event.repository.name }}-release-events" \
+          --function-name "${{ github.event.repository.name }}-releases" \
           --payload "{\"repository\":\"${{ github.event.repository.full_name }}\", \"tag\":\"${{ inputs.tag }}\"}" \
           --cli-binary-format raw-in-base64-out \
           "$TMPFILE"
