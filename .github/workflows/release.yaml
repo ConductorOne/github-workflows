@@ -184,7 +184,7 @@ jobs:
             - title: "Baton Connector Release Failed"
               text: |
                 %%%
-                # 🚨 Baton Connector Release Failed
+                # Baton Connector Release Failed
 
                 ## Details
                 * **Repository:** `${{ github.event.repository.full_name }}`
