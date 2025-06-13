@@ -1,4 +1,4 @@
-name: Reusable Release Workflow
+name: Baton Connector Release Workflow
 
 on:
   workflow_call:
@@ -181,10 +181,17 @@ jobs:
           api-key: ${{ secrets.DATADOG_API_KEY }}
           api-url: https://us3.datadoghq.com/
           events: |
-            - title: "Release Workflow Failed"
-              text: "Repository: ${{ github.event.repository.full_name }}\nTag: ${{ inputs.tag }}\nWorkflow: ${{ github.workflow }}\nRun ID: ${{ github.run_id }}\nLink: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+            - title: "Baton Connector Release Failed"
+              text: |
+                🚨 Baton Connector Release Failed
+                Repository: ${{ github.event.repository.full_name }}
+                Release Tag: ${{ inputs.tag }}
+                Workflow: baton-connector-release
+                Action Run ID: ${{ github.run_id }}
+                Action Run URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
               alert_type: "error"
               host: ${{ github.repository_owner }}
+              source_type_name: "github"
               tags:
                 - "github_repository:${{ github.event.repository.full_name }}"
                 - "github_release_tag:${{ inputs.tag }}"
