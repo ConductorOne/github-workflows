@@ -1,4 +1,4 @@
-name: Baton Connector Release Workflow
+name: Reusable Release Workflow
 
 on:
   workflow_call:
@@ -184,7 +184,7 @@ jobs:
             - title: "Baton Connector Release Failed"
               text: "%%%\n# Baton Connector Release Failed\n\n## Details\n* **Repository:** `${{ github.event.repository.full_name }}`\n* **Release Tag:** `${{ inputs.tag }}`\n* **Workflow:** `baton-connector-release`\n* **Action Run ID:** `${{ github.run_id }}`\n\n## Links\n[View Workflow Run](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})\n%%%"
               alert_type: "error"
-              host: "${{ github.repository_owner }}"
+              host: ${{ github.repository_owner }}
               source_type_name: "github"
               tags:
                 - "github_repository:${{ github.event.repository.full_name }}"
