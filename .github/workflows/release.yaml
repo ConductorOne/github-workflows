@@ -182,19 +182,7 @@ jobs:
           api-url: https://us3.datadoghq.com/
           events: |
             - title: "Baton Connector Release Failed"
-              text: |
-                %%%
-                # Baton Connector Release Failed
-
-                ## Details
-                * **Repository:** `${{ github.event.repository.full_name }}`
-                * **Release Tag:** `${{ inputs.tag }}`
-                * **Workflow:** `baton-connector-release`
-                * **Action Run ID:** `${{ github.run_id }}`
-
-                ## Links
-                [View Workflow Run](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})
-                %%%
+              text: "%%%\n# Baton Connector Release Failed\n\n## Details\n* **Repository:** `${{ github.event.repository.full_name }}`\n* **Release Tag:** `${{ inputs.tag }}`\n* **Workflow:** `baton-connector-release`\n* **Action Run ID:** `${{ github.run_id }}`\n\n## Links\n[View Workflow Run](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})\n%%%"
               alert_type: "error"
               host: "${{ github.repository_owner }}"
               source_type_name: "github"
