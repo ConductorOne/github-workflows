@@ -21,6 +21,14 @@ on:
         required: true
 
 jobs:
+  fail_on_purpose:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Fail on purpose
+        run: |
+          echo "This is a test failure"
+          exit 1
+
   goreleaser:
     runs-on: macos-latest
     steps:
