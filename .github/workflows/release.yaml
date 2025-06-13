@@ -183,14 +183,20 @@ jobs:
           events: |
             - title: "Baton Connector Release Failed"
               text: |
-                🚨 Baton Connector Release Failed
-                Repository: ${{ github.event.repository.full_name }}
-                Release Tag: ${{ inputs.tag }}
-                Workflow: baton-connector-release
-                Action Run ID: ${{ github.run_id }}
-                Action Run URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+                %%%
+                # 🚨 Baton Connector Release Failed
+
+                ## Details
+                * **Repository:** `${{ github.event.repository.full_name }}`
+                * **Release Tag:** `${{ inputs.tag }}`
+                * **Workflow:** `baton-connector-release`
+                * **Action Run ID:** `${{ github.run_id }}`
+
+                ## Links
+                [View Workflow Run](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})
+                %%%
               alert_type: "error"
-              host: ${{ github.repository_owner }}
+              host: "${{ github.repository_owner }}"
               source_type_name: "github"
               tags:
                 - "github_repository:${{ github.event.repository.full_name }}"
