@@ -21,16 +21,7 @@ on:
         required: true
 
 jobs:
-  fail_on_purpose:
-    runs-on: ubuntu-latest
-    steps:
-      - name: Fail on purpose
-        run: |
-          echo "This is a test failure"
-          exit 1
-
   goreleaser:
-    needs: [fail_on_purpose]
     runs-on: macos-latest
     steps:
       - name: Checkout caller repo
@@ -87,7 +78,6 @@ jobs:
           AC_PROVIDER: ${{ secrets.AC_PROVIDER }}
 
   goreleaser-docker:
-    needs: [fail_on_purpose]
     permissions:
       id-token: write
       contents: read
@@ -171,7 +161,7 @@ jobs:
           cat "$TMPFILE"
 
   notify-failure:
-    needs: [fail_on_purpose, goreleaser, goreleaser-docker, record-release]
+    needs: [goreleaser, goreleaser-docker, record-release]
     if: failure()
     runs-on: ubuntu-latest
     steps:

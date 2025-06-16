@@ -40,6 +40,7 @@ jobs:
       APPLE_SIGNING_KEY_P12_PASSWORD: ${{ secrets.APPLE_SIGNING_KEY_P12_PASSWORD }}
       AC_PASSWORD: ${{ secrets.AC_PASSWORD }}
       AC_PROVIDER: ${{ secrets.AC_PROVIDER }}
+      DATADOG_API_KEY: ${{ secrets.DATADOG_API_KEY }}
 ```
 
 2. Ensure your repository has the following secrets configured:
@@ -49,6 +50,7 @@ jobs:
    - `APPLE_SIGNING_KEY_P12_PASSWORD`: Password for the Apple signing key
    - `AC_PASSWORD`: Apple Connect password
    - `AC_PROVIDER`: Apple Connect provider
+   - `DATADOG_API_KEY`: Datadog API key for monitoring releases
 
 3. Remove all GoReleaser and gon files from your repository, if they were previously created there.
 
@@ -81,4 +83,4 @@ The workflows are versioned using Git tags. When testing a new version of the wo
 uses: ConductorOne/github-workflows/.github/workflows/release.yaml@my-branch
 ```
 
-Github does not resolve semantic versioning - tags must match exactly.  The major version must _float_.
+Github does not resolve semantic versioning - tags must match exactly. The major version must _float_.
