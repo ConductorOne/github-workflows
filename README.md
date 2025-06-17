@@ -31,7 +31,7 @@ on:
 
 jobs:
   release:
-    uses: ConductorOne/github-workflows/.github/workflows/release.yaml@v1
+    uses: ConductorOne/github-workflows/.github/workflows/release.yaml@v2
     with:
       tag: ${{ github.ref_name }}
     secrets:
@@ -70,10 +70,10 @@ To modify these workflows:
 2. Test the changes in a connector repository _pointing at your branch_
 3. Create a pull request for review
 4. Once approved, merge to main
-5. Tag the release: `git tag v1.1.0`
-6. Push the tag: `git push origin v1.1.0`
-7. Update the major version tag `git tag -f v1 v1.1.0`
-8. Push the major version tag `git push origin v1 --force`
+5. Tag the release: `git tag v2.0.1`
+6. Push the tag: `git push origin v2.0.1`
+7. Update the major version tag `git tag -f v2 v2.0.1`
+8. Push the major version tag `git push origin v2 --force`
 
 ## Versioning
 
