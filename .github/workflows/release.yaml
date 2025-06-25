@@ -119,7 +119,28 @@ jobs:
           echo "_workflows/.goreleaser.docker.yaml:"
           cat _workflows/.goreleaser.docker.yaml
 
+      - name: Check if ECR images already exist
+        id: check-ecr-images
+        run: |
+          REPO_NAME="${{ github.event.repository.name }}"
+          # Strip "v" prefix from tag to match GoReleaser version format
+          TAG="${{ inputs.tag }}"
+          VERSION="${TAG#v}"
+          
+          echo "Checking if ECR image ${REPO_NAME}:${VERSION}-arm64 exists"
+          aws ecr describe-images --repository-name "${REPO_NAME}" --image-ids imageTag="${VERSION}-arm64" --region us-west-2
+
+          # Check if the arm64 image already exists
+          if aws ecr describe-images --repository-name "${REPO_NAME}" --image-ids imageTag="${VERSION}-arm64" --region us-west-2 >/dev/null 2>&1; then
+            echo "ECR image ${REPO_NAME}:${VERSION}-arm64 already exists"
+            echo "images_exist=true" >> $GITHUB_OUTPUT
+          else
+            echo "ECR image ${REPO_NAME}:${VERSION}-arm64 does not exist"
+            echo "images_exist=false" >> $GITHUB_OUTPUT
+          fi
+
       - name: Docker Login
+        if: steps.check-ecr-images.outputs.images_exist != 'true'
         uses: docker/login-action@v3
         with:
           registry: ghcr.io
@@ -127,9 +148,11 @@ jobs:
           password: ${{ secrets.RELENG_GITHUB_TOKEN }}
 
       - name: Set up Docker Buildx
+        if: steps.check-ecr-images.outputs.images_exist != 'true'
         uses: docker/setup-buildx-action@v3
 
       - name: Run GoReleaser
+        if: steps.check-ecr-images.outputs.images_exist != 'true'
         uses: goreleaser/goreleaser-action@v6
         with:
           workdir: _caller
@@ -137,6 +160,11 @@ jobs:
           args: release --clean --config ../_workflows/.goreleaser.docker.yaml
         env:
           GITHUB_TOKEN: ${{ secrets.RELENG_GITHUB_TOKEN }}
+
+      - name: Skip GoReleaser - images already exist
+        if: steps.check-ecr-images.outputs.images_exist == 'true'
+        run: |
+          echo "Skipping GoReleaser because ECR images already exist for tag ${{ inputs.tag }}"
 
   record-release:
     needs: [goreleaser, goreleaser-docker]
