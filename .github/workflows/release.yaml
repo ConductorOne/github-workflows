@@ -123,7 +123,7 @@ jobs:
         id: check-ecr-images
         run: |
           REPO_NAME="${{ github.event.repository.name }}"
-          TAG="${{ inputs.tag }}"
+          TAG="${{ .Version }}"
 
           # Check if the arm64 image already exists
           if aws ecr describe-images --repository-name "${REPO_NAME}" --image-ids imageTag="${TAG}-arm64" --region us-west-2 >/dev/null 2>&1; then
