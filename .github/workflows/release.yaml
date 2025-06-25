@@ -123,14 +123,16 @@ jobs:
         id: check-ecr-images
         run: |
           REPO_NAME="${{ github.event.repository.name }}"
-          TAG="${{ .Version }}"
-
+          # Strip "v" prefix from tag to match GoReleaser version format
+          TAG="${{ inputs.tag }}"
+          VERSION="${TAG#v}"
+          
           # Check if the arm64 image already exists
-          if aws ecr describe-images --repository-name "${REPO_NAME}" --image-ids imageTag="${TAG}-arm64" --region us-west-2 >/dev/null 2>&1; then
-            echo "ECR image ${REPO_NAME}:${TAG}-arm64 already exists"
+          if aws ecr describe-images --repository-name "${REPO_NAME}" --image-ids imageTag="${VERSION}-arm64" --region us-west-2 >/dev/null 2>&1; then
+            echo "ECR image ${REPO_NAME}:${VERSION}-arm64 already exists"
             echo "images_exist=true" >> $GITHUB_OUTPUT
           else
-            echo "ECR image ${REPO_NAME}:${TAG}-arm64 does not exist"
+            echo "ECR image ${REPO_NAME}:${VERSION}-arm64 does not exist"
             echo "images_exist=false" >> $GITHUB_OUTPUT
           fi
 
