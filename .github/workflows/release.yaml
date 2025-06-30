@@ -128,8 +128,7 @@ jobs:
           VERSION="${TAG#v}"
           
           echo "Checking if ECR image ${REPO_NAME}:${VERSION}-arm64 exists"
-          aws ecr describe-images --repository-name "${REPO_NAME}" --image-ids imageTag="${VERSION}-arm64" --region us-west-2
-
+          
           # Check if the arm64 image already exists
           if aws ecr describe-images --repository-name "${REPO_NAME}" --image-ids imageTag="${VERSION}-arm64" --region us-west-2 >/dev/null 2>&1; then
             echo "ECR image ${REPO_NAME}:${VERSION}-arm64 already exists"
