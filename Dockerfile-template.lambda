@@ -1,13 +1,21 @@
+# TODO: consider pre-baking the extension into a base image separately for all connectors
+# --- Stage 1: Download and unpack the OpenTelemetry Collector layer ---
+FROM amazonlinux:2023 AS otel-layer
+RUN yum install -y unzip
+ADD https://github.com/open-telemetry/opentelemetry-lambda/releases/download/layer-collector%2F0.16.0/opentelemetry-collector-layer-arm64.zip /tmp/otel-layer.zip
+RUN unzip /tmp/otel-layer.zip -d /otel && \
+    chmod +x /otel/opt/extensions/collector && \
+    rm -f /tmp/otel-layer.zip
+
+# --- Stage 2: Final Lambda image ---
 FROM public.ecr.aws/lambda/provided:al2023
+ARG REPO_NAME
 COPY ${REPO_NAME} /
 ENTRYPOINT ["/${REPO_NAME}", "lambda"]
-ADD https://github.com/open-telemetry/opentelemetry-lambda/releases/download/layer-collector%2F0.16.0/opentelemetry-collector-layer-arm64.zip /tmp/otel-layer.zip
-RUN unzip /tmp/otel-layer.zip -d / && \
-    chmod +x /opt/extensions/collector && \
-    rm -f /tmp/otel-layer.zip
+COPY --from=otel-layer /otel/opt/extensions/collector /opt/extensions/collector
 COPY collector.yaml /var/task/
 ENV BATON_LAMBDA_OTEL_COLLECTOR_ENDPOINT=localhost:4317 \
     BATON_LAMBDA_OTEL_COLLECTOR_ENDPOINT_TLS_INSECURE=true \
     OPENTELEMETRY_COLLECTOR_CONFIG_URI=/var/task/collector.yaml \
     OTEL_RESOURCE_ATTRIBUTES=service.name=${REPO_NAME} \
-    OTEL_PROPAGATORS=tracecontext,baggage 
+    OTEL_PROPAGATORS=tracecontext,baggage

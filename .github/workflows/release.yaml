@@ -122,6 +122,9 @@ jobs:
 
           cp _workflows/collector.yaml _caller/collector.yaml
           envsubst < _workflows/Dockerfile-template.lambda > _caller/Dockerfile.lambda
+          echo "_caller/Dockerfile.lambda:"
+          cat _caller/Dockerfile.lambda
+
           envsubst < _workflows/.goreleaser-docker-template.yaml > _workflows/.goreleaser.docker.yaml
           echo "_workflows/.goreleaser.docker.yaml:"
           cat _workflows/.goreleaser.docker.yaml
