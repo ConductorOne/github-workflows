@@ -105,6 +105,8 @@ jobs:
           path: _workflows
           repository: ConductorOne/connector-workflows
           fetch-depth: 0
+          # TODO: remove this before we merge the PR
+          ref: gontzess/test-lambda-collector-extension-build-shared-workflow
 
       - name: Set up Go
         uses: actions/setup-go@v5
