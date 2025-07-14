@@ -111,10 +111,15 @@ jobs:
         with:
           go-version: 1.24.x
 
-      - name: Generate goreleaser configs
+      - name: Generate Dockerfile.lambda and goreleaser configs
         env:
           REPO_NAME: ${{ github.event.repository.name }}
         run: |
+          # Remove the old Dockerfile.lambda in the caller repo
+          rm -f _caller/Dockerfile.lambda
+
+          cp _workflows/collector.yaml _caller/collector.yaml
+          envsubst < _workflows/Dockerfile-template.lambda > _caller/Dockerfile.lambda
           envsubst < _workflows/.goreleaser-docker-template.yaml > _workflows/.goreleaser.docker.yaml
           echo "_workflows/.goreleaser.docker.yaml:"
           cat _workflows/.goreleaser.docker.yaml
@@ -159,6 +164,19 @@ jobs:
           args: release --clean --config ../_workflows/.goreleaser.docker.yaml
         env:
           GITHUB_TOKEN: ${{ secrets.RELENG_GITHUB_TOKEN }}
+
+      - name: Cleanup temporary files
+        if: steps.check-ecr-images.outputs.images_exist != 'true'
+        run: |
+          # Remove temporary files that were copied from shared workflows
+          if [ -f "_caller/collector.yaml" ]; then
+            rm _caller/collector.yaml
+            echo "Removed temporary collector.yaml"
+          fi
+          if [ -f "_caller/Dockerfile.lambda" ]; then
+            rm _caller/Dockerfile.lambda
+            echo "Removed temporary Dockerfile.lambda"
+          fi
 
       - name: Skip GoReleaser - images already exist
         if: steps.check-ecr-images.outputs.images_exist == 'true'

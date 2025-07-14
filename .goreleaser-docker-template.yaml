@@ -50,6 +50,8 @@ dockers:
       - "--label=org.opencontainers.image.title={{.ProjectName}}"
       - "--label=org.opencontainers.image.revision={{.FullCommit}}"
       - "--label=org.opencontainers.image.version={{.Version}}"
+    files:
+      - "collector.yaml"
 docker_manifests:
   - name_template: ghcr.io/conductorone/${REPO_NAME}:{{ .Version }}
     image_templates:

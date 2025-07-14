@@ -15,6 +15,22 @@ The release workflow handles the release process for connector repos, including:
 - Building and pushing ECR images
 - Recording releases in the release tracking system
 
+#### OpenTelemetry Collector Support
+
+The release workflow includes built-in support for OpenTelemetry collector configuration:
+
+- **Shared Configuration**: The `collector.yaml` file in this repository provides a standardized OpenTelemetry collector configuration for all lambda connectors
+- **Shared Dockerfile**: The `Dockerfile-template.lambda` template includes OpenTelemetry collector setup with proper environment variables
+- **Automatic Setup**: The workflow automatically copies and customizes these files for each repository during the build process
+
+The OpenTelemetry setup includes:
+
+- OTLP receiver for gRPC and HTTP protocols
+- OTLP exporter to `otel-collector.c1.internal:4317`
+- TLS configuration with insecure mode
+- Service pipelines for traces, metrics, and logs
+- Proper environment variables for Lambda execution
+
 #### Usage
 
 To use the release workflow in your connector repository:

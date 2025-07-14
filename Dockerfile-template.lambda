@@ -1,0 +1,13 @@
+FROM public.ecr.aws/lambda/provided:al2023
+COPY ${REPO_NAME} /
+ENTRYPOINT ["/${REPO_NAME}", "lambda"]
+ADD https://github.com/open-telemetry/opentelemetry-lambda/releases/download/layer-collector%2F0.16.0/opentelemetry-collector-layer-arm64.zip /tmp/otel-layer.zip
+RUN unzip /tmp/otel-layer.zip -d / && \
+    chmod +x /opt/extensions/collector && \
+    rm -f /tmp/otel-layer.zip
+COPY collector.yaml /var/task/
+ENV BATON_LAMBDA_OTEL_COLLECTOR_ENDPOINT=localhost:4317 \
+    BATON_LAMBDA_OTEL_COLLECTOR_ENDPOINT_TLS_INSECURE=true \
+    OPENTELEMETRY_COLLECTOR_CONFIG_URI=/var/task/collector.yaml \
+    OTEL_RESOURCE_ATTRIBUTES=service.name=${REPO_NAME} \
+    OTEL_PROPAGATORS=tracecontext,baggage 
