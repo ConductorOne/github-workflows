@@ -4,7 +4,7 @@ FROM amazonlinux:2023 AS otel-layer
 RUN yum install -y unzip
 ADD https://github.com/open-telemetry/opentelemetry-lambda/releases/download/layer-collector%2F0.16.0/opentelemetry-collector-layer-arm64.zip /tmp/otel-layer.zip
 RUN unzip /tmp/otel-layer.zip -d /otel && \
-    chmod +x /otel/opt/extensions/collector && \
+    chmod +x /otel/extensions/collector && \
     rm -f /tmp/otel-layer.zip
 
 # --- Stage 2: Final Lambda image ---
@@ -12,7 +12,7 @@ FROM public.ecr.aws/lambda/provided:al2023
 ARG REPO_NAME
 COPY ${REPO_NAME} /
 ENTRYPOINT ["/${REPO_NAME}", "lambda"]
-COPY --from=otel-layer /otel/opt/extensions/collector /opt/extensions/collector
+COPY --from=otel-layer /otel/extensions/collector /opt/extensions/collector
 COPY collector.yaml /var/task/
 ENV BATON_LAMBDA_OTEL_COLLECTOR_ENDPOINT=localhost:4317 \
     BATON_LAMBDA_OTEL_COLLECTOR_ENDPOINT_TLS_INSECURE=true \
