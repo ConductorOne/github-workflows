@@ -192,13 +192,13 @@ jobs:
               --cli-binary-format raw-in-base64-out \
               "$TMPFILE" 2>&1)
 
-            cat "$TMPFILE"
-
             # Check if the invoke was successful (exit code 0) and response has 200 status code
             if [[ $? -eq 0 ]] && [[ "$(cat $TMPFILE)" == *"\"statusCode\":200"* ]]; then
+                cat "$TMPFILE"
                 echo "Lambda invoked successfully."
                 break
             elif [[ "$RESPONSE" == *"CodeArtifactUserPendingException"* ]]; then
+                cat "$TMPFILE"
                 # Only retry for this specific transient error
                 if [[ $i -lt MAX_RETRIES ]]; then
                     WAIT_TIME=$((i * RETRY_DELAY))
@@ -209,6 +209,7 @@ jobs:
                     exit 1
                 fi
             else
+                cat "$TMPFILE"
                 # Any other error should fail immediately
                 echo "Lambda invoke failed with error: $RESPONSE"
                 exit 1
