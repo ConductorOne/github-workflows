@@ -177,41 +177,43 @@ jobs:
         with:
           role-to-assume: "arn:aws:iam::168442440833:role/GitHubActionsECRPushRole-${{ github.event.repository.name }}"
           aws-region: us-west-2
-      - name: Wait for Lambda to be ready
-        run: |
-          FUNCTION_NAME="${{ github.event.repository.name }}-releases"
-          MAX_RETRIES=5
-          RETRY_DELAY=5  # seconds
-
-          for ((i=1; i<=MAX_RETRIES; i++)); do
-            echo "Checking if Lambda function '$FUNCTION_NAME' is ready (Attempt $i)..."
-
-            aws lambda get-function --function-name "$FUNCTION_NAME" > /dev/null 2>&1
-            STATUS=$?
-
-            if [[ $STATUS -eq 0 ]]; then
-              echo "Lambda is ready."
-              break
-            fi
-
-            if [[ $i -lt MAX_RETRIES ]]; then
-              WAIT_TIME=$((i * RETRY_DELAY))
-              echo "Lambda not ready yet. Retrying in $WAIT_TIME seconds..."
-              sleep $WAIT_TIME
-            else
-              echo "Lambda did not become ready in time."
-              exit 1
-            fi
-          done
-      - name: Invoke Lambda
+      - name: Invoke Lambda with retries
         run: |
           TMPFILE=$(mktemp)
-          aws lambda invoke \
-          --function-name "${{ github.event.repository.name }}-releases" \
-          --payload "{\"repository\":\"${{ github.event.repository.full_name }}\", \"tag\":\"${{ inputs.tag }}\"}" \
-          --cli-binary-format raw-in-base64-out \
-          "$TMPFILE"
-          cat "$TMPFILE"
+          MAX_RETRIES=5
+          RETRY_DELAY=10  # seconds
+
+          for ((i=1; i<=MAX_RETRIES; i++)); do
+            echo "Attempt $i to invoke Lambda..."
+
+            RESPONSE=$(aws lambda invoke \
+              --function-name "${{ github.event.repository.name }}-releases" \
+              --payload "{\"repository\":\"${{ github.event.repository.full_name }}\", \"tag\":\"${{ inputs.tag }}\"}" \
+              --cli-binary-format raw-in-base64-out \
+              "$TMPFILE" 2>&1)
+
+            cat "$TMPFILE"
+
+            # Check if the invoke was successful (exit code 0) and response has 200 status code
+            if [[ $? -eq 0 ]] && [[ "$(cat $TMPFILE)" == *"\"statusCode\":200"* ]]; then
+                echo "Lambda invoked successfully."
+                break
+            elif [[ "$RESPONSE" == *"CodeArtifactUserPendingException"* ]]; then
+                # Only retry for this specific transient error
+                if [[ $i -lt MAX_RETRIES ]]; then
+                    WAIT_TIME=$((i * RETRY_DELAY))
+                    echo "Lambda not ready yet. Retrying in $WAIT_TIME seconds..."
+                    sleep $WAIT_TIME
+                else
+                    echo "Failed to invoke Lambda after $MAX_RETRIES attempts."
+                    exit 1
+                fi
+            else
+                # Any other error should fail immediately
+                echo "Lambda invoke failed with error: $RESPONSE"
+                exit 1
+            fi
+          done
 
   notify-failure:
     needs: [goreleaser, goreleaser-docker, record-release]
