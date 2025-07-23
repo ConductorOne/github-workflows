@@ -179,57 +179,23 @@ jobs:
           aws-region: us-west-2
       - name: Invoke Lambda with retries
         run: |
-          set +e  # Disable default fail-fast to support retries
-          set -x  # Debug logging
+          set +e    # Disable default fail-fast to support retries
+          if [[ "$ACTIONS_STEP_DEBUG" == "true" ]]; then
+            set -x  # Debug logging
+          fi
 
           TMPFILE=$(mktemp)
           MAX_RETRIES=5
           RETRY_DELAY=10  # seconds
 
-          fake_lambda_invoke() {
-            local outfile="$1"
-
-            # Randomly select a behavior
-            local options=("success" "fail" "init" "badstatus")
-            local behavior=${options[$RANDOM % ${#options[@]}]}
-
-            echo "Simulating Lambda behavior: $behavior"
-
-            case "$behavior" in
-              success)
-                echo '{"statusCode":200,"body":"OK"}' > "$outfile"
-                return 0
-                ;;
-              init)
-                echo '{"statusCode":500,"body":"Initializing"}' > "$outfile"
-                echo "An error occurred (CodeArtifactUserPendingException) when calling the Invoke operation: Lambda is initializing"
-                return 255
-                ;;
-              fail)
-                echo '{"statusCode":500,"body":"Failure"}' > "$outfile"
-                echo "An error occurred (ResourceNotFoundException) when calling the Invoke operation: Function not found"
-                return 1
-                ;;
-              badstatus)
-                echo '{"statusCode":403,"body":"Forbidden"}' > "$outfile"
-                return 0
-                ;;
-              *)
-                echo "Unknown behavior '$behavior'"
-                return 2
-                ;;
-            esac
-          }
-
           for ((i=1; i<=MAX_RETRIES; i++)); do
             echo "Attempt $i to invoke Lambda..."
 
-            # RESPONSE=$(aws lambda invoke \
-            #   --function-name "${{ github.event.repository.name }}-releases" \
-            #   --payload "{\"repository\":\"${{ github.event.repository.full_name }}\", \"tag\":\"${{ inputs.tag }}\"}" \
-            #   --cli-binary-format raw-in-base64-out \
-            #   "$TMPFILE" 2>&1)
-            RESPONSE=$(fake_lambda_invoke "$TMPFILE")
+            RESPONSE=$(aws lambda invoke \
+              --function-name "${{ github.event.repository.name }}-releases" \
+              --payload "{\"repository\":\"${{ github.event.repository.full_name }}\", \"tag\":\"${{ inputs.tag }}\"}" \
+              --cli-binary-format raw-in-base64-out \
+              "$TMPFILE" 2>&1)
             EXIT_CODE=$?
 
             echo "AWS CLI exited with code: $EXIT_CODE"
