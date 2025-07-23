@@ -2,6 +2,11 @@
 
 set -euxo pipefail
 
+if command -v baton &> /dev/null; then
+  echo "baton already installed"
+  exit 0
+fi
+
 OS=$(uname -s | tr '[:upper:]' '[:lower:]')
 ARCH=$(uname -m)
 if [ "${ARCH}" = "x86_64" ]; then
