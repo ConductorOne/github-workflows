@@ -62,6 +62,23 @@ The release workflow accepts the following input parameters:
 | --------- | -------- | -------------------------------- |
 | `tag`     | Yes      | The release tag (e.g., "v1.0.0") |
 
+
+## Available Actions
+
+### Get Baton
+
+The get-baton action downloads the latest version of [Baton](https://github.com/conductorone/baton) and installs it to /usr/local/bin/baton.
+
+#### Usage
+
+```yaml
+- name: Install baton
+  uses: ConductorOne/github-workflows/actions/get-baton@v2
+```
+
+You can then use the baton command in your workflow.
+
+
 ## Development
 
 To modify these workflows:
