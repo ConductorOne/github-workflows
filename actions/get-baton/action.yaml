@@ -1,0 +1,11 @@
+name: Get Baton
+description: Get the latest version of Baton and install it in /usr/local/bin/
+
+runs:
+  using: "composite"
+  steps:
+    - name: Download Baton
+      env:
+        GITHUB_TOKEN: ${{ github.token }}
+      run: ${{ github.action_path }}/get-baton.sh
+      shell: bash
