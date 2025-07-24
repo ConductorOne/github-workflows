@@ -16,6 +16,8 @@ COPY --from=otel-layer /otel/extensions/collector /opt/extensions/collector
 COPY collector.yaml /var/task/
 ENV BATON_LAMBDA_OTEL_COLLECTOR_ENDPOINT=localhost:4317 \
     BATON_LAMBDA_OTEL_COLLECTOR_ENDPOINT_TLS_INSECURE=true \
+    # TODO: remove log level after testing
+    BATON_LOG_LEVEL=debug \
     OPENTELEMETRY_COLLECTOR_CONFIG_URI=/var/task/collector.yaml \
     OTEL_RESOURCE_ATTRIBUTES=service.name=${REPO_NAME} \
     OTEL_PROPAGATORS=tracecontext,baggage
