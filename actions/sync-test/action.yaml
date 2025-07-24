@@ -1,0 +1,33 @@
+name: Connector Sync Test
+description: Test syncing, granting, and revoking for a baton connector.
+
+inputs:
+  connector:
+    description: 'Connector binary to test'
+    required: true
+  baton-entitlement:
+    description: 'Entitlement ID to test. If connector supports provisioning, it will be revoked and granted.'
+    required: true
+  baton-principal:
+    description: 'Principal ID to test.'
+    required: true
+  baton-principal-type:
+    description: 'Type of principal to test. If not provided, will default to "user".'
+    required: false
+    default: 'user'
+
+runs:
+  using: "composite"
+  steps:
+    - name: Download Baton
+      uses: ConductorOne/github-workflows/actions/get-baton@v2
+
+    - name: Grant Revoke
+      env:
+        BATON_CONNECTOR: ${{ inputs.connector }}
+        BATON_ENTITLEMENT: ${{ inputs.baton-entitlement }}
+        BATON_PRINCIPAL: ${{ inputs.baton-principal }}
+        BATON_PRINCIPAL_TYPE: ${{ inputs.baton-principal-type }}
+        BATON: baton
+      run: ${{ github.action_path }}/grant-revoke.sh
+      shell: bash
