@@ -1,8 +1,10 @@
 {
-  "source": ["./dist/macos-amd64_darwin_amd64_v1/${REPO_NAME}"],
+  "source": [
+    "./dist/macos-amd64_darwin_amd64_v1/${REPO_NAME}"
+  ],
   "bundle_id": "com.conductorone.${REPO_NAME}",
   "apple_id": {
-    "username": "justin.gallardo@conductorone.com"
+    "username": "justin.gallardo@insulator.one"
   },
   "sign": {
     "application_identity": "Developer ID Application: Justin Gallardo (858DKH55XL)"
