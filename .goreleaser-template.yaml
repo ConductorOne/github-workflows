@@ -14,6 +14,15 @@ builds:
   - binary: "${REPO_NAME}"
     env:
       - CGO_ENABLED=0
+    id: windows
+    main: ./cmd/${REPO_NAME}
+    goos:
+      - windows
+    goarch:
+      - amd64
+  - binary: "${REPO_NAME}"
+    env:
+      - CGO_ENABLED=0
     id: macos-amd64
     main: ./cmd/${REPO_NAME}
     goos:
@@ -45,6 +54,13 @@ archives:
     name_template: "{{ .ProjectName }}-v{{ .Version }}-{{ .Os }}-{{ .Arch }}"
     files:
       - none*
+  - id: windows-archive
+    builds:
+      - windows
+    format: zip
+    name_template: "{{ .ProjectName }}-v{{ .Version }}-{{ .Os }}-{{ .Arch }}"
+    files:
+      - none*
   - id: darwin-archive
     builds:
       - macos-amd64
@@ -56,12 +72,14 @@ archives:
 release:
   ids:
     - linux-archive
+    - windows-archive
     - darwin-archive
 snapshot:
   name_template: "{{ incpatch .Version }}-dev"
 checksum:
   ids:
     - linux-archive
+    - windows-archive
   extra_files:
     - glob: ./dist/*-darwin-amd64.zip
     - glob: ./dist/*-darwin-arm64.zip
