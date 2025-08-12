@@ -169,9 +169,9 @@ jobs:
         run: |
           echo "Skipping GoReleaser because ECR images already exist for tag ${{ inputs.tag }}"
 
-  record-release:
+  record-lambda-release:
     if: inputs.lambda == true
-    needs: [goreleaser, goreleaser-docker]
+    needs: [goreleaser-docker]
     permissions:
       id-token: write
       contents: read
@@ -234,8 +234,8 @@ jobs:
 
           rm -f "$TMPFILE"
 
-  notify-failure:
-    needs: [goreleaser, goreleaser-docker, record-release]
+  notify-lambda-failure:
+    needs: [goreleaser-docker, record-lambda-release]
     if: failure() && inputs.lambda == true
     runs-on: ubuntu-latest
     steps:
