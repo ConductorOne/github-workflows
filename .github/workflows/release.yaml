@@ -249,14 +249,12 @@ jobs:
               text: |
                 %%%
                 # Release Failed ${{ github.event.repository.name }}:${{ inputs.tag }}
+                [View Workflow Run](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})
                 ## Details
                 * **Repository:** `${{ github.event.repository.full_name }}`
                 * **Release Tag:** `${{ inputs.tag }}`
                 * **Workflow:** `baton-connector-release`
                 * **Action Run ID:** `${{ github.run_id }}`
-
-                ## Links
-                [View Workflow Run](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})
                 %%%
               alert_type: "error"
               host: ${{ github.repository_owner }}
