@@ -371,12 +371,10 @@ jobs:
             - title: "Baton Connector Release Failed"
               text: |
                 %%%
-                # ${{ github.event.repository.name }}:${{ inputs.tag }} Release Failed
-                [View Workflow Run](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})
-
+                # `${{ github.event.repository.name }}`:`${{ inputs.tag }}` Release Failed
                 ## Error
+                [View Workflow Run](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})
                 ```${{ steps.collect-ann.outputs.annotations }}```
-
                 ## Details
                 * **Repository:** `${{ github.event.repository.full_name }}`
                 * **Release Tag:** `${{ inputs.tag }}`
