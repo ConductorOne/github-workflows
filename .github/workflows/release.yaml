@@ -88,11 +88,6 @@ jobs:
       contents: read
     runs-on: ubuntu-latest
     steps:
-      - name: REMOVE AFTER TESTING - Simulate OIDC Role Assumption Error
-        run: |
-          echo "Error: Could not assume role with OIDC: Not authorized to perform sts:AssumeRoleWithWebIdentity"
-          exit 1
-
       - name: Configure AWS credentials via OIDC
         uses: aws-actions/configure-aws-credentials@v4
         with:
