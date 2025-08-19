@@ -234,37 +234,6 @@ jobs:
 
           rm -f "$TMPFILE"
 
-  notify-lambda-failure:
-    needs: [goreleaser, goreleaser-docker, record-lambda-release]
-    if: failure() && inputs.lambda == true
-    runs-on: ubuntu-latest
-    steps:
-      - name: Send Datadog event on failure
-        uses: masci/datadog@v1
-        with:
-          api-key: ${{ secrets.DATADOG_API_KEY }}
-          api-url: https://us3.datadoghq.com/
-          events: |
-            - title: "Baton Connector Release Failed"
-              text: |
-                %%%
-                # Release Failed ${{ github.event.repository.name }}:${{ inputs.tag }}
-                ## Details
-                * **Repository:** `${{ github.event.repository.full_name }}`
-                * **Release Tag:** `${{ inputs.tag }}`
-                * **Workflow:** `baton-connector-release`
-                * **Action Run ID:** `${{ github.run_id }}`
-
-                ## Links
-                [View Workflow Run](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})
-                %%%
-              alert_type: "error"
-              host: ${{ github.repository_owner }}
-              tags:
-                - "github_repository:${{ github.event.repository.full_name }}"
-                - "github_release_tag:${{ inputs.tag }}"
-                - "github_workflow:baton-connector-release"
-
   goreleaser-docker-no-lambda:
     if: inputs.lambda == false
     permissions:
@@ -316,3 +285,100 @@ jobs:
           args: release --clean --config ../_workflows/.goreleaser.docker.yaml
         env:
           GITHUB_TOKEN: ${{ secrets.RELENG_GITHUB_TOKEN }}
+
+  notify-release-failure:
+    needs:
+      [
+        goreleaser,
+        goreleaser-docker,
+        goreleaser-docker-no-lambda,
+        record-lambda-release,
+      ]
+    if: failure()
+    permissions:
+      checks: read
+      actions: read
+      contents: read
+    runs-on: ubuntu-latest
+    steps:
+      - name: Collect failure annotations
+        id: collect-ann
+        continue-on-error: true # never block the Datadog notification
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          RUN_ID: ${{ github.run_id }}
+        run: |
+          set -euo pipefail
+
+          # Get the latest attempt number for this workflow run
+          run_json="$(gh api "repos/$REPO/actions/runs/$RUN_ID")"
+          attempt="$(echo "$run_json" | jq -r '.run_attempt')"
+
+          # List jobs for the *specific* attempt (prevents mixing earlier attempts)
+          jobs_json="$(gh api "repos/$REPO/actions/runs/$RUN_ID/attempts/$attempt/jobs?per_page=100" --paginate)"
+
+          # Filter to failed jobs in this attempt
+          failed_jobs=$(echo "$jobs_json" | jq -r '.jobs[] | select(.conclusion=="failure") | @base64')
+
+          out=""
+          if [ -z "$failed_jobs" ]; then
+            out="No failure annotations found for latest attempt (#${attempt})."
+          else
+            while IFS= read -r enc; do
+              j() { echo "$enc" | base64 -d | jq -r "$1"; }
+              name="$(j '.name')"
+              check_run_url="$(j '.check_run_url')"
+
+              # Resolve check run ID for this attempt and fetch its annotations
+              check_id="$(gh api "$check_run_url" -H "Accept: application/vnd.github+json" | jq -r '.id')"
+
+              anns="$(gh api "repos/$REPO/check-runs/$check_id/annotations?per_page=100" \
+                      --paginate -H "Accept: application/vnd.github+json" | \
+                      jq -r '.[] | select(.annotation_level=="failure") | .message' || true)"
+
+              if [ -n "$anns" ]; then
+                while IFS= read -r msg; do
+                  oneline="$(printf "%s" "$msg" | tr '\n' ' ' | sed 's/  \+/ /g')"
+                  out+="$name: $oneline"$'\n'
+                done <<< "$anns"
+              else
+                out+="$name: (no failure-level annotations; step may have failed before annotating)"$'\n'
+              fi
+            done <<< "$failed_jobs"
+          fi
+
+          # Keep Datadog payload compact (~4k limit on text)
+          out="$(printf "%s" "$out" | tail -c 3500)"
+
+          {
+            echo "annotations<<EOF"
+            printf '%s\n' "$out"
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Send Datadog event on failure
+        uses: masci/datadog@v1
+        with:
+          api-key: ${{ secrets.DATADOG_API_KEY }}
+          api-url: https://us3.datadoghq.com/
+          events: |
+            - title: "Baton Connector Release Failed"
+              text: |
+                %%%
+                # `${{ github.event.repository.name }}`:`${{ inputs.tag }}` Release Failed
+                ## Error
+                [View Workflow Run](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})
+                ```${{ steps.collect-ann.outputs.annotations }}```
+                ## Details
+                * **Repository:** `${{ github.event.repository.full_name }}`
+                * **Release Tag:** `${{ inputs.tag }}`
+                * **Workflow:** `baton-connector-release`
+                * **Action Run ID:** `${{ github.run_id }}`
+                %%%
+              alert_type: "error"
+              host: ${{ github.repository_owner }}
+              tags:
+                - "github_repository:${{ github.event.repository.full_name }}"
+                - "github_release_tag:${{ inputs.tag }}"
+                - "github_workflow:baton-connector-release"
