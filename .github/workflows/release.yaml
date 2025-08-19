@@ -357,8 +357,8 @@ jobs:
           out="$(printf "%s" "$out" | tail -c 3500)"
 
           {
-            echo "annotations<<'EOF'"
-            printf "%s\n" "$out"
+            echo "annotations<<EOF"
+            printf '%s\n' "$out"
             echo "EOF"
           } >> "$GITHUB_OUTPUT"
 
@@ -371,11 +371,11 @@ jobs:
             - title: "Baton Connector Release Failed"
               text: |
                 %%%
-                # Release Failed ${{ github.event.repository.name }}:${{ inputs.tag }}
+                # ${{ github.event.repository.name }}:${{ inputs.tag }} Release Failed
                 [View Workflow Run](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})
 
                 ## Error
-                ```${steps.collect-ann.outputs.annotations}```
+                ```${{ steps.collect-ann.outputs.annotations }}```
 
                 ## Details
                 * **Repository:** `${{ github.event.repository.full_name }}`
