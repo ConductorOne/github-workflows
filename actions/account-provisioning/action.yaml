@@ -1,0 +1,41 @@
+name: Connector Account Provisioning Test
+description: Test account provisioning and deprovisioning for a baton connector that supports these capabilities.
+
+inputs:
+  connector:
+    description: 'Connector binary to test'
+    required: true
+  baton-account-login:
+    description: 'Account login to test provisioning'
+    required: true
+  baton-account-email:
+    description: 'Account email to test provisioning'
+    required: true
+  baton-account-profile:
+    description: 'Account profile JSON to test provisioning'
+    required: true
+  baton-display-name:
+    description: 'Display name for the test account'
+    required: true
+  baton-account-type:
+    description: 'Type of account to test provisioning. If not provided, will default to "user".'
+    required: false
+    default: 'user'
+
+runs:
+  using: "composite"
+  steps:
+    - name: Download Baton
+      uses: ConductorOne/github-workflows/actions/get-baton@v2
+
+    - name: Account Provisioning Test
+      env:
+        BATON_CONNECTOR: ${{ inputs.connector }}
+        BATON_ACCOUNT_LOGIN: ${{ inputs.baton-account-login }}
+        BATON_ACCOUNT_EMAIL: ${{ inputs.baton-account-email }}
+        BATON_ACCOUNT_PROFILE: ${{ inputs.baton-account-profile }}
+        BATON_DISPLAY_NAME: ${{ inputs.baton-display-name }}
+        BATON_ACCOUNT_TYPE: ${{ inputs.baton-account-type }}
+        BATON: baton
+      run: ${{ github.action_path }}/account-provisioning.sh
+      shell: bash
