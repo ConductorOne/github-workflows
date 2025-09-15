@@ -105,11 +105,12 @@ The account-provisioning action tests account provisioning and deprovisioning fo
   uses: ConductorOne/github-workflows/actions/account-provisioning@v2
   with:
     connector: './my-connector'
-    baton-account-login: 'testuser'
-    baton-account-email: 'test@example.com'
-    baton-account-profile: '{"first_name": "Test", "last_name": "User", "username": "testuser", "email": "test@example.com"}'
-    baton-display-name: 'Test User'
-    baton-account-type: 'user'
+    account-email: 'test@example.com'
+    account-login: 'testuser'  # optional
+    account-display-name: 'Test User'  # optional
+    account-profile: '{"first_name": "Test", "last_name": "User", "username": "testuser", "email": "test@example.com"}'  # optional
+    account-type: 'user'  # optional, defaults to 'user'
+    search-method: 'email'  # optional, defaults to 'email'
 ```
 
 
