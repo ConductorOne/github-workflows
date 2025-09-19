@@ -78,6 +78,41 @@ The get-baton action downloads the latest version of [Baton](https://github.com/
 
 You can then use the baton command in your workflow.
 
+### Sync Test
+
+The sync-test action tests syncing, granting, and revoking for a baton connector.
+
+#### Usage
+
+```yaml
+- name: Test Connector Sync
+  uses: ConductorOne/github-workflows/actions/sync-test@v2
+  with:
+    connector: './my-connector'
+    baton-entitlement: 'admin-role'
+    baton-principal: 'user123'
+    baton-principal-type: 'user'
+```
+
+### Account Provisioning Test
+
+The account-provisioning action tests account provisioning and deprovisioning for a baton connector that supports these capabilities.
+
+#### Usage
+
+```yaml
+- name: Test Account Provisioning
+  uses: ConductorOne/github-workflows/actions/account-provisioning@v2
+  with:
+    connector: './my-connector'
+    account-email: 'test@example.com'
+    account-login: 'testuser'  # optional
+    account-display-name: 'Test User'  # optional
+    account-profile: '{"first_name": "Test", "last_name": "User", "username": "testuser", "email": "test@example.com"}'  # optional
+    account-type: 'user'  # optional, defaults to 'user'
+    search-method: 'email'  # optional, defaults to 'email'
+```
+
 
 ## Development
 
