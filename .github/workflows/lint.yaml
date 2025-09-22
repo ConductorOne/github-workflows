@@ -1,5 +1,9 @@
 on:
   workflow_call:
+    inputs:
+      ref:
+        required: true
+        type: string
 
 jobs:
   go-lint:
@@ -11,6 +15,7 @@ jobs:
         path: _caller
         repository: ${{ github.event.repository.full_name }}
         fetch-depth: 0
+        ref: ${{ inputs.ref }}
     - name: Install Go
       uses: actions/setup-go@v5
       with:
