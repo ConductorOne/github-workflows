@@ -177,6 +177,8 @@ CREATED_ACCOUNT_ID=$(echo "$CREATED_ACCOUNT_IDS" | head -n 1)
 echo "Account created successfully with ID: $CREATED_ACCOUNT_ID"
 
 if [ -n "$CAPABILITY_RESOURCE_DELETE" ]; then
+  # sync
+  $BATON_CONNECTOR
   # delete account
   $BATON_CONNECTOR --delete-resource "$CREATED_ACCOUNT_ID" --delete-resource-type "$ACCOUNT_TYPE"
 
