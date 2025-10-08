@@ -126,6 +126,7 @@ $BATON_CONNECTOR
 set +e
 CAPABILITY_ACCOUNT_PROVISIONING=$($BATON_CONNECTOR capabilities | jq --raw-output --exit-status '.connectorCapabilities[] | select(contains("CAPABILITY_ACCOUNT_PROVISIONING") )')
 CAPABILITY_RESOURCE_DELETE=$($BATON_CONNECTOR capabilities | jq --raw-output --exit-status '.connectorCapabilities[] | select(contains("CAPABILITY_RESOURCE_DELETE") )')
+CAPABILITY_CREDENTIAL_ROTATION=$($BATON_CONNECTOR capabilities | jq --raw-output --exit-status '.connectorCapabilities[] | select(contains("CAPABILITY_CREDENTIAL_ROTATION") )')
 set -e
 
 if [ -z "$CAPABILITY_ACCOUNT_PROVISIONING" ]; then
@@ -175,6 +176,11 @@ fi
 # Get the single account ID
 CREATED_ACCOUNT_ID=$(echo "$CREATED_ACCOUNT_IDS" | head -n 1)
 echo "Account created successfully with ID: $CREATED_ACCOUNT_ID"
+
+if [ -n "$CAPABILITY_CREDENTIAL_ROTATION" ]; then
+  # rotate credentials
+  $BATON_CONNECTOR --rotate-credentials "$CREATED_ACCOUNT_ID" --rotate-credentials-type "$ACCOUNT_TYPE"
+fi
 
 if [ -n "$CAPABILITY_RESOURCE_DELETE" ]; then
   # delete account
