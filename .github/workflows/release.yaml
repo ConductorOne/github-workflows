@@ -41,6 +41,8 @@ jobs:
         with:
           path: _workflows
           repository: ConductorOne/github-workflows
+          ## TODO(steve): remove before merging
+          ref: gontzess/duct-12735-binaries-registry
 
       - name: Set up Go
         uses: actions/setup-go@v5
@@ -100,6 +102,8 @@ jobs:
         with:
           path: _workflows
           repository: ConductorOne/github-workflows
+          ## TODO(steve): remove before merging
+          ref: gontzess/duct-12735-binaries-registry
 
       - name: Set up Go
         uses: actions/setup-go@v5
@@ -161,6 +165,8 @@ jobs:
         with:
           path: _workflows
           repository: ConductorOne/github-workflows
+          ## TODO(steve): remove before merging
+          ref: gontzess/duct-12735-binaries-registry
 
       - name: Set up Go
         uses: actions/setup-go@v5
