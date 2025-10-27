@@ -30,14 +30,14 @@ jobs:
     runs-on: macos-latest
     steps:
       - name: Checkout caller repo
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           path: _caller
           repository: ${{ github.event.repository.full_name }}
           fetch-depth: 0
 
       - name: Checkout connector workflows
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           path: _workflows
           repository: ConductorOne/github-workflows
@@ -45,7 +45,7 @@ jobs:
           ref: gontzess/duct-12735-binaries-registry
 
       - name: Set up Go
-        uses: actions/setup-go@v5
+        uses: actions/setup-go@v6
         with:
           go-version-file: "_caller/go.mod"
 
@@ -55,7 +55,7 @@ jobs:
         run: |
           envsubst < _workflows/.gon-amd64-template.json > _workflows/.gon-amd64.json
           envsubst < _workflows/.gon-arm64-template.json > _workflows/.gon-arm64.json
-          envsubst < _workflows/.goreleaser-binaries-template.yaml > _workflows/.goreleaser.binaries.yaml
+          envsubst < _workflows/.goreleaser-template.yaml > _workflows/.goreleaser.binaries.yaml
           echo "_workflows/.gon-amd64.json:"
           cat _workflows/.gon-amd64.json
           echo "_workflows/.gon-arm64.json:"
@@ -91,14 +91,14 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout caller repo
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           path: _caller
           repository: ${{ github.event.repository.full_name }}
           fetch-depth: 0
 
       - name: Checkout connector workflows
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           path: _workflows
           repository: ConductorOne/github-workflows
@@ -106,7 +106,7 @@ jobs:
           ref: gontzess/duct-12735-binaries-registry
 
       - name: Set up Go
-        uses: actions/setup-go@v5
+        uses: actions/setup-go@v6
         with:
           go-version-file: "_caller/go.mod"
 
@@ -145,7 +145,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Configure AWS credentials via OIDC
-        uses: aws-actions/configure-aws-credentials@v4
+        uses: aws-actions/configure-aws-credentials@v5
         with:
           role-to-assume: "arn:aws:iam::168442440833:role/GitHubActionsECRPushRole-${{ github.event.repository.name }}"
           aws-region: us-west-2
@@ -154,14 +154,14 @@ jobs:
         uses: aws-actions/amazon-ecr-login@v2
 
       - name: Checkout caller repo
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           path: _caller
           repository: ${{ github.event.repository.full_name }}
           fetch-depth: 0
 
       - name: Checkout connector workflows
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           path: _workflows
           repository: ConductorOne/github-workflows
@@ -169,7 +169,7 @@ jobs:
           ref: gontzess/duct-12735-binaries-registry
 
       - name: Set up Go
-        uses: actions/setup-go@v5
+        uses: actions/setup-go@v6
         with:
           go-version-file: "_caller/go.mod"
 
@@ -237,7 +237,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Configure AWS credentials via OIDC
-        uses: aws-actions/configure-aws-credentials@v4
+        uses: aws-actions/configure-aws-credentials@v5
         with:
           role-to-assume: "arn:aws:iam::168442440833:role/GitHubActionsECRPushRole-${{ github.event.repository.name }}"
           aws-region: us-west-2
