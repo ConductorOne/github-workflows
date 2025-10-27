@@ -25,9 +25,16 @@ on:
       DATADOG_API_KEY:
         required: true
 
+env:
+  CDN_BASE_URL: "https://releases.connectors.conductorone.com"
+  S3_BUCKET: "gontzess-releases-registry"
+
 jobs:
   goreleaser-binaries:
     runs-on: macos-latest
+    permissions:
+      contents: read
+      id-token: write # <-- needed for cosign keyless (OIDC)
     steps:
       - name: Checkout caller repo
         uses: actions/checkout@v5
@@ -55,13 +62,10 @@ jobs:
         run: |
           envsubst < _workflows/.gon-amd64-template.json > _workflows/.gon-amd64.json
           envsubst < _workflows/.gon-arm64-template.json > _workflows/.gon-arm64.json
-          envsubst < _workflows/.goreleaser-template.yaml > _workflows/.goreleaser.binaries.yaml
-          echo "_workflows/.gon-amd64.json:"
-          cat _workflows/.gon-amd64.json
-          echo "_workflows/.gon-arm64.json:"
-          cat _workflows/.gon-arm64.json
-          echo "_workflows/.goreleaser.binaries.yaml:"
-          cat _workflows/.goreleaser.binaries.yaml
+          envsubst < _workflows/.goreleaser-binaries-template.yaml > _workflows/.goreleaser.binaries.yaml
+          echo "_workflows/.gon-amd64.json:"; cat _workflows/.gon-amd64.json
+          echo "_workflows/.gon-arm64.json:"; cat _workflows/.gon-arm64.json
+          echo "_workflows/.goreleaser.binaries.yaml:"; cat _workflows/.goreleaser.binaries.yaml
 
       - name: Set up Gon
         run: brew tap conductorone/gon && brew install conductorone/gon/gon
@@ -71,6 +75,9 @@ jobs:
         with:
           p12-file-base64: ${{ secrets.APPLE_SIGNING_KEY_P12 }}
           p12-password: ${{ secrets.APPLE_SIGNING_KEY_P12_PASSWORD }}
+
+      - name: Install cosign
+        uses: sigstore/cosign-installer@v3
 
       - name: Run GoReleaser
         uses: goreleaser/goreleaser-action@v6
@@ -82,6 +89,184 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.RELENG_GITHUB_TOKEN }}
           AC_PASSWORD: ${{ secrets.AC_PASSWORD }}
           AC_PROVIDER: ${{ secrets.AC_PROVIDER }}
+          COSIGN_EXPERIMENTAL: "1"
+          GITHUB_REF: ${{ github.ref }}
+
+      - name: Upload signed dist as artifact
+        uses: actions/upload-artifact@v5
+        with:
+          name: dist-${{ inputs.tag }}
+          path: _caller/dist/**
+          if-no-files-found: error
+          retention-days: 7
+
+  upload-binaries-and-manifest-to-s3:
+    needs: [
+        goreleaser-binaries,
+        # goreleaser-docker-no-lambda,
+        # goreleaser-docker-lambda,
+      ]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write # for cosign keyless (manifest signing)
+    steps:
+      - name: Compute shard
+        id: compute-shard
+        shell: bash
+        run: |
+          TAG="${{ inputs.tag }}"
+          V="${TAG#v}"
+          IFS='.' read -r MA MI PA <<<"$V"
+          echo "shard=${MA}/${MI}/${PA}/" >> "$GITHUB_OUTPUT"
+          echo "ver=$V" >> "$GITHUB_OUTPUT"
+
+      - name: Download signed dist from goreleaser-binaries job
+        uses: actions/download-artifact@v4
+        with:
+          name: dist-${{ inputs.tag }}
+          path: dist
+
+      - name: Verify signatures exist for all artifacts
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd dist
+          missing=0
+          for f in *; do
+            [ -f "$f" ] || continue
+            case "$f" in *.sig|*.cert|*.bundle) continue;; esac
+            case "$f" in *.zip|*.tar.gz|*.txt) ;;  # payloads expected to be signed already
+              *) continue;;
+            esac
+            [ -f "$f.sig" ]  || { echo "::error::missing signature: $f.sig"; missing=1; }
+            [ -f "$f.cert" ] || { echo "::error::missing certificate: $f.cert"; missing=1; }
+          done
+          [ $missing -eq 0 ] || { echo "Re-run full workflow (not just this job)."; exit 1; }
+
+      - name: Install cosign (for manifest signing)
+        uses: sigstore/cosign-installer@v3
+
+      - name: Generate manifest.json (placeholder)
+        id: manifest
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd dist
+          NOW="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          jq -n \
+            --arg v "1" \
+            --arg name "${{ github.event.repository.name }}" \
+            --arg org  "${{ github.event.repository.owner }}" \
+            --arg semver "v${{ steps.compute-shard.outputs.ver }}" \
+            --arg releasedAt "$NOW" \
+            '{
+              version:$v, name:$name, org:$org,
+              semver:$semver, releasedAt:$releasedAt,
+              assets:{}
+            }' > manifest.json
+
+          add_asset() {
+            local key="$1" file="$2" mt="$3"
+            [ -f "$file" ] || return 0
+            local size sha
+            size=$(stat -c%s "$file" 2>/dev/null || stat -f%z "$file")
+            if command -v sha256sum >/dev/null; then sha=$(sha256sum "$file"|awk '{print $1}'); else sha=$(shasum -a 256 "$file"|awk '{print $1}'); fi
+            jq --arg k "$key" --arg f "$file" --arg mt "$mt" \
+              --argjson sz "$size" --arg sha "$sha" \
+              '.assets[$k] = { filename:$f, mediaType:$mt, sizeBytes:$sz, sha256:$sha }' \
+              manifest.json > .t && mv .t manifest.json
+          }
+
+          add_asset darwin-arm64   "$(ls -1 *darwin-arm64.zip    2>/dev/null | head -n1)" application/zip
+          add_asset darwin-amd64   "$(ls -1 *darwin-amd64.zip    2>/dev/null | head -n1)" application/zip
+          add_asset linux-arm64    "$(ls -1 *linux-arm64.tar.gz  2>/dev/null | head -n1)" application/gzip
+          add_asset linux-amd64    "$(ls -1 *linux-amd64.tar.gz  2>/dev/null | head -n1)" application/gzip
+          add_asset windows-amd64  "$(ls -1 *windows-amd64.zip   2>/dev/null | head -n1)" application/zip
+          add_asset checksums      "${{ github.event.repository.name }}_${{ steps.compute-shard.outputs.ver }}_checksums.txt" text/plain
+
+          echo "path=$PWD/manifest.json" >> "$GITHUB_OUTPUT"
+
+      # NEW: enrich manifest with absolute CDN URLs for assets + manifestSignature pointers
+      - name: Enrich manifest with CDN URLs
+        shell: bash
+        run: |
+          set -euo pipefail
+          ORG="${{ github.event.repository.owner }}"
+          REPO="${{ github.event.repository.name }}"
+          SHARD="${{ steps.compute-shard.outputs.shard }}"
+          BASE="${{ env.CDN_BASE_URL }}/releases/$ORG/$REPO/$SHARD"
+          cd dist
+
+          enrich_key () {
+            local key="$1"
+            local fname
+            fname=$(jq -r --arg k "$key" '.assets[$k].filename // empty' manifest.json)
+            [ -n "$fname" ] || return 0
+            jq --arg k "$key" --arg base "$BASE" --arg f "$fname" \
+              '.assets[$k].href = ($base + $f)
+                | .assets[$k].signatureHref   = ($base + $f + ".sig")
+                | .assets[$k].certificateHref = ($base + $f + ".cert")' \
+              manifest.json > .t && mv .t manifest.json
+          }
+
+          for k in darwin-arm64 darwin-amd64 linux-arm64 linux-amd64 windows-amd64 checksums; do
+            enrich_key "$k"
+          done
+
+          # Add manifestSignature pointers (files will exist after signing)
+          jq --arg base "$BASE" \
+            '.manifestSignature = {
+              href: ($base + "manifest.json.sig"),
+              certificateHref: ($base + "manifest.json.cert")
+            }' manifest.json > .t && mv .t manifest.json
+
+      - name: Sign manifest.json (keyless)
+        env: { COSIGN_EXPERIMENTAL: "1" }
+        shell: bash
+        run: |
+          set -euo pipefail
+          cosign sign-blob --yes "dist/manifest.json" \
+            --output-signature "dist/manifest.json.sig" \
+            --output-certificate "dist/manifest.json.cert"
+
+      - name: Configure AWS credentials via OIDC
+        uses: aws-actions/configure-aws-credentials@v5
+        with:
+          role-to-assume: arn:aws:iam::323258005321:role/gontzess-releases-binary-pusher-ConductorOne-baton-github-test
+          aws-region: us-west-2
+
+      - name: Upload immutable version folder to S3
+        shell: bash
+        run: |
+          set -euo pipefail
+          BUCKET="${{ env.S3_BUCKET }}"
+          ORG="${{ github.event.repository.owner }}"
+          REPO="${{ github.event.repository.name }}"
+          SHARD="${{ steps.compute-shard.outputs.shard }}"
+          PREFIX="releases/$ORG/$REPO/$SHARD"
+
+          for f in dist/*; do
+            name="$(basename "$f")"
+            ct="application/octet-stream"
+            case "$name" in
+              *.zip)                   ct="application/zip" ;;
+              *.tar.gz|*.tgz)         ct="application/gzip" ;;
+              *.json)                 ct="application/json" ;;
+              *.txt)                  ct="text/plain" ;;
+              *.sig|*.cert|*.bundle)  ct="application/octet-stream" ;;
+            esac
+            aws s3 cp "$f" "s3://$BUCKET/$PREFIX$name" \
+              --cache-control "public,max-age=31536000,immutable" \
+              --content-type "$ct"
+          done
+
+          # Ensure canonical manifest.json key exists (if path was different)
+          if [ "$(basename '${{ steps.manifest.outputs.path }}')" != "manifest.json" ]; then
+            aws s3 cp "${{ steps.manifest.outputs.path }}" "s3://$BUCKET/${PREFIX}manifest.json" \
+              --cache-control "public,max-age=31536000,immutable" \
+              --content-type "application/json"
+          fi
 
   goreleaser-docker-no-lambda:
     if: inputs.lambda == false
@@ -227,10 +412,19 @@ jobs:
         run: |
           echo "Skipping GoReleaser because ECR images already exist for tag ${{ inputs.tag }}"
 
+  # record-release:
+  #   needs: [upload-binaries-and-manifest-to-s3]
+  #   permissions:
+
   record-lambda-release:
     if: inputs.lambda == true
     # lambda releases are dependent on assets produced in both goreleaser jobs
-    needs: [goreleaser-binaries, goreleaser-docker-lambda]
+    needs:
+      [
+        goreleaser-binaries,
+        goreleaser-docker-lambda,
+        upload-binaries-and-manifest-to-s3,
+      ]
     permissions:
       id-token: write
       contents: read
@@ -299,6 +493,7 @@ jobs:
         goreleaser-binaries,
         goreleaser-docker-no-lambda,
         goreleaser-docker-lambda,
+        upload-binaries-and-manifest-to-s3,
         record-lambda-release,
       ]
     if: failure()
