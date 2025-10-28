@@ -79,6 +79,8 @@ checksum:
     - linux-archive
     - windows-archive
     - darwin-archive
+sboms:
+  - artifacts: archive
 signs:
   - id: cosign-archives
     cmd: cosign
@@ -87,25 +89,25 @@ signs:
       - linux-archive
       - windows-archive
       - darwin-archive
-    certificate: "${artifact}.pem"
+    certificate: "{{ .Artifact }}.cert"
     args:
       - "sign-blob"
       - "--yes"
-      - "--output-signature=${signature}"
-      - "--output-certificate=${certificate}"
-      - "${artifact}"
+      - "--output-signature={{ .Signature }}"
+      - "--output-certificate={{ .Certificate }}"
+      - "{{ .Artifact }}"
     env:
       - COSIGN_EXPERIMENTAL=1
   - id: cosign-checksums
     cmd: cosign
     artifacts: checksum
-    certificate: "${artifact}.pem"
+    certificate: "{{ .Artifact }}.cert"
     args:
       - "sign-blob"
       - "--yes"
-      - "--output-signature=${signature}"
-      - "--output-certificate=${certificate}"
-      - "${artifact}"
+      - "--output-signature={{ .Signature }}"
+      - "--output-certificate={{ .Certificate }}"
+      - "{{ .Artifact }}"
     env:
       - COSIGN_EXPERIMENTAL=1
 brews:
