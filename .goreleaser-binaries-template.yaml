@@ -83,12 +83,11 @@ signs:
   - id: cosign-archives
     cmd: cosign
     artifacts: archive
-    signature: "${artifact}.sig"
-    certificate: "${artifact}.cert"
     ids:
       - linux-archive
       - windows-archive
       - darwin-archive
+    certificate: "${artifact}.pem"
     args:
       - "sign-blob"
       - "--yes"
@@ -100,8 +99,7 @@ signs:
   - id: cosign-checksums
     cmd: cosign
     artifacts: checksum
-    signature: "${artifact}.sig"
-    certificate: "${artifact}.cert"
+    certificate: "${artifact}.pem"
     args:
       - "sign-blob"
       - "--yes"
