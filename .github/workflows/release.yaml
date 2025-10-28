@@ -90,7 +90,6 @@ jobs:
           AC_PASSWORD: ${{ secrets.AC_PASSWORD }}
           AC_PROVIDER: ${{ secrets.AC_PROVIDER }}
           COSIGN_EXPERIMENTAL: "1"
-          GITHUB_REF: ${{ github.ref }}
 
       - name: Upload signed dist as artifact
         uses: actions/upload-artifact@v5
