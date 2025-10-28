@@ -89,25 +89,25 @@ signs:
       - linux-archive
       - windows-archive
       - darwin-archive
-    certificate: "{{ .Artifact }}.cert"
+    certificate: "{{ .Env.artifact }}.cert"
     args:
       - "sign-blob"
       - "--yes"
-      - "--output-signature={{ .Signature }}"
-      - "--output-certificate={{ .Certificate }}"
-      - "{{ .Artifact }}"
+      - "--output-signature={{ .Env.signature }}"
+      - "--output-certificate={{ .Env.certificate }}"
+      - "{{ .Env.artifact }}"
     env:
       - COSIGN_EXPERIMENTAL=1
   - id: cosign-checksums
     cmd: cosign
     artifacts: checksum
-    certificate: "{{ .Artifact }}.cert"
+    certificate: "{{ .Env.artifact }}.cert"
     args:
       - "sign-blob"
       - "--yes"
-      - "--output-signature={{ .Signature }}"
-      - "--output-certificate={{ .Certificate }}"
-      - "{{ .Artifact }}"
+      - "--output-signature={{ .Env.signature }}"
+      - "--output-certificate={{ .Env.certificate }}"
+      - "{{ .Env.artifact }}"
     env:
       - COSIGN_EXPERIMENTAL=1
 brews:
