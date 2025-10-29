@@ -241,15 +241,28 @@ jobs:
 
       - name: Debug OIDC claims (once)
         run: |
+          set -euo pipefail
           TOK="$(curl -sS "${ACTIONS_ID_TOKEN_REQUEST_URL}&audience=sts.amazonaws.com" \
             -H "Authorization: bearer ${ACTIONS_ID_TOKEN_REQUEST_TOKEN}" | jq -r .value)"
-          python - <<'PY'
+          if [ -z "$TOK" ]; then
+            echo "Error: Failed to retrieve OIDC token" >&2
+            exit 1
+          fi
+          export TOK
+          python3 <<'PY'
           import os, json, base64
-          tok=os.getenv("TOK")
-          claims=json.loads(base64.urlsafe_b64decode(tok.split('.')[1] + '=='))
-          print(json.dumps({k:claims.get(k) for k in [
-            'sub','repository','ref','workflow_ref','job_workflow_ref','iss','aud'
-          ]}, indent=2))
+          tok = os.getenv("TOK")
+          if not tok:
+              print("Error: TOK environment variable is not set", file=os.sys.stderr)
+              os.sys.exit(1)
+          try:
+              claims = json.loads(base64.urlsafe_b64decode(tok.split('.')[1] + '=='))
+              print(json.dumps({k: claims.get(k) for k in [
+                  'sub', 'repository', 'ref', 'workflow_ref', 'job_workflow_ref', 'iss', 'aud'
+              ]}, indent=2))
+          except Exception as e:
+              print(f"Error decoding token: {e}", file=os.sys.stderr)
+              os.sys.exit(1)
           PY
 
       - name: Configure AWS credentials via OIDC
