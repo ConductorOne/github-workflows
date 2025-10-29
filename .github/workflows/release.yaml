@@ -98,7 +98,14 @@ jobs:
         uses: actions/upload-artifact@v5
         with:
           name: dist-${{ inputs.tag }}
-          path: _caller/dist/**
+          path: |
+            _caller/dist/*.zip
+            _caller/dist/*.tar.gz
+            _caller/dist/*.json
+            _caller/dist/*.txt
+            _caller/dist/*.sig
+            _caller/dist/*.cert
+            _caller/dist/*.md
           if-no-files-found: error
           retention-days: 7
 
@@ -249,6 +256,7 @@ jobs:
           PREFIX="releases/$ORG/$REPO/$SHARD"
 
           for f in dist/*; do
+            [ -f "$f" ] || continue  # Skip directories, only process files
             name="$(basename "$f")"
             ct="application/octet-stream"
             case "$name" in
