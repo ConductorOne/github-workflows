@@ -159,7 +159,7 @@ jobs:
           jq -n \
             --arg v "1" \
             --arg name "${{ github.event.repository.name }}" \
-            --arg org  "${{ github.event.repository.owner }}" \
+            --arg org  "${{ github.event.repository.owner.login }}" \
             --arg semver "v${{ steps.compute-shard.outputs.ver }}" \
             --arg releasedAt "$NOW" \
             '{
@@ -194,7 +194,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          ORG="${{ github.event.repository.owner }}"
+          ORG="${{ github.event.repository.owner.login }}"
           REPO="${{ github.event.repository.name }}"
           SHARD="${{ steps.compute-shard.outputs.shard }}"
           BASE="${{ env.CDN_BASE_URL }}/releases/$ORG/$REPO/$SHARD"
@@ -243,7 +243,7 @@ jobs:
         run: |
           set -euo pipefail
           BUCKET="${{ env.S3_BUCKET }}"
-          ORG="${{ github.event.repository.owner }}"
+          ORG="${{ github.event.repository.owner.login }}"
           REPO="${{ github.event.repository.name }}"
           SHARD="${{ steps.compute-shard.outputs.shard }}"
           PREFIX="releases/$ORG/$REPO/$SHARD"
