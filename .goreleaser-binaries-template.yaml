@@ -127,3 +127,19 @@ changelog:
       - typo
       - lint
       - Merge pull request
+blobs:
+  - provider: s3
+    bucket: "${S3_BUCKET}"
+    region: "${S3_REGION}"
+    directory: "${S3_DIRECTORY}"
+    ids:
+      - linux-archive
+      - windows-archive
+      - darwin-archive
+      - checksum
+    extra_files:
+      - glob: dist/*.sig
+      - glob: dist/*.cert
+    cache_control:
+      - "public,max-age=31536000,immutable"
+    content_disposition: "-"

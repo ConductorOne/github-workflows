@@ -28,6 +28,7 @@ on:
 env:
   CDN_BASE_URL: "https://releases.connectors.conductorone.com"
   S3_BUCKET: "gontzess-releases-registry"
+  S3_REGION: "us-west-2"
 
 jobs:
   goreleaser-binaries:
@@ -56,9 +57,23 @@ jobs:
         with:
           go-version-file: "_caller/go.mod"
 
+      - name: Calculate S3 directory
+        id: s3-directory
+        shell: bash
+        run: |
+          TAG="${{ inputs.tag }}"
+          V="${TAG#v}"
+          IFS='.' read -r MA MI PA <<<"$V"
+          ORG="${{ github.event.repository.owner.login }}"
+          REPO="${{ github.event.repository.name }}"
+          echo "S3_DIRECTORY=releases/$ORG/$REPO/${MA}/${MI}/${PA}" >> "$GITHUB_OUTPUT"
+
       - name: Generate gon and goreleaser configs for binaries
         env:
           REPO_NAME: ${{ github.event.repository.name }}
+          S3_BUCKET: ${{ env.S3_BUCKET }}
+          S3_REGION: ${{ env.S3_REGION }}
+          S3_DIRECTORY: ${{ steps.s3-directory.outputs.S3_DIRECTORY }}
         run: |
           envsubst < _workflows/.gon-amd64-template.json > _workflows/.gon-amd64.json
           envsubst < _workflows/.gon-arm64-template.json > _workflows/.gon-arm64.json
@@ -82,6 +97,12 @@ jobs:
       - name: Download syft
         uses: anchore/sbom-action/download-syft@v0
 
+      - name: Configure AWS credentials via OIDC
+        uses: aws-actions/configure-aws-credentials@v5
+        with:
+          role-to-assume: arn:aws:iam::323258005321:role/gontzess-releases-binary-pusher-ConductorOne-baton-github-test
+          aws-region: ${{ env.S3_REGION }}
+
       - name: Run GoReleaser
         uses: goreleaser/goreleaser-action@v6
         with:
@@ -92,69 +113,6 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.RELENG_GITHUB_TOKEN }}
           AC_PASSWORD: ${{ secrets.AC_PASSWORD }}
           AC_PROVIDER: ${{ secrets.AC_PROVIDER }}
-          COSIGN_EXPERIMENTAL: "1"
-
-      - name: Upload signed dist as artifact
-        uses: actions/upload-artifact@v5
-        with:
-          name: dist-${{ inputs.tag }}
-          path: |
-            _caller/dist/*.zip
-            _caller/dist/*.tar.gz
-            _caller/dist/*.json
-            _caller/dist/*.txt
-            _caller/dist/*.sig
-            _caller/dist/*.cert
-            _caller/dist/*.md
-          if-no-files-found: error
-          retention-days: 7
-
-  upload-binaries-and-manifest-to-s3:
-    needs: [
-        goreleaser-binaries,
-        # goreleaser-docker-no-lambda,
-        # goreleaser-docker-lambda,
-      ]
-    runs-on: ubuntu-latest
-    permissions:
-      contents: read
-      id-token: write # for cosign keyless (manifest signing)
-    steps:
-      - name: Compute shard
-        id: compute-shard
-        shell: bash
-        run: |
-          TAG="${{ inputs.tag }}"
-          V="${TAG#v}"
-          IFS='.' read -r MA MI PA <<<"$V"
-          echo "shard=${MA}/${MI}/${PA}/" >> "$GITHUB_OUTPUT"
-          echo "ver=$V" >> "$GITHUB_OUTPUT"
-
-      - name: Download signed dist from goreleaser-binaries job
-        uses: actions/download-artifact@v4
-        with:
-          name: dist-${{ inputs.tag }}
-          path: dist
-
-      - name: Verify signatures exist for all artifacts
-        shell: bash
-        run: |
-          set -euo pipefail
-          cd dist
-          missing=0
-          for f in *; do
-            [ -f "$f" ] || continue
-            case "$f" in *.sig|*.cert|*.bundle) continue;; esac
-            case "$f" in *.zip|*.tar.gz|*.txt) ;;  # payloads expected to be signed already
-              *) continue;;
-            esac
-            [ -f "$f.sig" ]  || { echo "::error::missing signature: $f.sig"; missing=1; }
-            [ -f "$f.cert" ] || { echo "::error::missing certificate: $f.cert"; missing=1; }
-          done
-          [ $missing -eq 0 ] || { echo "Re-run full workflow (not just this job)."; exit 1; }
-
-      - name: Install cosign (for manifest signing)
-        uses: sigstore/cosign-installer@v3
 
       - name: Generate manifest.json (placeholder)
         id: manifest
@@ -162,12 +120,13 @@ jobs:
         run: |
           set -euo pipefail
           cd dist
+          TAG="${{ inputs.tag }}"
           NOW="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
           jq -n \
             --arg v "1" \
             --arg name "${{ github.event.repository.name }}" \
             --arg org  "${{ github.event.repository.owner.login }}" \
-            --arg semver "v${{ steps.compute-shard.outputs.ver }}" \
+            --arg semver "$TAG" \
             --arg releasedAt "$NOW" \
             '{
               version:$v, name:$name, org:$org,
@@ -192,7 +151,7 @@ jobs:
           add_asset linux-arm64    "$(ls -1 *linux-arm64.tar.gz  2>/dev/null | head -n1)" application/gzip
           add_asset linux-amd64    "$(ls -1 *linux-amd64.tar.gz  2>/dev/null | head -n1)" application/gzip
           add_asset windows-amd64  "$(ls -1 *windows-amd64.zip   2>/dev/null | head -n1)" application/zip
-          add_asset checksums      "${{ github.event.repository.name }}_${{ steps.compute-shard.outputs.ver }}_checksums.txt" text/plain
+          add_asset checksums      "$(ls -1 *checksums.txt       2>/dev/null | head -n1)" text/plain
 
           echo "path=$PWD/manifest.json" >> "$GITHUB_OUTPUT"
 
@@ -201,10 +160,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          ORG="${{ github.event.repository.owner.login }}"
-          REPO="${{ github.event.repository.name }}"
-          SHARD="${{ steps.compute-shard.outputs.shard }}"
-          BASE="${{ env.CDN_BASE_URL }}/releases/$ORG/$REPO/$SHARD"
+          BASE="${{ env.CDN_BASE_URL }}/${{ steps.s3-directory.outputs.S3_DIRECTORY }}/"
           cd dist
 
           enrich_key () {
@@ -239,69 +195,28 @@ jobs:
             --output-signature "dist/manifest.json.sig" \
             --output-certificate "dist/manifest.json.cert"
 
-      - name: Debug OIDC claims (once)
-        run: |
-          set -euo pipefail
-          TOK="$(curl -sS "${ACTIONS_ID_TOKEN_REQUEST_URL}&audience=sts.amazonaws.com" \
-            -H "Authorization: bearer ${ACTIONS_ID_TOKEN_REQUEST_TOKEN}" | jq -r .value)"
-          if [ -z "$TOK" ]; then
-            echo "Error: Failed to retrieve OIDC token" >&2
-            exit 1
-          fi
-          export TOK
-          python3 <<'PY'
-          import os, json, base64
-          tok = os.getenv("TOK")
-          if not tok:
-              print("Error: TOK environment variable is not set", file=os.sys.stderr)
-              os.sys.exit(1)
-          try:
-              claims = json.loads(base64.urlsafe_b64decode(tok.split('.')[1] + '=='))
-              print(json.dumps({k: claims.get(k) for k in [
-                  'sub', 'repository', 'ref', 'workflow_ref', 'job_workflow_ref', 'iss', 'aud'
-              ]}, indent=2))
-          except Exception as e:
-              print(f"Error decoding token: {e}", file=os.sys.stderr)
-              os.sys.exit(1)
-          PY
-
-      - name: Configure AWS credentials via OIDC
-        uses: aws-actions/configure-aws-credentials@v5
-        with:
-          role-to-assume: arn:aws:iam::323258005321:role/gontzess-releases-binary-pusher-ConductorOne-baton-github-test
-          aws-region: us-west-2
-
-      - name: Upload immutable version folder to S3
+      - name: Upload manifest.json to S3
         shell: bash
         run: |
           set -euo pipefail
           BUCKET="${{ env.S3_BUCKET }}"
-          ORG="${{ github.event.repository.owner.login }}"
-          REPO="${{ github.event.repository.name }}"
-          SHARD="${{ steps.compute-shard.outputs.shard }}"
-          PREFIX="releases/$ORG/$REPO/$SHARD"
+          DIRECTORY="${{ steps.s3-directory.outputs.S3_DIRECTORY }}"
 
-          for f in dist/*; do
-            [ -f "$f" ] || continue  # Skip directories, only process files
-            name="$(basename "$f")"
-            ct="application/octet-stream"
-            case "$name" in
-              *.zip)                   ct="application/zip" ;;
-              *.tar.gz|*.tgz)         ct="application/gzip" ;;
-              *.json)                 ct="application/json" ;;
-              *.txt)                  ct="text/plain" ;;
-              *.sig|*.cert|*.bundle)  ct="application/octet-stream" ;;
-            esac
-            aws s3 cp "$f" "s3://$BUCKET/$PREFIX$name" \
-              --cache-control "public,max-age=31536000,immutable" \
-              --content-type "$ct"
-          done
-
-          # Ensure canonical manifest.json key exists (if path was different)
-          if [ "$(basename '${{ steps.manifest.outputs.path }}')" != "manifest.json" ]; then
-            aws s3 cp "${{ steps.manifest.outputs.path }}" "s3://$BUCKET/${PREFIX}manifest.json" \
+          # Upload manifest.json and its signatures
+          if [ -f "dist/manifest.json" ]; then
+            aws s3 cp "dist/manifest.json" "s3://$BUCKET/$DIRECTORY/manifest.json" \
               --cache-control "public,max-age=31536000,immutable" \
               --content-type "application/json"
+          fi
+          if [ -f "dist/manifest.json.sig" ]; then
+            aws s3 cp "dist/manifest.json.sig" "s3://$BUCKET/$DIRECTORY/manifest.json.sig" \
+              --cache-control "public,max-age=31536000,immutable" \
+              --content-type "application/octet-stream"
+          fi
+          if [ -f "dist/manifest.json.cert" ]; then
+            aws s3 cp "dist/manifest.json.cert" "s3://$BUCKET/$DIRECTORY/manifest.json.cert" \
+              --cache-control "public,max-age=31536000,immutable" \
+              --content-type "application/octet-stream"
           fi
 
   goreleaser-docker-no-lambda:
@@ -455,12 +370,7 @@ jobs:
   record-lambda-release:
     if: inputs.lambda == true
     # lambda releases are dependent on assets produced in both goreleaser jobs
-    needs:
-      [
-        goreleaser-binaries,
-        goreleaser-docker-lambda,
-        upload-binaries-and-manifest-to-s3,
-      ]
+    needs: [goreleaser-binaries, goreleaser-docker-lambda]
     permissions:
       id-token: write
       contents: read
@@ -529,7 +439,6 @@ jobs:
         goreleaser-binaries,
         goreleaser-docker-no-lambda,
         goreleaser-docker-lambda,
-        upload-binaries-and-manifest-to-s3,
         record-lambda-release,
       ]
     if: failure()
