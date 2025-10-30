@@ -26,7 +26,59 @@ on:
         required: true
 
 jobs:
+  determine-workflows-ref:
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+      contents: read
+    outputs:
+      ref: ${{ steps.workflows-ref.outputs.ref }}
+    steps:
+      - name: Determine workflows ref from OIDC token
+        id: workflows-ref
+        shell: bash
+        run: |
+          set -euo pipefail
+          TOKEN=$(curl -sS "${ACTIONS_ID_TOKEN_REQUEST_URL}&audience=actions.github.com" \
+            -H "Authorization: bearer ${ACTIONS_ID_TOKEN_REQUEST_TOKEN}" | jq -r '.value')
+          if [ -z "$TOKEN" ] || [ "$TOKEN" == "null" ]; then
+            echo "::error::Failed to retrieve OIDC token"
+            exit 1
+          fi
+          export TOKEN
+          REF=$(python3 <<'PY'
+          import os, json, base64
+          tok = os.getenv("TOKEN")
+          if not tok:
+              print("::error::TOKEN environment variable is not set", file=os.sys.stderr)
+              os.sys.exit(1)
+          try:
+              payload = tok.split('.')[1]
+              # Add padding if needed for base64url decoding
+              payload += '=' * (4 - len(payload) % 4)
+              claims = json.loads(base64.urlsafe_b64decode(payload))
+              job_workflow_ref = claims.get('job_workflow_ref')
+              if not job_workflow_ref:
+                  print(f"::error::job_workflow_ref not found in token claims", file=os.sys.stderr)
+                  os.sys.exit(1)
+              if '@' not in job_workflow_ref:
+                  print(f"::error::job_workflow_ref does not contain '@': {job_workflow_ref}", file=os.sys.stderr)
+                  os.sys.exit(1)
+              ref = job_workflow_ref.split('@')[-1]
+              if not ref:
+                  print(f"::error::Could not extract ref from job_workflow_ref: {job_workflow_ref}", file=os.sys.stderr)
+                  os.sys.exit(1)
+              print(ref)
+          except Exception as e:
+              print(f"::error::Error decoding token: {e}", file=os.sys.stderr)
+              os.sys.exit(1)
+          PY
+          )
+          echo "Extracted ref from OIDC token: $REF"
+          echo "ref=$REF" >> "$GITHUB_OUTPUT"
+
   goreleaser:
+    needs: determine-workflows-ref
     runs-on: macos-latest
     steps:
       - name: Checkout caller repo
@@ -41,11 +93,12 @@ jobs:
         with:
           path: _workflows
           repository: ConductorOne/github-workflows
+          ref: ${{ needs.determine-workflows-ref.outputs.ref }}
 
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
-          go-version-file: '_caller/go.mod'
+          go-version-file: "_caller/go.mod"
 
       - name: Generate gon and goreleaser configs
         env:
@@ -83,6 +136,7 @@ jobs:
 
   goreleaser-docker:
     if: inputs.lambda == true
+    needs: determine-workflows-ref
     permissions:
       id-token: write
       contents: read
@@ -109,11 +163,12 @@ jobs:
         with:
           path: _workflows
           repository: ConductorOne/github-workflows
+          ref: ${{ needs.determine-workflows-ref.outputs.ref }}
 
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
-          go-version-file: '_caller/go.mod'
+          go-version-file: "_caller/go.mod"
 
       - name: Generate goreleaser configs
         env:
@@ -236,6 +291,7 @@ jobs:
 
   goreleaser-docker-no-lambda:
     if: inputs.lambda == false
+    needs: determine-workflows-ref
     permissions:
       id-token: write
       contents: read
@@ -253,11 +309,12 @@ jobs:
         with:
           path: _workflows
           repository: ConductorOne/github-workflows
+          ref: ${{ needs.determine-workflows-ref.outputs.ref }}
 
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
-          go-version-file: '_caller/go.mod'
+          go-version-file: "_caller/go.mod"
 
       - name: Generate goreleaser configs
         env:
@@ -289,6 +346,7 @@ jobs:
   notify-release-failure:
     needs:
       [
+        determine-workflows-ref,
         goreleaser,
         goreleaser-docker,
         goreleaser-docker-no-lambda,
