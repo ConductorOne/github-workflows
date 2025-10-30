@@ -73,7 +73,7 @@ release:
     - windows-archive
     - darwin-archive
 snapshot:
-  name_template: "{{ incpatch .Version }}-dev"
+  version_template: "{{ incpatch .Version }}-dev"
 checksum:
   ids:
     - linux-archive
@@ -140,6 +140,7 @@ blobs:
     extra_files:
       - glob: dist/*.sig
       - glob: dist/*.cert
+      - glob: dist/*.sbom.json
     cache_control:
       - "public,max-age=31536000,immutable"
     content_disposition: "-"

@@ -220,10 +220,15 @@ jobs:
             local fname
             fname=$(jq -r --arg k "$key" '.assets[$k].filename // empty' manifest.json)
             [ -n "$fname" ] || return 0
-            jq --arg k "$key" --arg base "$BASE" --arg f "$fname" \
+            local sb=""
+            if [ -f "$fname.sbom.json" ]; then
+              sb="$fname.sbom.json"
+            fi
+            jq --arg k "$key" --arg base "$BASE" --arg f "$fname" --arg sb "$sb" \
               '.assets[$k].href = ($base + $f)
                 | .assets[$k].signatureHref   = ($base + $f + ".sig")
-                | .assets[$k].certificateHref = ($base + $f + ".cert")' \
+                | .assets[$k].certificateHref = ($base + $f + ".cert")
+                | (if ($sb | length) > 0 then (.assets[$k].sbomHref = ($base + $sb)) else . end)' \
               manifest.json > .t && mv .t manifest.json
           }
 
