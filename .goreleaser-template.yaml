@@ -32,7 +32,6 @@ builds:
     hooks:
       post:
         - gon ../_workflows/.gon-amd64.json
-        - mv dist/${REPO_NAME}-darwin-amd64.signed.zip dist/macos-amd64_darwin_amd64_v1/${REPO_NAME}
   - binary: "${REPO_NAME}"
     env:
       - CGO_ENABLED=0
@@ -45,7 +44,6 @@ builds:
     hooks:
       post:
         - gon ../_workflows/.gon-arm64.json
-        - mv dist/${REPO_NAME}-darwin-arm64.signed.zip dist/macos-arm64_darwin_arm64_v8.0/${REPO_NAME}
 archives:
   - id: linux-archive
     builds:
@@ -65,8 +63,8 @@ archives:
     builds:
       - macos-amd64
       - macos-arm64
-    format: binary
-    name_template: "{{ .ProjectName }}-v{{ .Version }}-{{ .Os }}-{{ .Arch }}.zip"
+    format: zip
+    name_template: "{{ .ProjectName }}-v{{ .Version }}-{{ .Os }}-{{ .Arch }}"
     files:
       - none*
 release:
@@ -75,14 +73,12 @@ release:
     - windows-archive
     - darwin-archive
 snapshot:
-  name_template: "{{ incpatch .Version }}-dev"
+  version_template: "{{ incpatch .Version }}-dev"
 checksum:
   ids:
     - linux-archive
     - windows-archive
-  extra_files:
-    - glob: ./dist/*-darwin-amd64.zip
-    - glob: ./dist/*-darwin-arm64.zip
+    - darwin-archive
 brews:
   - repository:
       owner: conductorone
