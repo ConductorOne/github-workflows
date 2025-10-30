@@ -166,7 +166,8 @@ jobs:
           AC_PASSWORD: ${{ secrets.AC_PASSWORD }}
           AC_PROVIDER: ${{ secrets.AC_PROVIDER }}
 
-      - name: Generate manifest.json (placeholder)
+      # TODO: move to a go file with proper structs
+      - name: Generate manifest.json
         id: manifest
         shell: bash
         run: |
@@ -207,7 +208,7 @@ jobs:
 
           echo "path=$PWD/manifest.json" >> "$GITHUB_OUTPUT"
 
-      # NEW: enrich manifest with absolute CDN URLs for assets + manifestSignature pointers
+      # TODO: move to a go file with proper structs
       - name: Enrich manifest with CDN URLs
         shell: bash
         run: |
@@ -236,14 +237,13 @@ jobs:
             enrich_key "$k"
           done
 
-          # Add manifestSignature pointers (files will exist after signing)
+          # Add top-level manifest signature and certificate pointers (files will exist after signing)
           jq --arg base "$BASE" \
-            '.manifestSignature = {
-              href: ($base + "manifest.json.sig"),
-              certificateHref: ($base + "manifest.json.cert")
-            }' manifest.json > .t && mv .t manifest.json
+            '.signatureHref   = ($base + "manifest.json.sig")
+             | .certificateHref = ($base + "manifest.json.cert")' \
+            manifest.json > .t && mv .t manifest.json
 
-      - name: Sign manifest.json (keyless)
+      - name: Sign manifest.json
         env: { COSIGN_EXPERIMENTAL: "1" }
         shell: bash
         run: |
@@ -261,12 +261,14 @@ jobs:
           DIRECTORY="${{ steps.s3-directory.outputs.S3_DIRECTORY }}"
           cd _caller/dist
 
-          # Upload manifest.json and its signatures
-          if [ -f "manifest.json" ]; then
-            aws s3 cp "manifest.json" "s3://$BUCKET/$DIRECTORY/manifest.json" \
-              --cache-control "public,max-age=31536000,immutable" \
-              --content-type "application/json"
+          # manifest.json is required
+          if [ ! -f "manifest.json" ]; then
+            echo "::error::manifest.json not found in $(pwd)"
+            exit 1
           fi
+          aws s3 cp "manifest.json" "s3://$BUCKET/$DIRECTORY/manifest.json" \
+            --cache-control "public,max-age=31536000,immutable" \
+            --content-type "application/json"
           if [ -f "manifest.json.sig" ]; then
             aws s3 cp "manifest.json.sig" "s3://$BUCKET/$DIRECTORY/manifest.json.sig" \
               --cache-control "public,max-age=31536000,immutable" \
