@@ -171,7 +171,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          cd dist
+          cd _caller/dist
           TAG="${{ inputs.tag }}"
           NOW="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
           jq -n \
@@ -213,7 +213,7 @@ jobs:
         run: |
           set -euo pipefail
           BASE="${{ env.CDN_BASE_URL }}/${{ steps.s3-directory.outputs.S3_DIRECTORY }}/"
-          cd dist
+          cd _caller/dist
 
           enrich_key () {
             local key="$1"
@@ -243,9 +243,10 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          cosign sign-blob --yes "dist/manifest.json" \
-            --output-signature "dist/manifest.json.sig" \
-            --output-certificate "dist/manifest.json.cert"
+          cd _caller/dist
+          cosign sign-blob --yes "manifest.json" \
+            --output-signature "manifest.json.sig" \
+            --output-certificate "manifest.json.cert"
 
       - name: Upload manifest.json to S3
         shell: bash
@@ -253,20 +254,21 @@ jobs:
           set -euo pipefail
           BUCKET="${{ env.S3_BUCKET }}"
           DIRECTORY="${{ steps.s3-directory.outputs.S3_DIRECTORY }}"
+          cd _caller/dist
 
           # Upload manifest.json and its signatures
-          if [ -f "dist/manifest.json" ]; then
-            aws s3 cp "dist/manifest.json" "s3://$BUCKET/$DIRECTORY/manifest.json" \
+          if [ -f "manifest.json" ]; then
+            aws s3 cp "manifest.json" "s3://$BUCKET/$DIRECTORY/manifest.json" \
               --cache-control "public,max-age=31536000,immutable" \
               --content-type "application/json"
           fi
-          if [ -f "dist/manifest.json.sig" ]; then
-            aws s3 cp "dist/manifest.json.sig" "s3://$BUCKET/$DIRECTORY/manifest.json.sig" \
+          if [ -f "manifest.json.sig" ]; then
+            aws s3 cp "manifest.json.sig" "s3://$BUCKET/$DIRECTORY/manifest.json.sig" \
               --cache-control "public,max-age=31536000,immutable" \
               --content-type "application/octet-stream"
           fi
-          if [ -f "dist/manifest.json.cert" ]; then
-            aws s3 cp "dist/manifest.json.cert" "s3://$BUCKET/$DIRECTORY/manifest.json.cert" \
+          if [ -f "manifest.json.cert" ]; then
+            aws s3 cp "manifest.json.cert" "s3://$BUCKET/$DIRECTORY/manifest.json.cert" \
               --cache-control "public,max-age=31536000,immutable" \
               --content-type "application/octet-stream"
           fi
