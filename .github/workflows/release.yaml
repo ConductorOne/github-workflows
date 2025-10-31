@@ -26,7 +26,7 @@ on:
         required: true
 
 env:
-  CDN_BASE_URL: "https://d1v8j4ofspo67g.cloudfront.net/"
+  CDN_BASE_URL: "https://d1v8j4ofspo67g.cloudfront.net"
   S3_BUCKET: "gontzess-releases-registry"
   S3_REGION: "us-west-2"
 
