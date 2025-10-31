@@ -26,7 +26,7 @@ on:
         required: true
 
 env:
-  CDN_BASE_URL: "https://releases.connectors.conductorone.com"
+  CDN_BASE_URL: "https://d1v8j4ofspo67g.cloudfront.net/"
   S3_BUCKET: "gontzess-releases-registry"
   S3_REGION: "us-west-2"
 
@@ -113,12 +113,10 @@ jobs:
         id: s3-directory
         shell: bash
         run: |
-          TAG="${{ inputs.tag }}"
-          V="${TAG#v}"
-          IFS='.' read -r MA MI PA <<<"$V"
           ORG="${{ github.event.repository.owner.login }}"
           REPO="${{ github.event.repository.name }}"
-          echo "S3_DIRECTORY=releases/$ORG/$REPO/${MA}/${MI}/${PA}" >> "$GITHUB_OUTPUT"
+          TAG="${{ inputs.tag }}"
+          echo "S3_DIRECTORY=releases/$ORG/$REPO/$TAG" >> "$GITHUB_OUTPUT"
 
       - name: Generate gon and goreleaser configs for binaries
         env:
