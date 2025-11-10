@@ -268,7 +268,19 @@ jobs:
           repository: ${{ github.event.repository.full_name }}
           fetch-depth: 0
 
+      - name: Check for .Dockerfile
+        id: check-dockerfile
+        run: |
+          if [ -f "_caller/.Dockerfile" ]; then
+            echo "exists=true" >> $GITHUB_OUTPUT
+            echo ".Dockerfile found, continuing with job"
+          else
+            echo "exists=false" >> $GITHUB_OUTPUT
+            echo ".Dockerfile not found, skipping rest of job"
+          fi
+
       - name: Checkout connector workflows
+        if: steps.check-dockerfile.outputs.exists == 'true'
         uses: actions/checkout@v4
         with:
           path: _workflows
@@ -276,11 +288,13 @@ jobs:
           ref: ${{ needs.determine-workflows-ref.outputs.ref }}
 
       - name: Set up Go
+        if: steps.check-dockerfile.outputs.exists == 'true'
         uses: actions/setup-go@v5
         with:
           go-version-file: "_caller/go.mod"
 
       - name: Generate goreleaser configs
+        if: steps.check-dockerfile.outputs.exists == 'true'
         env:
           REPO_NAME: ${{ github.event.repository.name }}
         run: |
@@ -289,6 +303,7 @@ jobs:
           cat _workflows/.goreleaser.docker.yaml
 
       - name: Docker Login
+        if: steps.check-dockerfile.outputs.exists == 'true'
         uses: docker/login-action@v3
         with:
           registry: ghcr.io
@@ -296,9 +311,11 @@ jobs:
           password: ${{ secrets.RELENG_GITHUB_TOKEN }}
 
       - name: Set up Docker Buildx
+        if: steps.check-dockerfile.outputs.exists == 'true'
         uses: docker/setup-buildx-action@v3
 
       - name: Run GoReleaser
+        if: steps.check-dockerfile.outputs.exists == 'true'
         uses: goreleaser/goreleaser-action@v6
         with:
           workdir: _caller
