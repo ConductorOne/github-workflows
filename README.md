@@ -103,7 +103,7 @@ The account-provisioning action tests account provisioning and deprovisioning fo
 
 ```yaml
 - name: Test Account Provisioning
-  uses: ConductorOne/github-workflows/actions/account-provisioning@v2
+  uses: ConductorOne/github-workflows/actions/account-provisioning@v3
   with:
     connector: "./my-connector"
     account-email: "test@example.com"
