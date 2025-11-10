@@ -268,15 +268,15 @@ jobs:
           repository: ${{ github.event.repository.full_name }}
           fetch-depth: 0
 
-      - name: Check for .Dockerfile
+      - name: Check for Dockerfile
         id: check-dockerfile
         run: |
-          if [ -f "_caller/.Dockerfile" ]; then
+          if [ -f "_caller/Dockerfile" ]; then
             echo "exists=true" >> $GITHUB_OUTPUT
-            echo ".Dockerfile found, continuing with job"
+            echo "Dockerfile found, continuing with job"
           else
             echo "exists=false" >> $GITHUB_OUTPUT
-            echo ".Dockerfile not found, skipping rest of job"
+            echo "Dockerfile not found, skipping rest of job"
           fi
 
       - name: Checkout connector workflows
