@@ -31,9 +31,11 @@ on:
 
 jobs:
   release:
-    uses: ConductorOne/github-workflows/.github/workflows/release.yaml@v2
+    uses: ConductorOne/github-workflows/.github/workflows/release.yaml@v3
     with:
       tag: ${{ github.ref_name }}
+      # defaults to true
+      # lambda: false
     secrets:
       RELENG_GITHUB_TOKEN: ${{ secrets.RELENG_GITHUB_TOKEN }}
       APPLE_SIGNING_KEY_P12: ${{ secrets.APPLE_SIGNING_KEY_P12 }}
@@ -62,7 +64,6 @@ The release workflow accepts the following input parameters:
 | --------- | -------- | -------------------------------- |
 | `tag`     | Yes      | The release tag (e.g., "v1.0.0") |
 
-
 ## Available Actions
 
 ### Get Baton
@@ -73,7 +74,7 @@ The get-baton action downloads the latest version of [Baton](https://github.com/
 
 ```yaml
 - name: Install baton
-  uses: ConductorOne/github-workflows/actions/get-baton@v2
+  uses: ConductorOne/github-workflows/actions/get-baton@v3
 ```
 
 You can then use the baton command in your workflow.
@@ -86,12 +87,12 @@ The sync-test action tests syncing, granting, and revoking for a baton connector
 
 ```yaml
 - name: Test Connector Sync
-  uses: ConductorOne/github-workflows/actions/sync-test@v2
+  uses: ConductorOne/github-workflows/actions/sync-test@v3
   with:
-    connector: './my-connector'
-    baton-entitlement: 'admin-role'
-    baton-principal: 'user123'
-    baton-principal-type: 'user'
+    connector: "./my-connector"
+    baton-entitlement: "admin-role"
+    baton-principal: "user123"
+    baton-principal-type: "user"
 ```
 
 ### Account Provisioning Test
@@ -104,15 +105,14 @@ The account-provisioning action tests account provisioning and deprovisioning fo
 - name: Test Account Provisioning
   uses: ConductorOne/github-workflows/actions/account-provisioning@v2
   with:
-    connector: './my-connector'
-    account-email: 'test@example.com'
-    account-login: 'testuser'  # optional
-    account-display-name: 'Test User'  # optional
-    account-profile: '{"first_name": "Test", "last_name": "User", "username": "testuser", "email": "test@example.com"}'  # optional
-    account-type: 'user'  # optional, defaults to 'user'
-    search-method: 'email'  # optional, defaults to 'email'
+    connector: "./my-connector"
+    account-email: "test@example.com"
+    account-login: "testuser" # optional
+    account-display-name: "Test User" # optional
+    account-profile: '{"first_name": "Test", "last_name": "User", "username": "testuser", "email": "test@example.com"}' # optional
+    account-type: "user" # optional, defaults to 'user'
+    search-method: "email" # optional, defaults to 'email'
 ```
-
 
 ## Development
 
@@ -122,10 +122,10 @@ To modify these workflows:
 2. Test the changes in a connector repository _pointing at your branch_
 3. Create a pull request for review
 4. Once approved, merge to main
-5. Tag the release: `git tag v2.0.1`
-6. Push the tag: `git push origin v2.0.1`
-7. Update the major version tag `git tag -f v2 v2.0.1`
-8. Push the major version tag `git push origin v2 --force`
+5. Tag the release: `git tag v3.0.1`
+6. Push the tag: `git push origin v3.0.1`
+7. Update the major version tag `git tag -f v3 v3.0.1`
+8. Push the major version tag `git push origin v3 --force`
 
 ## Versioning
 
