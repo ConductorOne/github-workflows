@@ -26,7 +26,23 @@ on:
         required: true
 
 jobs:
+  determine-workflows-ref:
+    runs-on: ubuntu-latest
+    permissions:
+      actions: read
+    outputs:
+      ref: ${{ steps.workflow-version.outputs.sha }}
+    steps:
+      - name: Determine workflows ref
+        id: workflow-version
+        uses: canonical/get-workflow-version-action@v1
+        with:
+          repository-name: "ConductorOne/github-workflows"
+          file-name: "release.yaml"
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
   goreleaser:
+    needs: determine-workflows-ref
     runs-on: macos-latest
     steps:
       - name: Checkout caller repo
@@ -41,11 +57,12 @@ jobs:
         with:
           path: _workflows
           repository: ConductorOne/github-workflows
+          ref: ${{ needs.determine-workflows-ref.outputs.ref }}
 
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
-          go-version-file: '_caller/go.mod'
+          go-version-file: "_caller/go.mod"
 
       - name: Generate gon and goreleaser configs
         env:
@@ -83,6 +100,7 @@ jobs:
 
   goreleaser-docker:
     if: inputs.lambda == true
+    needs: determine-workflows-ref
     permissions:
       id-token: write
       contents: read
@@ -109,11 +127,12 @@ jobs:
         with:
           path: _workflows
           repository: ConductorOne/github-workflows
+          ref: ${{ needs.determine-workflows-ref.outputs.ref }}
 
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
-          go-version-file: '_caller/go.mod'
+          go-version-file: "_caller/go.mod"
 
       - name: Generate goreleaser configs
         env:
@@ -236,6 +255,7 @@ jobs:
 
   goreleaser-docker-no-lambda:
     if: inputs.lambda == false
+    needs: determine-workflows-ref
     permissions:
       id-token: write
       contents: read
@@ -253,11 +273,12 @@ jobs:
         with:
           path: _workflows
           repository: ConductorOne/github-workflows
+          ref: ${{ needs.determine-workflows-ref.outputs.ref }}
 
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
-          go-version-file: '_caller/go.mod'
+          go-version-file: "_caller/go.mod"
 
       - name: Generate goreleaser configs
         env:
@@ -289,6 +310,7 @@ jobs:
   notify-release-failure:
     needs:
       [
+        determine-workflows-ref,
         goreleaser,
         goreleaser-docker,
         goreleaser-docker-no-lambda,
