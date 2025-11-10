@@ -39,6 +39,7 @@ jobs:
         with:
           repository-name: "ConductorOne/github-workflows"
           file-name: "release.yaml"
+          github-token: ${{ secrets.GITHUB_TOKEN }}
 
   goreleaser:
     needs: determine-workflows-ref
