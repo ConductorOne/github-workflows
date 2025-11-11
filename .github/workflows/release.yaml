@@ -467,7 +467,7 @@ jobs:
   record-release:
     # require docker to complete before saying it's successful, but not strictly needed
     # note: have to use always() to ensure the job isn't skipped before the if condition is evaluated
-    if: always() && success(needs.goreleaser-binaries) && (success(needs.goreleaser-docker-lambda) || success(needs.goreleaser-docker-no-lambda))
+    if: always() && needs.goreleaser-binaries.result == 'success' && (needs.goreleaser-docker-lambda.result == 'success' || needs.goreleaser-docker-no-lambda.result == 'success')
     needs:
       [
         goreleaser-binaries,
