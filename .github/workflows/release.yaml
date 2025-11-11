@@ -326,7 +326,7 @@ jobs:
 
   record-lambda-release:
     if: inputs.lambda == true
-    # lambda releases are dependent on assets produced in both goreleaser jobs
+    # lambda releases are dependent on assets produced in the binaries and docker goreleaser jobs
     needs: [goreleaser-binaries, goreleaser-docker-lambda]
     permissions:
       id-token: write
@@ -465,10 +465,15 @@ jobs:
   # TODO: implement once pulumi is set up
   # rename to record-binaries-release?
   record-release:
-    needs: [
+    # require docker to complete before saying it's successful, but not strictly true if we decide
+    # not to include image urls in the manifest.json ...
+    if: |
+      needs.goreleaser-binaries.result == 'success' &&
+      ((inputs.lambda == true && needs.goreleaser-docker-lambda.result == 'success') ||
+       (inputs.lambda == false && needs.goreleaser-docker-no-lambda.result == 'success'))
+    needs:
+      [
         goreleaser-binaries,
-        # probably should require docker to complete before saying it's successful, but
-        # not strictly necessary if we decide not to include image urls in the manifest.json ...
         goreleaser-docker-lambda,
         goreleaser-docker-no-lambda,
       ]
