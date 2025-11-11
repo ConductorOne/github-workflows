@@ -25,6 +25,11 @@ on:
       DATADOG_API_KEY:
         required: true
 
+env:
+  CDN_BASE_URL: "https://d1v8j4ofspo67g.cloudfront.net"
+  S3_BUCKET: "gontzess-releases-registry"
+  S3_REGION: "us-west-2"
+
 jobs:
   determine-workflows-ref:
     runs-on: ubuntu-latest
@@ -41,42 +46,54 @@ jobs:
           file-name: "release.yaml"
           github-token: ${{ secrets.GITHUB_TOKEN }}
 
-  goreleaser:
+  goreleaser-binaries:
     needs: determine-workflows-ref
     runs-on: macos-latest
+    permissions:
+      contents: read
+      id-token: write # <-- needed for cosign keyless (OIDC)
     steps:
       - name: Checkout caller repo
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           path: _caller
           repository: ${{ github.event.repository.full_name }}
           fetch-depth: 0
 
       - name: Checkout connector workflows
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           path: _workflows
           repository: ConductorOne/github-workflows
           ref: ${{ needs.determine-workflows-ref.outputs.ref }}
 
       - name: Set up Go
-        uses: actions/setup-go@v5
+        uses: actions/setup-go@v6
         with:
           go-version-file: "_caller/go.mod"
 
-      - name: Generate gon and goreleaser configs
+      - name: Calculate S3 directory
+        id: s3-directory
+        shell: bash
+        run: |
+          ORG="${{ github.event.repository.owner.login }}"
+          REPO="${{ github.event.repository.name }}"
+          TAG="${{ inputs.tag }}"
+          echo "S3_DIRECTORY=releases/$ORG/$REPO/$TAG" >> "$GITHUB_OUTPUT"
+
+      - name: Generate gon and goreleaser configs for binaries
         env:
           REPO_NAME: ${{ github.event.repository.name }}
+          S3_BUCKET: ${{ env.S3_BUCKET }}
+          S3_REGION: ${{ env.S3_REGION }}
+          S3_DIRECTORY: ${{ steps.s3-directory.outputs.S3_DIRECTORY }}
         run: |
           envsubst < _workflows/.gon-amd64-template.json > _workflows/.gon-amd64.json
           envsubst < _workflows/.gon-arm64-template.json > _workflows/.gon-arm64.json
-          envsubst < _workflows/.goreleaser-template.yaml > _workflows/.goreleaser.yaml
-          echo "_workflows/.gon-amd64.json:"
-          cat _workflows/.gon-amd64.json
-          echo "_workflows/.gon-arm64.json:"
-          cat _workflows/.gon-arm64.json
-          echo "_workflows/.goreleaser.yaml:"
-          cat _workflows/.goreleaser.yaml
+          envsubst < _workflows/.goreleaser-binaries-template.yaml > _workflows/.goreleaser.binaries.yaml
+          echo "_workflows/.gon-amd64.json:"; cat _workflows/.gon-amd64.json
+          echo "_workflows/.gon-arm64.json:"; cat _workflows/.gon-arm64.json
+          echo "_workflows/.goreleaser.binaries.yaml:"; cat _workflows/.goreleaser.binaries.yaml
 
       - name: Set up Gon
         run: brew tap conductorone/gon && brew install conductorone/gon/gon
@@ -87,18 +104,137 @@ jobs:
           p12-file-base64: ${{ secrets.APPLE_SIGNING_KEY_P12 }}
           p12-password: ${{ secrets.APPLE_SIGNING_KEY_P12_PASSWORD }}
 
+      - name: Install cosign
+        uses: sigstore/cosign-installer@v3
+
+      - name: Download syft
+        uses: anchore/sbom-action/download-syft@v0
+
+      - name: Configure AWS credentials via OIDC
+        uses: aws-actions/configure-aws-credentials@v5
+        with:
+          role-to-assume: arn:aws:iam::323258005321:role/gontzess-releases-binary-pusher-ConductorOne-baton-github-test
+          aws-region: ${{ env.S3_REGION }}
+
       - name: Run GoReleaser
         uses: goreleaser/goreleaser-action@v6
         with:
           workdir: _caller
           version: "~> v2.5"
-          args: release --clean --config ../_workflows/.goreleaser.yaml
+          args: release --clean --config ../_workflows/.goreleaser.binaries.yaml
         env:
           GITHUB_TOKEN: ${{ secrets.RELENG_GITHUB_TOKEN }}
           AC_PASSWORD: ${{ secrets.AC_PASSWORD }}
           AC_PROVIDER: ${{ secrets.AC_PROVIDER }}
 
-  goreleaser-docker:
+      # TODO: move to a go file with proper structs
+      - name: Generate manifest.json
+        id: manifest
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd _caller/dist
+          TAG="${{ inputs.tag }}"
+          NOW="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          jq -n \
+            --arg v "1" \
+            --arg name "${{ github.event.repository.name }}" \
+            --arg org  "${{ github.event.repository.owner.login }}" \
+            --arg semver "$TAG" \
+            --arg releasedAt "$NOW" \
+            '{
+              version:$v, name:$name, org:$org,
+              semver:$semver, releasedAt:$releasedAt,
+              assets:{}
+            }' > manifest.json
+          add_asset() {
+            local key="$1" file="$2" mt="$3"
+            [ -f "$file" ] || return 0
+            local size sha
+            size=$(stat -c%s "$file" 2>/dev/null || stat -f%z "$file")
+            if command -v sha256sum >/dev/null; then sha=$(sha256sum "$file"|awk '{print $1}'); else sha=$(shasum -a 256 "$file"|awk '{print $1}'); fi
+            jq --arg k "$key" --arg f "$file" --arg mt "$mt" \
+              --argjson sz "$size" --arg sha "$sha" \
+              '.assets[$k] = { filename:$f, mediaType:$mt, sizeBytes:$sz, sha256:$sha }' \
+              manifest.json > .t && mv .t manifest.json
+          }
+          add_asset darwin-arm64   "$(ls -1 *darwin-arm64.zip    2>/dev/null | head -n1)" application/zip
+          add_asset darwin-amd64   "$(ls -1 *darwin-amd64.zip    2>/dev/null | head -n1)" application/zip
+          add_asset linux-arm64    "$(ls -1 *linux-arm64.tar.gz  2>/dev/null | head -n1)" application/gzip
+          add_asset linux-amd64    "$(ls -1 *linux-amd64.tar.gz  2>/dev/null | head -n1)" application/gzip
+          add_asset windows-amd64  "$(ls -1 *windows-amd64.zip   2>/dev/null | head -n1)" application/zip
+          add_asset checksums      "$(ls -1 *checksums.txt       2>/dev/null | head -n1)" text/plain
+          echo "path=$PWD/manifest.json" >> "$GITHUB_OUTPUT"
+
+      # TODO: move to a go file with proper structs
+      - name: Enrich manifest with CDN URLs
+        shell: bash
+        run: |
+          set -euo pipefail
+          BASE="${{ env.CDN_BASE_URL }}/${{ steps.s3-directory.outputs.S3_DIRECTORY }}/"
+          cd _caller/dist
+          enrich_key () {
+            local key="$1"
+            local fname
+            fname=$(jq -r --arg k "$key" '.assets[$k].filename // empty' manifest.json)
+            [ -n "$fname" ] || return 0
+            local sb=""
+            if [ -f "$fname.sbom.json" ]; then
+              sb="$fname.sbom.json"
+            fi
+            jq --arg k "$key" --arg base "$BASE" --arg f "$fname" --arg sb "$sb" \
+              '.assets[$k].href = ($base + $f)
+                | .assets[$k].signatureHref   = ($base + $f + ".sig")
+                | .assets[$k].certificateHref = ($base + $f + ".cert")
+                | (if ($sb | length) > 0 then (.assets[$k].sbomHref = ($base + $sb)) else . end)' \
+              manifest.json > .t && mv .t manifest.json
+          }
+          for k in darwin-arm64 darwin-amd64 linux-arm64 linux-amd64 windows-amd64 checksums; do
+            enrich_key "$k"
+          done
+          # Add top-level manifest signature and certificate pointers (files will exist after signing)
+          jq --arg base "$BASE" \
+            '.signatureHref   = ($base + "manifest.json.sig")
+             | .certificateHref = ($base + "manifest.json.cert")' \
+            manifest.json > .t && mv .t manifest.json
+
+      - name: Sign manifest.json
+        env: { COSIGN_EXPERIMENTAL: "1" }
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd _caller/dist
+          cosign sign-blob --yes "manifest.json" \
+            --output-signature "manifest.json.sig" \
+            --output-certificate "manifest.json.cert"
+
+      - name: Upload manifest.json to S3
+        shell: bash
+        run: |
+          set -euo pipefail
+          BUCKET="${{ env.S3_BUCKET }}"
+          DIRECTORY="${{ steps.s3-directory.outputs.S3_DIRECTORY }}"
+          cd _caller/dist
+          # manifest.json is required
+          if [ ! -f "manifest.json" ]; then
+            echo "::error::manifest.json not found in $(pwd)"
+            exit 1
+          fi
+          aws s3 cp "manifest.json" "s3://$BUCKET/$DIRECTORY/manifest.json" \
+            --cache-control "public,max-age=31536000,immutable" \
+            --content-type "application/json"
+          if [ -f "manifest.json.sig" ]; then
+            aws s3 cp "manifest.json.sig" "s3://$BUCKET/$DIRECTORY/manifest.json.sig" \
+              --cache-control "public,max-age=31536000,immutable" \
+              --content-type "application/octet-stream"
+          fi
+          if [ -f "manifest.json.cert" ]; then
+            aws s3 cp "manifest.json.cert" "s3://$BUCKET/$DIRECTORY/manifest.json.cert" \
+              --cache-control "public,max-age=31536000,immutable" \
+              --content-type "application/octet-stream"
+          fi
+
+  goreleaser-docker-lambda:
     if: inputs.lambda == true
     needs: determine-workflows-ref
     permissions:
@@ -107,7 +243,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Configure AWS credentials via OIDC
-        uses: aws-actions/configure-aws-credentials@v4
+        uses: aws-actions/configure-aws-credentials@v5
         with:
           role-to-assume: "arn:aws:iam::168442440833:role/GitHubActionsECRPushRole-${{ github.event.repository.name }}"
           aws-region: us-west-2
@@ -116,21 +252,21 @@ jobs:
         uses: aws-actions/amazon-ecr-login@v2
 
       - name: Checkout caller repo
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           path: _caller
           repository: ${{ github.event.repository.full_name }}
           fetch-depth: 0
 
       - name: Checkout connector workflows
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           path: _workflows
           repository: ConductorOne/github-workflows
           ref: ${{ needs.determine-workflows-ref.outputs.ref }}
 
       - name: Set up Go
-        uses: actions/setup-go@v5
+        uses: actions/setup-go@v6
         with:
           go-version-file: "_caller/go.mod"
 
@@ -190,17 +326,19 @@ jobs:
 
   record-lambda-release:
     if: inputs.lambda == true
-    needs: [goreleaser, goreleaser-docker] # lambda releases are dependent on github release assets in the goreleaser job
+    # lambda releases are dependent on assets produced in both goreleaser jobs
+    needs: [goreleaser-binaries, goreleaser-docker-lambda]
     permissions:
       id-token: write
       contents: read
     runs-on: ubuntu-latest
     steps:
       - name: Configure AWS credentials via OIDC
-        uses: aws-actions/configure-aws-credentials@v4
+        uses: aws-actions/configure-aws-credentials@v5
         with:
           role-to-assume: "arn:aws:iam::168442440833:role/GitHubActionsECRPushRole-${{ github.event.repository.name }}"
           aws-region: us-west-2
+
       - name: Invoke Lambda with retries
         run: |
           set +e    # Disable default fail-fast to support retries
@@ -262,7 +400,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout caller repo
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           path: _caller
           repository: ${{ github.event.repository.full_name }}
@@ -281,7 +419,7 @@ jobs:
 
       - name: Checkout connector workflows
         if: steps.check-dockerfile.outputs.exists == 'true'
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           path: _workflows
           repository: ConductorOne/github-workflows
@@ -289,7 +427,7 @@ jobs:
 
       - name: Set up Go
         if: steps.check-dockerfile.outputs.exists == 'true'
-        uses: actions/setup-go@v5
+        uses: actions/setup-go@v6
         with:
           go-version-file: "_caller/go.mod"
 
@@ -324,14 +462,31 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.RELENG_GITHUB_TOKEN }}
 
+  # TODO: implement once pulumi is set up
+  # rename to record-binaries-release?
+  record-release:
+    needs: [
+        goreleaser-binaries,
+        # probably should require docker to complete before saying it's successful, but
+        # not strictly necessary if we decide not to include image urls in the manifest.json ...
+        goreleaser-docker-lambda,
+        goreleaser-docker-no-lambda,
+      ]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Record release
+        run: |
+          echo "Placeholder for recording release to binaries registry"
+
   notify-release-failure:
     needs:
       [
         determine-workflows-ref,
-        goreleaser,
-        goreleaser-docker,
+        goreleaser-binaries,
+        goreleaser-docker-lambda,
         goreleaser-docker-no-lambda,
         record-lambda-release,
+        record-release,
       ]
     if: failure()
     permissions:
