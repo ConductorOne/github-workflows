@@ -52,6 +52,9 @@ jobs:
     permissions:
       contents: read
       id-token: write # <-- needed for cosign keyless (OIDC)
+    outputs:
+      s3_directory: ${{ steps.s3-directory.outputs.S3_DIRECTORY }}
+      binaries_manifest: ${{ steps.generate-binaries-manifest.outputs.binaries_manifest }}
     steps:
       - name: Checkout caller repo
         uses: actions/checkout@v5
@@ -129,7 +132,7 @@ jobs:
 
       # TODO: move to a go file with proper structs
       - name: Generate manifest.json
-        id: manifest
+        id: generate-binaries-manifest
         shell: bash
         run: |
           set -euo pipefail
@@ -164,15 +167,8 @@ jobs:
           add_asset linux-amd64    "$(ls -1 *linux-amd64.tar.gz  2>/dev/null | head -n1)" application/gzip
           add_asset windows-amd64  "$(ls -1 *windows-amd64.zip   2>/dev/null | head -n1)" application/zip
           add_asset checksums      "$(ls -1 *checksums.txt       2>/dev/null | head -n1)" text/plain
-          echo "path=$PWD/manifest.json" >> "$GITHUB_OUTPUT"
 
-      # TODO: move to a go file with proper structs
-      - name: Enrich manifest with CDN URLs
-        shell: bash
-        run: |
-          set -euo pipefail
           BASE="${{ env.CDN_BASE_URL }}/${{ steps.s3-directory.outputs.S3_DIRECTORY }}/"
-          cd _caller/dist
           enrich_key () {
             local key="$1"
             local fname
@@ -198,41 +194,10 @@ jobs:
              | .certificateHref = ($base + "manifest.json.cert")' \
             manifest.json > .t && mv .t manifest.json
 
-      - name: Sign manifest.json
-        env: { COSIGN_EXPERIMENTAL: "1" }
-        shell: bash
-        run: |
-          set -euo pipefail
-          cd _caller/dist
-          cosign sign-blob --yes "manifest.json" \
-            --output-signature "manifest.json.sig" \
-            --output-certificate "manifest.json.cert"
-
-      - name: Upload manifest.json to S3
-        shell: bash
-        run: |
-          set -euo pipefail
-          BUCKET="${{ env.S3_BUCKET }}"
-          DIRECTORY="${{ steps.s3-directory.outputs.S3_DIRECTORY }}"
-          cd _caller/dist
-          # manifest.json is required
-          if [ ! -f "manifest.json" ]; then
-            echo "::error::manifest.json not found in $(pwd)"
-            exit 1
-          fi
-          aws s3 cp "manifest.json" "s3://$BUCKET/$DIRECTORY/manifest.json" \
-            --cache-control "public,max-age=31536000,immutable" \
-            --content-type "application/json"
-          if [ -f "manifest.json.sig" ]; then
-            aws s3 cp "manifest.json.sig" "s3://$BUCKET/$DIRECTORY/manifest.json.sig" \
-              --cache-control "public,max-age=31536000,immutable" \
-              --content-type "application/octet-stream"
-          fi
-          if [ -f "manifest.json.cert" ]; then
-            aws s3 cp "manifest.json.cert" "s3://$BUCKET/$DIRECTORY/manifest.json.cert" \
-              --cache-control "public,max-age=31536000,immutable" \
-              --content-type "application/octet-stream"
-          fi
+          # Output manifest content as multiline output
+          echo "binaries_manifest<<EOF" >> "$GITHUB_OUTPUT"
+          cat manifest.json >> "$GITHUB_OUTPUT"
+          echo "EOF" >> "$GITHUB_OUTPUT"
 
   goreleaser-docker-lambda:
     if: inputs.lambda == true
@@ -240,6 +205,8 @@ jobs:
     permissions:
       id-token: write
       contents: read
+    outputs:
+      images_manifest: ${{ steps.extract-images.outputs.images_manifest }}
     runs-on: ubuntu-latest
     steps:
       - name: Configure AWS credentials via OIDC
@@ -324,72 +291,71 @@ jobs:
         run: |
           echo "Skipping GoReleaser because ECR images already exist for tag ${{ inputs.tag }}"
 
-  record-lambda-release:
-    if: inputs.lambda == true
-    # lambda releases are dependent on assets produced in the binaries and docker goreleaser jobs
-    needs: [goreleaser-binaries, goreleaser-docker-lambda]
-    permissions:
-      id-token: write
-      contents: read
-    runs-on: ubuntu-latest
-    steps:
-      - name: Configure AWS credentials via OIDC
-        uses: aws-actions/configure-aws-credentials@v5
-        with:
-          role-to-assume: "arn:aws:iam::168442440833:role/GitHubActionsECRPushRole-${{ github.event.repository.name }}"
-          aws-region: us-west-2
-
-      - name: Invoke Lambda with retries
+      - name: Extract GHCR image digests from GoReleaser output
+        id: extract-images
+        shell: bash
         run: |
-          set +e    # Disable default fail-fast to support retries
-          if [[ "$ACTIONS_STEP_DEBUG" == "true" ]]; then
-            set -x  # Debug logging
+          set -euo pipefail
+          cd _caller
+
+          # GoReleaser generates docker_digests.txt in the dist directory
+          DIGEST_FILE="dist/docker_digests.txt"
+          TAG="${{ inputs.tag }}"
+
+          if [ ! -f "$DIGEST_FILE" ]; then
+            echo "::error::docker_digests.txt not found. GoReleaser should generate this file."
+            exit 1
           fi
 
-          TMPFILE=$(mktemp)
-          MAX_RETRIES=5
-          RETRY_DELAY=10  # seconds
+          echo "Reading digests from $DIGEST_FILE"
+          # Parse docker_digests.txt file
+          # Format: image_ref@sha256:digest (one per line)
+          # Dynamically extract all images matching the tag
+          IMAGES_JSON="{}"
 
-          for ((i=1; i<=MAX_RETRIES; i++)); do
-            echo "Attempt $i to invoke Lambda..."
-
-            RESPONSE=$(aws lambda invoke \
-              --function-name "${{ github.event.repository.name }}-releases" \
-              --payload "{\"repository\":\"${{ github.event.repository.full_name }}\", \"tag\":\"${{ inputs.tag }}\"}" \
-              --cli-binary-format raw-in-base64-out \
-              "$TMPFILE" 2>&1)
-            EXIT_CODE=$?
-
-            echo "AWS CLI exited with code: $EXIT_CODE"
-            cat "$TMPFILE"
-
-            STATUS_CODE=$(jq -r '.statusCode' < "$TMPFILE" 2>/dev/null)
-
-            if [[ $EXIT_CODE -eq 0 && "$STATUS_CODE" == "200" ]]; then
-              echo "Lambda invoked successfully."
-              break
-
-            elif [[ "$RESPONSE" == *"CodeArtifactUserPendingException"* ]]; then
-              echo "Lambda not ready (CodeArtifactUserPendingException)."
-
-              if [[ $i -lt $MAX_RETRIES ]]; then
-                WAIT_TIME=$((i * RETRY_DELAY))
-                echo "Retrying in $WAIT_TIME seconds..."
-                sleep "$WAIT_TIME"
-              else
-                echo "Lambda still not ready after $MAX_RETRIES attempts."
-                rm -f "$TMPFILE"
-                exit 1
+          while IFS= read -r line; do
+            if [[ "$line" =~ ^([^@]+)@(sha256:[a-f0-9]+)$ ]]; then
+              image_ref="${BASH_REMATCH[1]}"
+              digest="${BASH_REMATCH[2]}"
+              
+              # Only process images matching our tag (exclude 'latest' tags)
+              if [[ "$image_ref" =~ :${TAG}(-.*)?$ ]]; then
+                # Determine the key based on the image reference
+                # If it ends with just the tag (no suffix), it's the index/manifest
+                if [[ "$image_ref" =~ :${TAG}$ ]]; then
+                  key="index"
+                else
+                  # Extract the suffix after the tag (e.g., "-amd64", "-arm64")
+                  # Map common suffixes to platform keys
+                  suffix="${image_ref##*:${TAG}-}"
+                  case "$suffix" in
+                    amd64)
+                      key="linux-amd64"
+                      ;;
+                    arm64)
+                      key="linux-arm64"
+                      ;;
+                    *)
+                      # For any other suffix, use it as-is or map it
+                      # This allows for future platforms like "windows-amd64", "darwin-arm64", etc.
+                      key="linux-${suffix}"
+                      ;;
+                  esac
+                fi
+                
+                # Add to images JSON
+                IMAGES_JSON=$(echo "$IMAGES_JSON" | jq --arg k "$key" --arg ref "$image_ref" --arg digest "$digest" '.[$k] = {ref: $ref, digest: $digest}')
               fi
-
-            else
-              echo "Lambda invoke failed with unexpected error: $RESPONSE"
-              rm -f "$TMPFILE"
-              exit 1
             fi
-          done
+          done < "$DIGEST_FILE"
 
-          rm -f "$TMPFILE"
+          # Output as JSON string (will be escaped properly by GitHub Actions)
+          echo "images_manifest<<EOF" >> "$GITHUB_OUTPUT"
+          echo "$IMAGES_JSON" >> "$GITHUB_OUTPUT"
+          echo "EOF" >> "$GITHUB_OUTPUT"
+
+          echo "✅ Extracted image digests:"
+          echo "$IMAGES_JSON" | jq '.'
 
   goreleaser-docker-no-lambda:
     if: inputs.lambda == false
@@ -397,6 +363,8 @@ jobs:
     permissions:
       id-token: write
       contents: read
+    outputs:
+      images_manifest: ${{ steps.extract-images.outputs.images_manifest }}
     runs-on: ubuntu-latest
     steps:
       - name: Checkout caller repo
@@ -462,23 +430,306 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.RELENG_GITHUB_TOKEN }}
 
-  # TODO: implement once pulumi is set up
-  # rename to record-binaries-release?
-  record-release:
-    # require docker to complete before saying it's successful, but not strictly needed
-    # note: have to use always() to ensure the job isn't skipped before the if condition is evaluated
-    if: always() && needs.goreleaser-binaries.result == 'success' && (needs.goreleaser-docker-lambda.result == 'success' || needs.goreleaser-docker-no-lambda.result == 'success')
+      - name: Extract GHCR image digests from GoReleaser output
+        id: extract-images
+        if: steps.check-dockerfile.outputs.exists == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd _caller
+
+          # GoReleaser generates docker_digests.txt in the dist directory
+          DIGEST_FILE="dist/docker_digests.txt"
+          TAG="${{ inputs.tag }}"
+
+          if [ ! -f "$DIGEST_FILE" ]; then
+            echo "::error::docker_digests.txt not found. GoReleaser should generate this file."
+            exit 1
+          fi
+
+          echo "Reading digests from $DIGEST_FILE"
+          # Parse docker_digests.txt file
+          # Format: image_ref@sha256:digest (one per line)
+          # Dynamically extract all images matching the tag
+          IMAGES_JSON="{}"
+
+          while IFS= read -r line; do
+            if [[ "$line" =~ ^([^@]+)@(sha256:[a-f0-9]+)$ ]]; then
+              image_ref="${BASH_REMATCH[1]}"
+              digest="${BASH_REMATCH[2]}"
+              
+              # Only process images matching our tag (exclude 'latest' tags)
+              if [[ "$image_ref" =~ :${TAG}(-.*)?$ ]]; then
+                # Determine the key based on the image reference
+                # If it ends with just the tag (no suffix), it's the index/manifest
+                if [[ "$image_ref" =~ :${TAG}$ ]]; then
+                  key="index"
+                else
+                  # Extract the suffix after the tag (e.g., "-amd64", "-arm64")
+                  # Map common suffixes to platform keys
+                  suffix="${image_ref##*:${TAG}-}"
+                  case "$suffix" in
+                    amd64)
+                      key="linux-amd64"
+                      ;;
+                    arm64)
+                      key="linux-arm64"
+                      ;;
+                    *)
+                      # For any other suffix, use it as-is or map it
+                      # This allows for future platforms like "windows-amd64", "darwin-arm64", etc.
+                      key="linux-${suffix}"
+                      ;;
+                  esac
+                fi
+                
+                # Add to images JSON
+                IMAGES_JSON=$(echo "$IMAGES_JSON" | jq --arg k "$key" --arg ref "$image_ref" --arg digest "$digest" '.[$k] = {ref: $ref, digest: $digest}')
+              fi
+            fi
+          done < "$DIGEST_FILE"
+
+          # Output as JSON string (will be escaped properly by GitHub Actions)
+          echo "images_manifest<<EOF" >> "$GITHUB_OUTPUT"
+          echo "$IMAGES_JSON" >> "$GITHUB_OUTPUT"
+          echo "EOF" >> "$GITHUB_OUTPUT"
+
+          echo "✅ Extracted image digests:"
+          echo "$IMAGES_JSON" | jq '.'
+
+  record-connector-registry:
+    # require binaries and docker to complete before recording, since we include both in the manifest
     needs:
       [
         goreleaser-binaries,
         goreleaser-docker-lambda,
         goreleaser-docker-no-lambda,
       ]
+    # note: have to use always() to ensure the job isn't skipped before the if condition is evaluated
+    if: always() && needs.goreleaser-binaries.result == 'success' && (needs.goreleaser-docker-lambda.result == 'success' || needs.goreleaser-docker-no-lambda.result == 'success')
+    permissions:
+      id-token: write
+      contents: read
     runs-on: ubuntu-latest
     steps:
-      - name: Record release
+      - name: Prepare manifest with images
+        shell: bash
         run: |
-          echo "Placeholder for recording release to binaries registry"
+          set -euo pipefail
+          mkdir -p dist
+
+          # Write binaries manifest from job output (already enriched with CDN URLs)
+          echo '${{ needs.goreleaser-binaries.outputs.binaries_manifest }}' > dist/manifest.json
+
+          if [ ! -f "dist/manifest.json" ] || [ ! -s "dist/manifest.json" ]; then
+            echo "::error::Binaries manifest not found or empty"
+            exit 1
+          fi
+
+          cd dist
+
+          # Get images manifest from whichever docker job ran
+          IMAGES_MANIFEST=""
+          if [ "${{ needs.goreleaser-docker-lambda.result }}" == "success" ] && [ -n "${{ needs.goreleaser-docker-lambda.outputs.images_manifest }}" ]; then
+            IMAGES_MANIFEST="${{ needs.goreleaser-docker-lambda.outputs.images_manifest }}"
+          elif [ "${{ needs.goreleaser-docker-no-lambda.result }}" == "success" ] && [ -n "${{ needs.goreleaser-docker-no-lambda.outputs.images_manifest }}" ]; then
+            IMAGES_MANIFEST="${{ needs.goreleaser-docker-no-lambda.outputs.images_manifest }}"
+          fi
+
+          # Add images to manifest if available (images are in GHCR, not S3, so no URL enrichment needed)
+          if [ -n "$IMAGES_MANIFEST" ] && [ "$IMAGES_MANIFEST" != "{}" ]; then
+            echo "$IMAGES_MANIFEST" > /tmp/images.json
+            jq --slurpfile images /tmp/images.json '.images = $images[0]' manifest.json > manifest.json.tmp
+            mv manifest.json.tmp manifest.json
+            echo "✅ Added images to manifest:"
+            jq '.images' manifest.json
+          else
+            echo "ℹ️  No images to add to manifest (docker job may have been skipped or no Dockerfile)"
+          fi
+
+      - name: Install cosign
+        uses: sigstore/cosign-installer@v3
+
+      - name: Download syft
+        uses: anchore/sbom-action/download-syft@v0
+
+      - name: Configure AWS credentials via OIDC
+        uses: aws-actions/configure-aws-credentials@v5
+        with:
+          role-to-assume: arn:aws:iam::323258005321:role/gontzess-releases-binary-pusher-ConductorOne-baton-github-test
+          aws-region: ${{ env.S3_REGION }}
+
+      - name: Sign manifest.json
+        env: { COSIGN_EXPERIMENTAL: "1" }
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd dist
+          cosign sign-blob --yes "manifest.json" \
+            --output-signature "manifest.json.sig" \
+            --output-certificate "manifest.json.cert"
+
+      - name: Upload manifest.json to S3
+        id: upload-manifest
+        shell: bash
+        run: |
+          set -euo pipefail
+          BUCKET="${{ env.S3_BUCKET }}"
+          DIRECTORY="${{ needs.goreleaser-binaries.outputs.s3_directory }}"
+          CDN_BASE="${{ env.CDN_BASE_URL }}"
+          cd dist
+          # manifest.json is required
+          if [ ! -f "manifest.json" ]; then
+            echo "::error::manifest.json not found in $(pwd)"
+            exit 1
+          fi
+          if aws s3 cp "manifest.json" "s3://$BUCKET/$DIRECTORY/manifest.json" \
+            --cache-control "public,max-age=31536000,immutable" \
+            --content-type "application/json"; then
+            MANIFEST_URL="$CDN_BASE/$DIRECTORY/manifest.json"
+            echo "manifest_url=$MANIFEST_URL" >> "$GITHUB_OUTPUT"
+            echo "✅ Manifest uploaded successfully: $MANIFEST_URL"
+          else
+            echo "::error::Failed to upload manifest.json to S3"
+            exit 1
+          fi
+          if [ -f "manifest.json.sig" ]; then
+            aws s3 cp "manifest.json.sig" "s3://$BUCKET/$DIRECTORY/manifest.json.sig" \
+              --cache-control "public,max-age=31536000,immutable" \
+              --content-type "application/octet-stream"
+          fi
+          if [ -f "manifest.json.cert" ]; then
+            aws s3 cp "manifest.json.cert" "s3://$BUCKET/$DIRECTORY/manifest.json.cert" \
+              --cache-control "public,max-age=31536000,immutable" \
+              --content-type "application/octet-stream"
+          fi
+
+      - name: Configure AWS credentials via OIDC
+        uses: aws-actions/configure-aws-credentials@v5
+        with:
+          # TODO: update this to the real role
+          role-to-assume: "arn:aws:iam::168442440833:role/GitHubActionsRecordBinaryPushRole-${{ github.event.repository.name }}"
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Invoke Lambda with retries
+        run: |
+          set +e    # Disable default fail-fast to support retries
+          if [[ "$ACTIONS_STEP_DEBUG" == "true" ]]; then
+            set -x  # Debug logging
+          fi
+
+          TMPFILE=$(mktemp)
+          MAX_RETRIES=5
+          RETRY_DELAY=10  # seconds
+
+          for ((i=1; i<=MAX_RETRIES; i++)); do
+            echo "Attempt $i to invoke Lambda..."
+
+            # TODO: use real lambda name
+            RESPONSE=$(aws lambda invoke \
+              --function-name "${{ github.event.repository.name }}-binary-releases" \
+              --payload "{\"repository\":\"${{ github.event.repository.full_name }}\", \"tag\":\"${{ inputs.tag }}\", \"manifest_url\":\"${{ steps.upload-manifest.outputs.manifest_url }}\"}" \
+              --cli-binary-format raw-in-base64-out \
+              "$TMPFILE" 2>&1)
+            EXIT_CODE=$?
+
+            echo "AWS CLI exited with code: $EXIT_CODE"
+            cat "$TMPFILE"
+
+            STATUS_CODE=$(jq -r '.statusCode' < "$TMPFILE" 2>/dev/null)
+
+            if [[ $EXIT_CODE -eq 0 && "$STATUS_CODE" == "200" ]]; then
+              echo "Lambda invoked successfully."
+              break
+
+            elif [[ "$RESPONSE" == *"CodeArtifactUserPendingException"* ]]; then
+              echo "Lambda not ready (CodeArtifactUserPendingException)."
+
+              if [[ $i -lt $MAX_RETRIES ]]; then
+                WAIT_TIME=$((i * RETRY_DELAY))
+                echo "Retrying in $WAIT_TIME seconds..."
+                sleep "$WAIT_TIME"
+              else
+                echo "Lambda still not ready after $MAX_RETRIES attempts."
+                rm -f "$TMPFILE"
+                exit 1
+              fi
+
+            else
+              echo "Lambda invoke failed with unexpected error: $RESPONSE"
+              rm -f "$TMPFILE"
+              exit 1
+            fi
+          done
+
+          rm -f "$TMPFILE"
+
+  record-lambda-registry:
+    if: inputs.lambda == true
+    # lambda releases are dependent on assets produced in the binaries and docker goreleaser jobs
+    needs: [goreleaser-binaries, goreleaser-docker-lambda]
+    permissions:
+      id-token: write
+      contents: read
+    runs-on: ubuntu-latest
+    steps:
+      - name: Configure AWS credentials via OIDC
+        uses: aws-actions/configure-aws-credentials@v5
+        with:
+          role-to-assume: "arn:aws:iam::168442440833:role/GitHubActionsECRPushRole-${{ github.event.repository.name }}"
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Invoke Lambda with retries
+        run: |
+          set +e    # Disable default fail-fast to support retries
+          if [[ "$ACTIONS_STEP_DEBUG" == "true" ]]; then
+            set -x  # Debug logging
+          fi
+
+          TMPFILE=$(mktemp)
+          MAX_RETRIES=5
+          RETRY_DELAY=10  # seconds
+
+          for ((i=1; i<=MAX_RETRIES; i++)); do
+            echo "Attempt $i to invoke Lambda..."
+
+            RESPONSE=$(aws lambda invoke \
+              --function-name "${{ github.event.repository.name }}-releases" \
+              --payload "{\"repository\":\"${{ github.event.repository.full_name }}\", \"tag\":\"${{ inputs.tag }}\"}" \
+              --cli-binary-format raw-in-base64-out \
+              "$TMPFILE" 2>&1)
+            EXIT_CODE=$?
+
+            echo "AWS CLI exited with code: $EXIT_CODE"
+            cat "$TMPFILE"
+
+            STATUS_CODE=$(jq -r '.statusCode' < "$TMPFILE" 2>/dev/null)
+
+            if [[ $EXIT_CODE -eq 0 && "$STATUS_CODE" == "200" ]]; then
+              echo "Lambda invoked successfully."
+              break
+
+            elif [[ "$RESPONSE" == *"CodeArtifactUserPendingException"* ]]; then
+              echo "Lambda not ready (CodeArtifactUserPendingException)."
+
+              if [[ $i -lt $MAX_RETRIES ]]; then
+                WAIT_TIME=$((i * RETRY_DELAY))
+                echo "Retrying in $WAIT_TIME seconds..."
+                sleep "$WAIT_TIME"
+              else
+                echo "Lambda still not ready after $MAX_RETRIES attempts."
+                rm -f "$TMPFILE"
+                exit 1
+              fi
+
+            else
+              echo "Lambda invoke failed with unexpected error: $RESPONSE"
+              rm -f "$TMPFILE"
+              exit 1
+            fi
+          done
+
+          rm -f "$TMPFILE"
 
   notify-release-failure:
     needs:
@@ -487,8 +738,8 @@ jobs:
         goreleaser-binaries,
         goreleaser-docker-lambda,
         goreleaser-docker-no-lambda,
-        record-lambda-release,
-        record-release,
+        record-connector-registry,
+        record-lambda-registry,
       ]
     if: failure()
     permissions:
