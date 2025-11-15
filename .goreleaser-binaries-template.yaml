@@ -90,30 +90,30 @@ signs:
       - linux-archive
       - windows-archive
       - darwin-archive
-    signature: "{{ .ArtifactPath }}.sig"
-    certificate: "{{ .ArtifactPath }}.cert"
+    signature: "${artifact}.sig"
+    certificate: "${artifact}.cert"
     env:
       - COSIGN_EXPERIMENTAL=1
     args:
       - "sign-blob"
       - "--yes"
-      - "--output-signature={{ .Signature }}"
-      - "--output-certificate={{ .Certificate }}"
-      - "{{ .ArtifactPath }}"
+      - "--output-signature=${signature}"
+      - "--output-certificate=${certificate}"
+      - "${artifact}"
   - id: cosign-checksums
     output: true
     cmd: cosign
     artifacts: checksum
-    signature: "{{ .ArtifactPath }}.sig"
-    certificate: "{{ .ArtifactPath }}.cert"
+    signature: "${artifact}.sig"
+    certificate: "${artifact}.cert"
     env:
       - COSIGN_EXPERIMENTAL=1
     args:
       - "sign-blob"
       - "--yes"
-      - "--output-signature={{ .Signature }}"
-      - "--output-certificate={{ .Certificate }}"
-      - "{{ .ArtifactPath }}"
+      - "--output-signature=${signature}"
+      - "--output-certificate=${certificate}"
+      - "${artifact}"
 brews:
   - repository:
       owner: conductorone
