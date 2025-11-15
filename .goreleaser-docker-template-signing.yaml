@@ -72,9 +72,9 @@ docker_signs:
     args:
       - sign
       - --yes
-      - --output-signature=${signature}
-      - --output-certificate=${certificate}
-      - ${artifact}@${digest}
+      - --output-signature={{ .Env.signature }}
+      - --output-certificate={{ .Env.certificate }}
+      - "{{ .Env.artifact }}@{{ .Env.digest }}"
     env:
       - COSIGN_EXPERIMENTAL=1
 checksum:
