@@ -1,6 +1,6 @@
-## DEPRECATED: starting in v3, use .goreleaser-docker-template-signing.yaml instead.
-## NOTE: v1 and v2 of release.yaml workflow reference this file directly from main,
-## so you cannot change this file in any ways that breaks those workflow versions.
+## NOTE: Consolidated docker template for GoReleaser >= 2.12
+## This template supports both lambda and no-lambda builds
+## Uses docker_signs for image signing with cosign
 version: 2
 project_name: "${REPO_NAME}"
 builds:
@@ -41,10 +41,12 @@ dockers:
       - "--label=org.opencontainers.image.title={{.ProjectName}}"
       - "--label=org.opencontainers.image.revision={{.FullCommit}}"
       - "--label=org.opencontainers.image.version={{.Version}}"
+  # Lambda-specific docker build (only used when lambda=true)
   - use: buildx
     goos: linux
     goarch: arm64
     dockerfile: Dockerfile.lambda
+    skip_build: '{{ ne .Env.LAMBDA "true" }}'
     image_templates:
       - "168442440833.dkr.ecr.us-west-2.amazonaws.com/${REPO_NAME}:{{ .Version }}-arm64"
     build_flag_templates:
@@ -62,6 +64,19 @@ docker_manifests:
     image_templates:
       - ghcr.io/conductorone/${REPO_NAME}:latest-amd64
       - ghcr.io/conductorone/${REPO_NAME}:latest-arm64
+docker_digest:
+  name_template: "{{ .ProjectName }}_{{ .Version }}_digests.txt"
+docker_signs:
+  - id: cosign-images
+    cmd: cosign
+    args:
+      - sign
+      - --yes
+      - --output-signature=${signature}
+      - --output-certificate=${certificate}
+      - ${artifact}@${digest}
+    env:
+      - COSIGN_EXPERIMENTAL=1
 checksum:
   disable: true
 release:

@@ -199,8 +199,7 @@ jobs:
           cat manifest.json >> "$GITHUB_OUTPUT"
           echo "EOF" >> "$GITHUB_OUTPUT"
 
-  goreleaser-docker-lambda:
-    if: inputs.lambda == true
+  goreleaser-docker:
     needs: determine-workflows-ref
     permissions:
       id-token: write
@@ -208,24 +207,37 @@ jobs:
     outputs:
       images_manifest: ${{ steps.extract-images.outputs.images_manifest }}
     runs-on: ubuntu-latest
+    # Skips all build steps if Dockerfile doesn't exist. Skips ECR steps if lambda is false.
     steps:
+      - name: Checkout caller repo
+        uses: actions/checkout@v5
+        with:
+          path: _caller
+          repository: ${{ github.event.repository.full_name }}
+          fetch-depth: 0
+
+      - name: Skip build if Dockerfile doesn't exist
+        id: skip-build
+        run: |
+          echo "skip=false" >> $GITHUB_OUTPUT
+          if [ ! -f "_caller/Dockerfile" ]; then
+            echo "skip=true" >> $GITHUB_OUTPUT
+            echo "Dockerfile not found, skipping build"
+          fi
+
       - name: Configure AWS credentials via OIDC
+        if: steps.skip-build.outputs.skip == 'false' && inputs.lambda == true
         uses: aws-actions/configure-aws-credentials@v5
         with:
           role-to-assume: "arn:aws:iam::168442440833:role/GitHubActionsECRPushRole-${{ github.event.repository.name }}"
           aws-region: us-west-2
 
       - name: Login to Amazon ECR
+        if: steps.skip-build.outputs.skip == 'false' && inputs.lambda == true
         uses: aws-actions/amazon-ecr-login@v2
 
-      - name: Checkout caller repo
-        uses: actions/checkout@v5
-        with:
-          path: _caller
-          repository: ${{ github.event.repository.full_name }}
-          fetch-depth: 0
-
       - name: Checkout connector workflows
+        if: steps.skip-build.outputs.skip == 'false'
         uses: actions/checkout@v5
         with:
           path: _workflows
@@ -233,39 +245,26 @@ jobs:
           ref: ${{ needs.determine-workflows-ref.outputs.ref }}
 
       - name: Set up Go
+        if: steps.skip-build.outputs.skip == 'false'
         uses: actions/setup-go@v6
         with:
           go-version-file: "_caller/go.mod"
 
+      - name: Install cosign
+        if: steps.skip-build.outputs.skip == 'false'
+        uses: sigstore/cosign-installer@v3
+
       - name: Generate goreleaser configs
+        if: steps.skip-build.outputs.skip == 'false'
         env:
           REPO_NAME: ${{ github.event.repository.name }}
         run: |
-          envsubst < _workflows/.goreleaser-docker-template.yaml > _workflows/.goreleaser.docker.yaml
+          envsubst < _workflows/.goreleaser-docker-template-signing.yaml > _workflows/.goreleaser.docker.yaml
           echo "_workflows/.goreleaser.docker.yaml:"
           cat _workflows/.goreleaser.docker.yaml
 
-      - name: Check if ECR images already exist
-        id: check-ecr-images
-        run: |
-          REPO_NAME="${{ github.event.repository.name }}"
-          # Strip "v" prefix from tag to match GoReleaser version format
-          TAG="${{ inputs.tag }}"
-          VERSION="${TAG#v}"
-
-          echo "Checking if ECR image ${REPO_NAME}:${VERSION}-arm64 exists"
-
-          # Check if the arm64 image already exists
-          if aws ecr describe-images --repository-name "${REPO_NAME}" --image-ids imageTag="${VERSION}-arm64" --region us-west-2 >/dev/null 2>&1; then
-            echo "ECR image ${REPO_NAME}:${VERSION}-arm64 already exists"
-            echo "images_exist=true" >> $GITHUB_OUTPUT
-          else
-            echo "ECR image ${REPO_NAME}:${VERSION}-arm64 does not exist"
-            echo "images_exist=false" >> $GITHUB_OUTPUT
-          fi
-
       - name: Docker Login
-        if: steps.check-ecr-images.outputs.images_exist != 'true'
+        if: steps.skip-build.outputs.skip == 'false'
         uses: docker/login-action@v3
         with:
           registry: ghcr.io
@@ -273,240 +272,69 @@ jobs:
           password: ${{ secrets.RELENG_GITHUB_TOKEN }}
 
       - name: Set up Docker Buildx
-        if: steps.check-ecr-images.outputs.images_exist != 'true'
+        if: steps.skip-build.outputs.skip == 'false'
         uses: docker/setup-buildx-action@v3
 
       - name: Run GoReleaser
-        if: steps.check-ecr-images.outputs.images_exist != 'true'
+        if: steps.skip-build.outputs.skip == 'false'
         uses: goreleaser/goreleaser-action@v6
         with:
           workdir: _caller
-          version: "~> v2.5"
+          version: "~> v2.12"
           args: release --clean --config ../_workflows/.goreleaser.docker.yaml
         env:
           GITHUB_TOKEN: ${{ secrets.RELENG_GITHUB_TOKEN }}
-
-      - name: Skip GoReleaser - images already exist
-        if: steps.check-ecr-images.outputs.images_exist == 'true'
-        run: |
-          echo "Skipping GoReleaser because ECR images already exist for tag ${{ inputs.tag }}"
+          COSIGN_EXPERIMENTAL: "1"
+          LAMBDA: ${{ inputs.lambda }}
 
       - name: Extract GHCR image digests from GoReleaser output
         id: extract-images
-        shell: bash
+        if: steps.skip-build.outputs.skip == 'false'
+        working-directory: _caller
         run: |
-          set -euo pipefail
-          cd _caller
-
-          # GoReleaser generates docker_digests.txt in the dist directory
-          DIGEST_FILE="dist/docker_digests.txt"
-          TAG="${{ inputs.tag }}"
-
-          if [ ! -f "$DIGEST_FILE" ]; then
-            echo "::error::docker_digests.txt not found. GoReleaser should generate this file."
-            exit 1
-          fi
-
-          echo "Reading digests from $DIGEST_FILE"
-          # Parse docker_digests.txt file
-          # Format: image_ref@sha256:digest (one per line)
-          # Dynamically extract all images matching the tag
-          IMAGES_JSON="{}"
-
-          while IFS= read -r line; do
-            if [[ "$line" =~ ^([^@]+)@(sha256:[a-f0-9]+)$ ]]; then
-              image_ref="${BASH_REMATCH[1]}"
-              digest="${BASH_REMATCH[2]}"
-              
-              # Only process images matching our tag (exclude 'latest' tags)
-              if [[ "$image_ref" =~ :${TAG}(-.*)?$ ]]; then
-                # Determine the key based on the image reference
-                # If it ends with just the tag (no suffix), it's the index/manifest
-                if [[ "$image_ref" =~ :${TAG}$ ]]; then
-                  key="index"
-                else
-                  # Extract the suffix after the tag (e.g., "-amd64", "-arm64")
-                  # Map common suffixes to platform keys
-                  suffix="${image_ref##*:${TAG}-}"
-                  case "$suffix" in
-                    amd64)
-                      key="linux-amd64"
-                      ;;
-                    arm64)
-                      key="linux-arm64"
-                      ;;
-                    *)
-                      # For any other suffix, use it as-is or map it
-                      # This allows for future platforms like "windows-amd64", "darwin-arm64", etc.
-                      key="linux-${suffix}"
-                      ;;
-                  esac
-                fi
-                
-                # Add to images JSON
-                IMAGES_JSON=$(echo "$IMAGES_JSON" | jq --arg k "$key" --arg ref "$image_ref" --arg digest "$digest" '.[$k] = {ref: $ref, digest: $digest}')
-              fi
-            fi
-          done < "$DIGEST_FILE"
-
-          # Output as JSON string (will be escaped properly by GitHub Actions)
-          echo "images_manifest<<EOF" >> "$GITHUB_OUTPUT"
-          echo "$IMAGES_JSON" >> "$GITHUB_OUTPUT"
-          echo "EOF" >> "$GITHUB_OUTPUT"
-
-          echo "✅ Extracted image digests:"
-          echo "$IMAGES_JSON" | jq '.'
-
-  goreleaser-docker-no-lambda:
-    if: inputs.lambda == false
-    needs: determine-workflows-ref
-    permissions:
-      id-token: write
-      contents: read
-    outputs:
-      images_manifest: ${{ steps.extract-images.outputs.images_manifest }}
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout caller repo
-        uses: actions/checkout@v5
-        with:
-          path: _caller
-          repository: ${{ github.event.repository.full_name }}
-          fetch-depth: 0
-
-      - name: Check for Dockerfile
-        id: check-dockerfile
-        run: |
-          if [ -f "_caller/Dockerfile" ]; then
-            echo "exists=true" >> $GITHUB_OUTPUT
-            echo "Dockerfile found, continuing with job"
-          else
-            echo "exists=false" >> $GITHUB_OUTPUT
-            echo "Dockerfile not found, skipping rest of job"
-          fi
-
-      - name: Checkout connector workflows
-        if: steps.check-dockerfile.outputs.exists == 'true'
-        uses: actions/checkout@v5
-        with:
-          path: _workflows
-          repository: ConductorOne/github-workflows
-          ref: ${{ needs.determine-workflows-ref.outputs.ref }}
-
-      - name: Set up Go
-        if: steps.check-dockerfile.outputs.exists == 'true'
-        uses: actions/setup-go@v6
-        with:
-          go-version-file: "_caller/go.mod"
-
-      - name: Generate goreleaser configs
-        if: steps.check-dockerfile.outputs.exists == 'true'
-        env:
-          REPO_NAME: ${{ github.event.repository.name }}
-        run: |
-          envsubst < _workflows/.goreleaser-docker-template-no-lambda.yaml > _workflows/.goreleaser.docker.yaml
-          echo "_workflows/.goreleaser.docker.yaml:"
-          cat _workflows/.goreleaser.docker.yaml
-
-      - name: Docker Login
-        if: steps.check-dockerfile.outputs.exists == 'true'
-        uses: docker/login-action@v3
-        with:
-          registry: ghcr.io
-          username: ${{ github.repository_owner }}
-          password: ${{ secrets.RELENG_GITHUB_TOKEN }}
-
-      - name: Set up Docker Buildx
-        if: steps.check-dockerfile.outputs.exists == 'true'
-        uses: docker/setup-buildx-action@v3
-
-      - name: Run GoReleaser
-        if: steps.check-dockerfile.outputs.exists == 'true'
-        uses: goreleaser/goreleaser-action@v6
-        with:
-          workdir: _caller
-          version: "~> v2.5"
-          args: release --clean --config ../_workflows/.goreleaser.docker.yaml
-        env:
-          GITHUB_TOKEN: ${{ secrets.RELENG_GITHUB_TOKEN }}
-
-      - name: Extract GHCR image digests from GoReleaser output
-        id: extract-images
-        if: steps.check-dockerfile.outputs.exists == 'true'
-        shell: bash
-        run: |
-          set -euo pipefail
-          cd _caller
-
-          # GoReleaser generates docker_digests.txt in the dist directory
-          DIGEST_FILE="dist/docker_digests.txt"
-          TAG="${{ inputs.tag }}"
-
-          if [ ! -f "$DIGEST_FILE" ]; then
-            echo "::error::docker_digests.txt not found. GoReleaser should generate this file."
-            exit 1
-          fi
-
-          echo "Reading digests from $DIGEST_FILE"
-          # Parse docker_digests.txt file
-          # Format: image_ref@sha256:digest (one per line)
-          # Dynamically extract all images matching the tag
-          IMAGES_JSON="{}"
-
-          while IFS= read -r line; do
-            if [[ "$line" =~ ^([^@]+)@(sha256:[a-f0-9]+)$ ]]; then
-              image_ref="${BASH_REMATCH[1]}"
-              digest="${BASH_REMATCH[2]}"
-              
-              # Only process images matching our tag (exclude 'latest' tags)
-              if [[ "$image_ref" =~ :${TAG}(-.*)?$ ]]; then
-                # Determine the key based on the image reference
-                # If it ends with just the tag (no suffix), it's the index/manifest
-                if [[ "$image_ref" =~ :${TAG}$ ]]; then
-                  key="index"
-                else
-                  # Extract the suffix after the tag (e.g., "-amd64", "-arm64")
-                  # Map common suffixes to platform keys
-                  suffix="${image_ref##*:${TAG}-}"
-                  case "$suffix" in
-                    amd64)
-                      key="linux-amd64"
-                      ;;
-                    arm64)
-                      key="linux-arm64"
-                      ;;
-                    *)
-                      # For any other suffix, use it as-is or map it
-                      # This allows for future platforms like "windows-amd64", "darwin-arm64", etc.
-                      key="linux-${suffix}"
-                      ;;
-                  esac
-                fi
-                
-                # Add to images JSON
-                IMAGES_JSON=$(echo "$IMAGES_JSON" | jq --arg k "$key" --arg ref "$image_ref" --arg digest "$digest" '.[$k] = {ref: $ref, digest: $digest}')
-              fi
-            fi
-          done < "$DIGEST_FILE"
-
-          # Output as JSON string (will be escaped properly by GitHub Actions)
-          echo "images_manifest<<EOF" >> "$GITHUB_OUTPUT"
-          echo "$IMAGES_JSON" >> "$GITHUB_OUTPUT"
-          echo "EOF" >> "$GITHUB_OUTPUT"
-
-          echo "✅ Extracted image digests:"
-          echo "$IMAGES_JSON" | jq '.'
+          python3 -c "
+          import json
+          import os
+          import re
+          import sys
+          repo_name = '${{ github.event.repository.name }}'
+          tag = '${{ inputs.tag }}'
+          version = tag.lstrip('v')
+          digest_file = f'dist/{repo_name}_{version}_digests.txt'
+          if not os.path.exists(digest_file):
+              print(f'::error::Digest file not found: {digest_file}', file=sys.stderr)
+              sys.exit(1)
+          images = {}
+          with open(digest_file) as f:
+              for line in f:
+                  line = line.strip()
+                  if not line or '@sha256:' not in line:
+                      continue
+                  ref, digest = line.split('@', 1)
+                  if re.match(f'^ghcr.io/conductorone/{repo_name}:{version}$', ref):
+                      images['index'] = {'ref': ref, 'digest': digest}
+                  elif re.match(f'^ghcr.io/conductorone/{repo_name}:{version}-amd64$', ref):
+                      images['linux-amd64'] = {'ref': ref, 'digest': digest}
+                  elif re.match(f'^ghcr.io/conductorone/{repo_name}:{version}-arm64$', ref):
+                      images['linux-arm64'] = {'ref': ref, 'digest': digest}
+          required = ['index', 'linux-amd64', 'linux-arm64']
+          missing = [k for k in required if k not in images]
+          if missing:
+              print(f'::error::Could not find all required image digests in {digest_file}', file=sys.stderr)
+              print(f'Missing: {', '.join(missing)}', file=sys.stderr)
+              sys.exit(1)
+          images_json = json.dumps(images, indent=2)
+          with open(os.environ['GITHUB_OUTPUT'], 'a') as f:
+              f.write('images_manifest<<EOF\n')
+              f.write(images_json)
+              f.write('\nEOF\n')
+          print('✅ Extracted image digests:')
+          print(images_json)
+          "
 
   record-connector-registry:
     # require binaries and docker to complete before recording, since we include both in the manifest
-    needs:
-      [
-        goreleaser-binaries,
-        goreleaser-docker-lambda,
-        goreleaser-docker-no-lambda,
-      ]
-    # note: have to use always() to ensure the job isn't skipped before the if condition is evaluated
-    if: always() && needs.goreleaser-binaries.result == 'success' && (needs.goreleaser-docker-lambda.result == 'success' || needs.goreleaser-docker-no-lambda.result == 'success')
+    needs: [goreleaser-binaries, goreleaser-docker]
     permissions:
       id-token: write
       contents: read
@@ -517,26 +345,13 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p dist
-
-          # Write binaries manifest from job output (already enriched with CDN URLs)
           echo '${{ needs.goreleaser-binaries.outputs.binaries_manifest }}' > dist/manifest.json
-
           if [ ! -f "dist/manifest.json" ] || [ ! -s "dist/manifest.json" ]; then
             echo "::error::Binaries manifest not found or empty"
             exit 1
           fi
-
           cd dist
-
-          # Get images manifest from whichever docker job ran
-          IMAGES_MANIFEST=""
-          if [ "${{ needs.goreleaser-docker-lambda.result }}" == "success" ] && [ -n "${{ needs.goreleaser-docker-lambda.outputs.images_manifest }}" ]; then
-            IMAGES_MANIFEST="${{ needs.goreleaser-docker-lambda.outputs.images_manifest }}"
-          elif [ "${{ needs.goreleaser-docker-no-lambda.result }}" == "success" ] && [ -n "${{ needs.goreleaser-docker-no-lambda.outputs.images_manifest }}" ]; then
-            IMAGES_MANIFEST="${{ needs.goreleaser-docker-no-lambda.outputs.images_manifest }}"
-          fi
-
-          # Add images to manifest if available (images are in GHCR, not S3, so no URL enrichment needed)
+          IMAGES_MANIFEST="${{ needs.goreleaser-docker.outputs.images_manifest }}"
           if [ -n "$IMAGES_MANIFEST" ] && [ "$IMAGES_MANIFEST" != "{}" ]; then
             echo "$IMAGES_MANIFEST" > /tmp/images.json
             jq --slurpfile images /tmp/images.json '.images = $images[0]' manifest.json > manifest.json.tmp
@@ -544,7 +359,7 @@ jobs:
             echo "✅ Added images to manifest:"
             jq '.images' manifest.json
           else
-            echo "ℹ️  No images to add to manifest (docker job may have been skipped or no Dockerfile)"
+            echo "ℹ️  No images to add to manifest (docker job may have been skipped if no Dockerfile)"
           fi
 
       - name: Install cosign
@@ -604,70 +419,70 @@ jobs:
               --content-type "application/octet-stream"
           fi
 
-      - name: Configure AWS credentials via OIDC
-        uses: aws-actions/configure-aws-credentials@v5
-        with:
-          # TODO: update this to the real role
-          role-to-assume: "arn:aws:iam::168442440833:role/GitHubActionsRecordBinaryPushRole-${{ github.event.repository.name }}"
-          aws-region: ${{ env.AWS_REGION }}
+      # - name: Configure AWS credentials via OIDC
+      #   uses: aws-actions/configure-aws-credentials@v5
+      #   with:
+      #     # TODO: update this to the real role
+      #     role-to-assume: "arn:aws:iam::168442440833:role/GitHubActionsRecordBinaryPushRole-${{ github.event.repository.name }}"
+      #     aws-region: ${{ env.AWS_REGION }}
 
-      - name: Invoke Lambda with retries
-        run: |
-          set +e    # Disable default fail-fast to support retries
-          if [[ "$ACTIONS_STEP_DEBUG" == "true" ]]; then
-            set -x  # Debug logging
-          fi
+      # - name: Invoke Lambda with retries
+      #   run: |
+      #     set +e    # Disable default fail-fast to support retries
+      #     if [[ "$ACTIONS_STEP_DEBUG" == "true" ]]; then
+      #       set -x  # Debug logging
+      #     fi
 
-          TMPFILE=$(mktemp)
-          MAX_RETRIES=5
-          RETRY_DELAY=10  # seconds
+      #     TMPFILE=$(mktemp)
+      #     MAX_RETRIES=5
+      #     RETRY_DELAY=10  # seconds
 
-          for ((i=1; i<=MAX_RETRIES; i++)); do
-            echo "Attempt $i to invoke Lambda..."
+      #     for ((i=1; i<=MAX_RETRIES; i++)); do
+      #       echo "Attempt $i to invoke Lambda..."
 
-            # TODO: use real lambda name
-            RESPONSE=$(aws lambda invoke \
-              --function-name "${{ github.event.repository.name }}-binary-releases" \
-              --payload "{\"repository\":\"${{ github.event.repository.full_name }}\", \"tag\":\"${{ inputs.tag }}\", \"manifest_url\":\"${{ steps.upload-manifest.outputs.manifest_url }}\"}" \
-              --cli-binary-format raw-in-base64-out \
-              "$TMPFILE" 2>&1)
-            EXIT_CODE=$?
+      #       # TODO: use real lambda name
+      #       RESPONSE=$(aws lambda invoke \
+      #         --function-name "${{ github.event.repository.name }}-binary-releases" \
+      #         --payload "{\"repository\":\"${{ github.event.repository.full_name }}\", \"tag\":\"${{ inputs.tag }}\", \"manifest_url\":\"${{ steps.upload-manifest.outputs.manifest_url }}\"}" \
+      #         --cli-binary-format raw-in-base64-out \
+      #         "$TMPFILE" 2>&1)
+      #       EXIT_CODE=$?
 
-            echo "AWS CLI exited with code: $EXIT_CODE"
-            cat "$TMPFILE"
+      #       echo "AWS CLI exited with code: $EXIT_CODE"
+      #       cat "$TMPFILE"
 
-            STATUS_CODE=$(jq -r '.statusCode' < "$TMPFILE" 2>/dev/null)
+      #       STATUS_CODE=$(jq -r '.statusCode' < "$TMPFILE" 2>/dev/null)
 
-            if [[ $EXIT_CODE -eq 0 && "$STATUS_CODE" == "200" ]]; then
-              echo "Lambda invoked successfully."
-              break
+      #       if [[ $EXIT_CODE -eq 0 && "$STATUS_CODE" == "200" ]]; then
+      #         echo "Lambda invoked successfully."
+      #         break
 
-            elif [[ "$RESPONSE" == *"CodeArtifactUserPendingException"* ]]; then
-              echo "Lambda not ready (CodeArtifactUserPendingException)."
+      #       elif [[ "$RESPONSE" == *"CodeArtifactUserPendingException"* ]]; then
+      #         echo "Lambda not ready (CodeArtifactUserPendingException)."
 
-              if [[ $i -lt $MAX_RETRIES ]]; then
-                WAIT_TIME=$((i * RETRY_DELAY))
-                echo "Retrying in $WAIT_TIME seconds..."
-                sleep "$WAIT_TIME"
-              else
-                echo "Lambda still not ready after $MAX_RETRIES attempts."
-                rm -f "$TMPFILE"
-                exit 1
-              fi
+      #         if [[ $i -lt $MAX_RETRIES ]]; then
+      #           WAIT_TIME=$((i * RETRY_DELAY))
+      #           echo "Retrying in $WAIT_TIME seconds..."
+      #           sleep "$WAIT_TIME"
+      #         else
+      #           echo "Lambda still not ready after $MAX_RETRIES attempts."
+      #           rm -f "$TMPFILE"
+      #           exit 1
+      #         fi
 
-            else
-              echo "Lambda invoke failed with unexpected error: $RESPONSE"
-              rm -f "$TMPFILE"
-              exit 1
-            fi
-          done
+      #       else
+      #         echo "Lambda invoke failed with unexpected error: $RESPONSE"
+      #         rm -f "$TMPFILE"
+      #         exit 1
+      #       fi
+      #     done
 
-          rm -f "$TMPFILE"
+      #     rm -f "$TMPFILE"
 
   record-lambda-registry:
     if: inputs.lambda == true
     # lambda releases are dependent on assets produced in the binaries and docker goreleaser jobs
-    needs: [goreleaser-binaries, goreleaser-docker-lambda]
+    needs: [goreleaser-binaries, goreleaser-docker]
     permissions:
       id-token: write
       contents: read
@@ -736,8 +551,7 @@ jobs:
       [
         determine-workflows-ref,
         goreleaser-binaries,
-        goreleaser-docker-lambda,
-        goreleaser-docker-no-lambda,
+        goreleaser-docker,
         record-connector-registry,
         record-lambda-registry,
       ]
