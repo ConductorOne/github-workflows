@@ -89,27 +89,30 @@ signs:
       - linux-archive
       - windows-archive
       - darwin-archive
-    certificate: "{{ .Env.artifact }}.cert"
+    signature: "{{ .ArtifactPath }}.sig"
+    certificate: "{{ .ArtifactPath }}.cert"
+    env:
+      - COSIGN_EXPERIMENTAL=1
     args:
       - "sign-blob"
       - "--yes"
-      - "--output-signature={{ .Env.signature }}"
-      - "--output-certificate={{ .Env.certificate }}"
-      - "{{ .Env.artifact }}"
-    env:
-      - COSIGN_EXPERIMENTAL=1
+      - "--output-signature=${signature}"
+      - "--output-certificate=${certificate}"
+      - "${artifact}"
+
   - id: cosign-checksums
     cmd: cosign
     artifacts: checksum
-    certificate: "{{ .Env.artifact }}.cert"
+    signature: "{{ .ArtifactPath }}.sig"
+    certificate: "{{ .ArtifactPath }}.cert"
+    env:
+      - COSIGN_EXPERIMENTAL=1
     args:
       - "sign-blob"
       - "--yes"
-      - "--output-signature={{ .Env.signature }}"
-      - "--output-certificate={{ .Env.certificate }}"
-      - "{{ .Env.artifact }}"
-    env:
-      - COSIGN_EXPERIMENTAL=1
+      - "--output-signature=${signature}"
+      - "--output-certificate=${certificate}"
+      - "${artifact}"
 brews:
   - repository:
       owner: conductorone

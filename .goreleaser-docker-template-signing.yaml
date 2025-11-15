@@ -1,6 +1,5 @@
-## NOTE: Consolidated docker template for GoReleaser >= 2.12
-## This template supports both lambda and no-lambda builds
-## Uses docker_signs for image signing with cosign
+## NOTE: replaces .goreleaser-docker-template.yaml and .goreleaser-docker-template-no-lambda.yaml
+## Consolidated docker template for GoReleaser >= 2.12 with optional lambda build and signing
 version: 2
 project_name: "${REPO_NAME}"
 builds:
@@ -16,67 +15,89 @@ builds:
       - arm64
     tags:
       - "baton_lambda_support"
-dockers:
-  - use: buildx
-    goos: linux
-    goarch: amd64
-    image_templates:
-      - "ghcr.io/conductorone/${REPO_NAME}:{{ .Version }}-amd64"
-      - "ghcr.io/conductorone/${REPO_NAME}:latest-amd64"
-    build_flag_templates:
-      - "--platform=linux/amd64"
-      - "--label=org.opencontainers.image.created={{.Date}}"
-      - "--label=org.opencontainers.image.title={{.ProjectName}}"
-      - "--label=org.opencontainers.image.revision={{.FullCommit}}"
-      - "--label=org.opencontainers.image.version={{.Version}}"
-  - use: buildx
-    goos: linux
-    goarch: arm64
-    image_templates:
-      - "ghcr.io/conductorone/${REPO_NAME}:{{ .Version }}-arm64"
-      - "ghcr.io/conductorone/${REPO_NAME}:latest-arm64"
-    build_flag_templates:
-      - "--platform=linux/arm64/v8"
-      - "--label=org.opencontainers.image.created={{.Date}}"
-      - "--label=org.opencontainers.image.title={{.ProjectName}}"
-      - "--label=org.opencontainers.image.revision={{.FullCommit}}"
-      - "--label=org.opencontainers.image.version={{.Version}}"
-  # Lambda-specific docker build (only used when lambda=true)
-  - use: buildx
-    goos: linux
-    goarch: arm64
+dockers_v2:
+  # GHCR amd64 image
+  - images:
+      - "ghcr.io/conductorone/${REPO_NAME}"
+    tags:
+      - "{{ .Version }}-amd64"
+      - "latest-amd64"
+    platforms:
+      - linux/amd64
+    ids:
+      - linux
+    labels:
+      "org.opencontainers.image.created": "{{.Date}}"
+      "org.opencontainers.image.title": "{{.ProjectName}}"
+      "org.opencontainers.image.revision": "{{.FullCommit}}"
+      "org.opencontainers.image.version": "{{.Version}}"
+      "org.opencontainers.image.source": "{{ .GitURL }}"
+      "org.opencontainers.image.description": "ConductorOne Baton connector"
+  # GHCR arm64 image
+  - images:
+      - "ghcr.io/conductorone/${REPO_NAME}"
+    tags:
+      - "{{ .Version }}-arm64"
+      - "latest-arm64"
+    platforms:
+      - linux/arm64/v8
+    ids:
+      - linux
+    labels:
+      "org.opencontainers.image.created": "{{.Date}}"
+      "org.opencontainers.image.title": "{{.ProjectName}}"
+      "org.opencontainers.image.revision": "{{.FullCommit}}"
+      "org.opencontainers.image.version": "{{.Version}}"
+      "org.opencontainers.image.source": "{{ .GitURL }}"
+      "org.opencontainers.image.description": "ConductorOne Baton connector"
+  # GHCR multi-arch manifest (combines amd64 and arm64)
+  - images:
+      - "ghcr.io/conductorone/${REPO_NAME}"
+    tags:
+      - "{{ .Version }}"
+      - latest
+    platforms:
+      - linux/amd64
+      - linux/arm64/v8
+    ids:
+      - linux
+    labels:
+      "org.opencontainers.image.created": "{{.Date}}"
+      "org.opencontainers.image.title": "{{.ProjectName}}"
+      "org.opencontainers.image.revision": "{{.FullCommit}}"
+      "org.opencontainers.image.version": "{{.Version}}"
+      "org.opencontainers.image.source": "{{ .GitURL }}"
+      "org.opencontainers.image.description": "ConductorOne Baton connector"
+  # Lambda-specific ECR image (only used when lambda=true)
+  - images:
+      - "168442440833.dkr.ecr.us-west-2.amazonaws.com/${REPO_NAME}"
+    tags:
+      - "{{ .Version }}"
+    platforms:
+      - linux/arm64/v8
     dockerfile: Dockerfile.lambda
-    skip_build: '{{ ne .Env.LAMBDA "true" }}'
-    image_templates:
-      - "168442440833.dkr.ecr.us-west-2.amazonaws.com/${REPO_NAME}:{{ .Version }}-arm64"
-    build_flag_templates:
-      - "--platform=linux/arm64/v8"
-      - "--label=org.opencontainers.image.created={{.Date}}"
-      - "--label=org.opencontainers.image.title={{.ProjectName}}"
-      - "--label=org.opencontainers.image.revision={{.FullCommit}}"
-      - "--label=org.opencontainers.image.version={{.Version}}"
-docker_manifests:
-  - name_template: ghcr.io/conductorone/${REPO_NAME}:{{ .Version }}
-    image_templates:
-      - ghcr.io/conductorone/${REPO_NAME}:{{ .Version }}-amd64
-      - ghcr.io/conductorone/${REPO_NAME}:{{ .Version }}-arm64
-  - name_template: ghcr.io/conductorone/${REPO_NAME}:latest
-    image_templates:
-      - ghcr.io/conductorone/${REPO_NAME}:latest-amd64
-      - ghcr.io/conductorone/${REPO_NAME}:latest-arm64
+    ids:
+      - linux
+    disable: '{{ ne .Env.LAMBDA "true" }}'
+    labels:
+      "org.opencontainers.image.created": "{{.Date}}"
+      "org.opencontainers.image.title": "{{.ProjectName}}"
+      "org.opencontainers.image.revision": "{{.FullCommit}}"
+      "org.opencontainers.image.version": "{{.Version}}"
 docker_digest:
   name_template: "{{ .ProjectName }}_{{ .Version }}_digests.txt"
+# sign each image by digest
 docker_signs:
   - id: cosign-images
     cmd: cosign
-    args:
-      - sign
-      - --yes
-      - --output-signature={{ .Env.signature }}
-      - --output-certificate={{ .Env.certificate }}
-      - "{{ .Env.artifact }}@{{ .Env.digest }}"
+    artifacts: images
     env:
       - COSIGN_EXPERIMENTAL=1
+    args:
+      - "sign"
+      - "--yes"
+      - "--certificate-oidc-issuer=https://token.actions.githubusercontent.com"
+      - "${artifact}@${digest}"
 checksum:
   disable: true
 release:
