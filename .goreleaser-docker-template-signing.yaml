@@ -98,7 +98,7 @@ docker_signs:
       - "sign"
       - "--yes"
       - "--certificate-oidc-issuer=https://token.actions.githubusercontent.com"
-      - "${artifact}@${digest}"
+      - "{{ .Env.artifact }}@{{ .Env.digest }}"
 checksum:
   disable: true
 release:
