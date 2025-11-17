@@ -1,0 +1,4 @@
+FROM gcr.io/distroless/static-debian11:nonroot
+ARG TARGETPLATFORM
+ENTRYPOINT ["/${REPO_NAME}"]
+COPY ${TARGETPLATFORM}/${REPO_NAME} /${REPO_NAME}

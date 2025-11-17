@@ -10,7 +10,17 @@ on:
         required: false
         type: boolean
         default: true
-        description: "Whether to release with Lambda support."
+        description: "Whether to release with Lambda image support."
+      docker:
+        required: false
+        type: boolean
+        default: true
+        description: "Whether to release with Docker image support."
+      msi:
+        required: false
+        type: boolean
+        default: false
+        description: "Whether to release with MSI support."
     secrets:
       RELENG_GITHUB_TOKEN:
         required: true
@@ -28,7 +38,6 @@ on:
 env:
   CDN_BASE_URL: "https://d1v8j4ofspo67g.cloudfront.net"
   S3_BUCKET: "gontzess-releases-registry"
-  S3_REGION: "us-west-2"
 
 jobs:
   determine-workflows-ref:
@@ -52,6 +61,9 @@ jobs:
     permissions:
       contents: read
       id-token: write # <-- needed for cosign keyless (OIDC)
+    outputs:
+      s3_directory: ${{ steps.s3-directory.outputs.S3_DIRECTORY }}
+      binaries_manifest: ${{ steps.generate-binaries-manifest.outputs.binaries_manifest }}
     steps:
       - name: Checkout caller repo
         uses: actions/checkout@v5
@@ -85,7 +97,7 @@ jobs:
         env:
           REPO_NAME: ${{ github.event.repository.name }}
           S3_BUCKET: ${{ env.S3_BUCKET }}
-          S3_REGION: ${{ env.S3_REGION }}
+          S3_REGION: "us-west-2"
           S3_DIRECTORY: ${{ steps.s3-directory.outputs.S3_DIRECTORY }}
         run: |
           envsubst < _workflows/.gon-amd64-template.json > _workflows/.gon-amd64.json
@@ -114,7 +126,7 @@ jobs:
         uses: aws-actions/configure-aws-credentials@v5
         with:
           role-to-assume: arn:aws:iam::323258005321:role/gontzess-releases-binary-pusher-ConductorOne-baton-github-test
-          aws-region: ${{ env.S3_REGION }}
+          aws-region: us-west-2
 
       - name: Run GoReleaser
         uses: goreleaser/goreleaser-action@v6
@@ -129,7 +141,7 @@ jobs:
 
       # TODO: move to a go file with proper structs
       - name: Generate manifest.json
-        id: manifest
+        id: generate-binaries-manifest
         shell: bash
         run: |
           set -euo pipefail
@@ -164,15 +176,8 @@ jobs:
           add_asset linux-amd64    "$(ls -1 *linux-amd64.tar.gz  2>/dev/null | head -n1)" application/gzip
           add_asset windows-amd64  "$(ls -1 *windows-amd64.zip   2>/dev/null | head -n1)" application/zip
           add_asset checksums      "$(ls -1 *checksums.txt       2>/dev/null | head -n1)" text/plain
-          echo "path=$PWD/manifest.json" >> "$GITHUB_OUTPUT"
 
-      # TODO: move to a go file with proper structs
-      - name: Enrich manifest with CDN URLs
-        shell: bash
-        run: |
-          set -euo pipefail
           BASE="${{ env.CDN_BASE_URL }}/${{ steps.s3-directory.outputs.S3_DIRECTORY }}/"
-          cd _caller/dist
           enrich_key () {
             local key="$1"
             local fname
@@ -198,31 +203,276 @@ jobs:
              | .certificateHref = ($base + "manifest.json.cert")' \
             manifest.json > .t && mv .t manifest.json
 
+          # Output manifest content as multiline output
+          echo "binaries_manifest<<EOF" >> "$GITHUB_OUTPUT"
+          cat manifest.json >> "$GITHUB_OUTPUT"
+          echo "EOF" >> "$GITHUB_OUTPUT"
+
+  goreleaser-docker:
+    if: inputs.docker == true || inputs.lambda == true
+    needs: determine-workflows-ref
+    permissions:
+      id-token: write
+      contents: read
+    outputs:
+      images_manifest: ${{ steps.extract-images.outputs.images_manifest }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout caller repo
+        uses: actions/checkout@v5
+        with:
+          path: _caller
+          repository: ${{ github.event.repository.full_name }}
+          fetch-depth: 0
+
+      - name: Configure AWS credentials via OIDC
+        if: inputs.lambda == true
+        uses: aws-actions/configure-aws-credentials@v5
+        with:
+          role-to-assume: "arn:aws:iam::168442440833:role/GitHubActionsECRPushRole-${{ github.event.repository.name }}"
+          aws-region: us-west-2
+
+      - name: Login to Amazon ECR
+        if: inputs.lambda == true
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Checkout connector workflows
+        if: inputs.docker == true || inputs.lambda == true
+        uses: actions/checkout@v5
+        with:
+          path: _workflows
+          repository: ConductorOne/github-workflows
+          ref: ${{ needs.determine-workflows-ref.outputs.ref }}
+
+      - name: Set up Go
+        if: inputs.docker == true || inputs.lambda == true
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: "_caller/go.mod"
+
+      - name: Install cosign
+        if: inputs.docker == true || inputs.lambda == true
+        uses: sigstore/cosign-installer@v3
+
+      - name: Generate goreleaser configs
+        if: inputs.docker == true || inputs.lambda == true
+        env:
+          REPO_NAME: ${{ github.event.repository.name }}
+        run: |
+          envsubst < _workflows/.goreleaser-docker-template-signing.yaml > _workflows/.goreleaser.docker.yaml
+          echo "_workflows/.goreleaser.docker.yaml:"
+          cat _workflows/.goreleaser.docker.yaml
+
+      - name: Generate Dockerfiles from templates
+        if: inputs.docker == true || inputs.lambda == true
+        env:
+          REPO_NAME: ${{ github.event.repository.name }}
+        run: |
+          # Remove old Dockerfiles if they exist
+          rm -f _caller/Dockerfile _caller/Dockerfile.lambda
+          # Copy Dockerfile template if docker is enabled
+          if [ "${{ inputs.docker }}" == "true" ]; then
+            envsubst '$REPO_NAME' < _workflows/.Dockerfile-template > _caller/Dockerfile
+            echo "Generated Dockerfile:"
+            cat _caller/Dockerfile
+          fi
+          # Copy lambda Dockerfile template if lambda is enabled
+          if [ "${{ inputs.lambda }}" == "true" ]; then
+            envsubst '$REPO_NAME' < _workflows/.Dockerfile-lambda-template > _caller/Dockerfile.lambda
+            echo "Generated Dockerfile.lambda:"
+            cat _caller/Dockerfile.lambda
+          fi
+
+      - name: Docker Login
+        if: inputs.docker == true
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.repository_owner }}
+          password: ${{ secrets.RELENG_GITHUB_TOKEN }}
+
+      - name: Set up QEMU
+        if: inputs.docker == true || inputs.lambda == true
+        uses: docker/setup-qemu-action@v3
+        with:
+          platforms: linux/arm64
+
+      - name: Set up Docker Buildx
+        if: inputs.docker == true || inputs.lambda == true
+        uses: docker/setup-buildx-action@v3
+
+      - name: Run GoReleaser
+        if: inputs.docker == true || inputs.lambda == true
+        uses: goreleaser/goreleaser-action@v6
+        with:
+          workdir: _caller
+          version: "~> v2.12"
+          args: release --clean --config ../_workflows/.goreleaser.docker.yaml
+        env:
+          GITHUB_TOKEN: ${{ secrets.RELENG_GITHUB_TOKEN }}
+          COSIGN_EXPERIMENTAL: "1"
+          LAMBDA: ${{ inputs.lambda }}
+          DOCKER: ${{ inputs.docker }}
+
+      - name: Extract GHCR image digests from GoReleaser output
+        id: extract-images
+        if: inputs.docker == true
+        working-directory: _caller
+        env:
+          REPO_NAME: ${{ github.event.repository.name }}
+          TAG: ${{ inputs.tag }}
+        run: |
+          python3 - << 'PY'
+          import json, os, sys
+
+          repo_name = os.environ['REPO_NAME']
+          tag = os.environ['TAG']           # e.g. v0.1.65
+          version = tag.lstrip('v')        # e.g. 0.1.65
+          digest_file = f"dist/{repo_name}_{version}_digests.txt"
+
+          if not os.path.exists(digest_file):
+              print(f"::error::Digest file not found: {digest_file}", file=sys.stderr)
+              sys.exit(1)
+
+          images = {}
+          with open(digest_file, "r", encoding="utf-8") as f:
+              for raw in f:
+                  line = raw.strip()
+                  if not line:
+                      continue
+
+                  # docker_digest prints "<digest>  <ref>"
+                  parts = line.split()
+                  if len(parts) != 2:
+                      continue
+                  digest_hex, ref = parts
+
+                  # We only care about GHCR; skip ECR lines
+                  if not ref.startswith("ghcr.io/conductorone/"):
+                      continue
+
+                  digest = f"sha256:{digest_hex}"
+                  # multi-arch image
+                  if ref.endswith(f":{version}"):
+                      images["index"] = {"ref": ref, "digest": digest}
+                  elif ref.endswith(f":{version}-amd64"):
+                      images["linux-amd64"] = {"ref": ref, "digest": digest}
+                  elif ref.endswith(f":{version}-arm64"):
+                      images["linux-arm64"] = {"ref": ref, "digest": digest}
+
+          if "index" not in images:
+              with open(digest_file, "r", encoding="utf-8") as f:
+                  content = f.read()
+              print(f"::error::Could not find GHCR index line in {digest_file}", file=sys.stderr)
+              print("Contents of digest file:", file=sys.stderr)
+              print(content, file=sys.stderr)
+              sys.exit(1)
+
+          images_json = json.dumps(images, indent=2)
+          github_output = os.environ["GITHUB_OUTPUT"]
+          with open(github_output, "a", encoding="utf-8") as f:
+              f.write("images_manifest<<EOF\n")
+              f.write(images_json)
+              f.write("\nEOF\n")
+
+          print("✅ Extracted image digests:")
+          print(images_json)
+          PY
+
+  record-connector-registry:
+    # require binaries and docker to complete before recording, since we include both in the manifest
+    needs: [goreleaser-binaries, goreleaser-docker]
+    permissions:
+      id-token: write
+      contents: read
+    runs-on: ubuntu-latest
+    steps:
+      - name: Prepare manifest with images
+        shell: bash
+        env:
+          BINARIES_MANIFEST: ${{ needs.goreleaser-binaries.outputs.binaries_manifest }}
+          IMAGES_MANIFEST: ${{ needs.goreleaser-docker.outputs.images_manifest }}
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+          # Write binaries manifest to file, preserving JSON formatting
+          printf '%s\n' "$BINARIES_MANIFEST" > dist/binaries_manifest.json
+          # Validate the JSON
+          if ! jq empty dist/binaries_manifest.json >/dev/null 2>&1; then
+            echo "::error::Invalid JSON in binaries_manifest output"
+            echo "Raw content:"
+            cat dist/binaries_manifest.json
+            exit 1
+          fi
+          if [ ! -s "dist/binaries_manifest.json" ]; then
+            echo "::error::Binaries manifest is empty"
+            exit 1
+          fi
+          # Start with binaries manifest as the base
+          cp dist/binaries_manifest.json dist/manifest.json
+          # Merge images if present
+          if [ -n "$IMAGES_MANIFEST" ] && [ "$IMAGES_MANIFEST" != "{}" ]; then
+            # Write images manifest to temp file
+            printf '%s\n' "$IMAGES_MANIFEST" > /tmp/images.json
+            # Validate the JSON
+            if ! jq empty /tmp/images.json >/dev/null 2>&1; then
+              echo "::error::Invalid JSON in images_manifest output"
+              echo "Raw content:"
+              cat /tmp/images.json
+              exit 1
+            fi
+            # Merge images into manifest
+            jq --slurpfile images /tmp/images.json '.images = $images[0]' dist/manifest.json > dist/manifest.json.tmp
+            mv dist/manifest.json.tmp dist/manifest.json
+            echo "✅ Added images to manifest:"
+            jq '.images' dist/manifest.json
+          else
+            echo "ℹ️  No images to add to manifest (docker job may have been skipped if no Dockerfile)"
+          fi
+
+      - name: Install cosign
+        uses: sigstore/cosign-installer@v3
+
+      - name: Configure AWS credentials via OIDC
+        uses: aws-actions/configure-aws-credentials@v5
+        with:
+          role-to-assume: arn:aws:iam::323258005321:role/gontzess-releases-binary-pusher-ConductorOne-baton-github-test
+          aws-region: us-west-2
+
       - name: Sign manifest.json
         env: { COSIGN_EXPERIMENTAL: "1" }
         shell: bash
         run: |
           set -euo pipefail
-          cd _caller/dist
+          cd dist
           cosign sign-blob --yes "manifest.json" \
             --output-signature "manifest.json.sig" \
             --output-certificate "manifest.json.cert"
 
       - name: Upload manifest.json to S3
+        id: upload-manifest
         shell: bash
         run: |
           set -euo pipefail
           BUCKET="${{ env.S3_BUCKET }}"
-          DIRECTORY="${{ steps.s3-directory.outputs.S3_DIRECTORY }}"
-          cd _caller/dist
+          DIRECTORY="${{ needs.goreleaser-binaries.outputs.s3_directory }}"
+          CDN_BASE="${{ env.CDN_BASE_URL }}"
+          cd dist
           # manifest.json is required
           if [ ! -f "manifest.json" ]; then
             echo "::error::manifest.json not found in $(pwd)"
             exit 1
           fi
-          aws s3 cp "manifest.json" "s3://$BUCKET/$DIRECTORY/manifest.json" \
+          if aws s3 cp "manifest.json" "s3://$BUCKET/$DIRECTORY/manifest.json" \
             --cache-control "public,max-age=31536000,immutable" \
-            --content-type "application/json"
+            --content-type "application/json"; then
+            MANIFEST_URL="$CDN_BASE/$DIRECTORY/manifest.json"
+            echo "manifest_url=$MANIFEST_URL" >> "$GITHUB_OUTPUT"
+            echo "✅ Manifest uploaded successfully: $MANIFEST_URL"
+          else
+            echo "::error::Failed to upload manifest.json to S3"
+            exit 1
+          fi
           if [ -f "manifest.json.sig" ]; then
             aws s3 cp "manifest.json.sig" "s3://$BUCKET/$DIRECTORY/manifest.json.sig" \
               --cache-control "public,max-age=31536000,immutable" \
@@ -234,100 +484,70 @@ jobs:
               --content-type "application/octet-stream"
           fi
 
-  goreleaser-docker-lambda:
+      # - name: Configure AWS credentials via OIDC
+      #   uses: aws-actions/configure-aws-credentials@v5
+      #   with:
+      #     # TODO: update this to the real role
+      #     role-to-assume: "arn:aws:iam::168442440833:role/GitHubActionsRecordBinaryPushRole-${{ github.event.repository.name }}"
+      #     aws-region: us-west-2
+
+      # - name: Invoke Lambda with retries
+      #   run: |
+      #     set +e    # Disable default fail-fast to support retries
+      #     if [[ "$ACTIONS_STEP_DEBUG" == "true" ]]; then
+      #       set -x  # Debug logging
+      #     fi
+
+      #     TMPFILE=$(mktemp)
+      #     MAX_RETRIES=5
+      #     RETRY_DELAY=10  # seconds
+
+      #     for ((i=1; i<=MAX_RETRIES; i++)); do
+      #       echo "Attempt $i to invoke Lambda..."
+
+      #       # TODO: use real lambda name
+      #       RESPONSE=$(aws lambda invoke \
+      #         --function-name "${{ github.event.repository.name }}-binary-releases" \
+      #         --payload "{\"repository\":\"${{ github.event.repository.full_name }}\", \"tag\":\"${{ inputs.tag }}\", \"manifest_url\":\"${{ steps.upload-manifest.outputs.manifest_url }}\"}" \
+      #         --cli-binary-format raw-in-base64-out \
+      #         "$TMPFILE" 2>&1)
+      #       EXIT_CODE=$?
+
+      #       echo "AWS CLI exited with code: $EXIT_CODE"
+      #       cat "$TMPFILE"
+
+      #       STATUS_CODE=$(jq -r '.statusCode' < "$TMPFILE" 2>/dev/null)
+
+      #       if [[ $EXIT_CODE -eq 0 && "$STATUS_CODE" == "200" ]]; then
+      #         echo "Lambda invoked successfully."
+      #         break
+
+      #       elif [[ "$RESPONSE" == *"CodeArtifactUserPendingException"* ]]; then
+      #         echo "Lambda not ready (CodeArtifactUserPendingException)."
+
+      #         if [[ $i -lt $MAX_RETRIES ]]; then
+      #           WAIT_TIME=$((i * RETRY_DELAY))
+      #           echo "Retrying in $WAIT_TIME seconds..."
+      #           sleep "$WAIT_TIME"
+      #         else
+      #           echo "Lambda still not ready after $MAX_RETRIES attempts."
+      #           rm -f "$TMPFILE"
+      #           exit 1
+      #         fi
+
+      #       else
+      #         echo "Lambda invoke failed with unexpected error: $RESPONSE"
+      #         rm -f "$TMPFILE"
+      #         exit 1
+      #       fi
+      #     done
+
+      #     rm -f "$TMPFILE"
+
+  record-lambda-registry:
     if: inputs.lambda == true
-    needs: determine-workflows-ref
-    permissions:
-      id-token: write
-      contents: read
-    runs-on: ubuntu-latest
-    steps:
-      - name: Configure AWS credentials via OIDC
-        uses: aws-actions/configure-aws-credentials@v5
-        with:
-          role-to-assume: "arn:aws:iam::168442440833:role/GitHubActionsECRPushRole-${{ github.event.repository.name }}"
-          aws-region: us-west-2
-
-      - name: Login to Amazon ECR
-        uses: aws-actions/amazon-ecr-login@v2
-
-      - name: Checkout caller repo
-        uses: actions/checkout@v5
-        with:
-          path: _caller
-          repository: ${{ github.event.repository.full_name }}
-          fetch-depth: 0
-
-      - name: Checkout connector workflows
-        uses: actions/checkout@v5
-        with:
-          path: _workflows
-          repository: ConductorOne/github-workflows
-          ref: ${{ needs.determine-workflows-ref.outputs.ref }}
-
-      - name: Set up Go
-        uses: actions/setup-go@v6
-        with:
-          go-version-file: "_caller/go.mod"
-
-      - name: Generate goreleaser configs
-        env:
-          REPO_NAME: ${{ github.event.repository.name }}
-        run: |
-          envsubst < _workflows/.goreleaser-docker-template.yaml > _workflows/.goreleaser.docker.yaml
-          echo "_workflows/.goreleaser.docker.yaml:"
-          cat _workflows/.goreleaser.docker.yaml
-
-      - name: Check if ECR images already exist
-        id: check-ecr-images
-        run: |
-          REPO_NAME="${{ github.event.repository.name }}"
-          # Strip "v" prefix from tag to match GoReleaser version format
-          TAG="${{ inputs.tag }}"
-          VERSION="${TAG#v}"
-
-          echo "Checking if ECR image ${REPO_NAME}:${VERSION}-arm64 exists"
-
-          # Check if the arm64 image already exists
-          if aws ecr describe-images --repository-name "${REPO_NAME}" --image-ids imageTag="${VERSION}-arm64" --region us-west-2 >/dev/null 2>&1; then
-            echo "ECR image ${REPO_NAME}:${VERSION}-arm64 already exists"
-            echo "images_exist=true" >> $GITHUB_OUTPUT
-          else
-            echo "ECR image ${REPO_NAME}:${VERSION}-arm64 does not exist"
-            echo "images_exist=false" >> $GITHUB_OUTPUT
-          fi
-
-      - name: Docker Login
-        if: steps.check-ecr-images.outputs.images_exist != 'true'
-        uses: docker/login-action@v3
-        with:
-          registry: ghcr.io
-          username: ${{ github.repository_owner }}
-          password: ${{ secrets.RELENG_GITHUB_TOKEN }}
-
-      - name: Set up Docker Buildx
-        if: steps.check-ecr-images.outputs.images_exist != 'true'
-        uses: docker/setup-buildx-action@v3
-
-      - name: Run GoReleaser
-        if: steps.check-ecr-images.outputs.images_exist != 'true'
-        uses: goreleaser/goreleaser-action@v6
-        with:
-          workdir: _caller
-          version: "~> v2.5"
-          args: release --clean --config ../_workflows/.goreleaser.docker.yaml
-        env:
-          GITHUB_TOKEN: ${{ secrets.RELENG_GITHUB_TOKEN }}
-
-      - name: Skip GoReleaser - images already exist
-        if: steps.check-ecr-images.outputs.images_exist == 'true'
-        run: |
-          echo "Skipping GoReleaser because ECR images already exist for tag ${{ inputs.tag }}"
-
-  record-lambda-release:
-    if: inputs.lambda == true
-    # lambda releases are dependent on assets produced in both goreleaser jobs
-    needs: [goreleaser-binaries, goreleaser-docker-lambda]
+    # lambda releases are dependent on assets produced in the binaries and docker goreleaser jobs
+    needs: [goreleaser-binaries, goreleaser-docker]
     permissions:
       id-token: write
       contents: read
@@ -391,102 +611,14 @@ jobs:
 
           rm -f "$TMPFILE"
 
-  goreleaser-docker-no-lambda:
-    if: inputs.lambda == false
-    needs: determine-workflows-ref
-    permissions:
-      id-token: write
-      contents: read
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout caller repo
-        uses: actions/checkout@v5
-        with:
-          path: _caller
-          repository: ${{ github.event.repository.full_name }}
-          fetch-depth: 0
-
-      - name: Check for Dockerfile
-        id: check-dockerfile
-        run: |
-          if [ -f "_caller/Dockerfile" ]; then
-            echo "exists=true" >> $GITHUB_OUTPUT
-            echo "Dockerfile found, continuing with job"
-          else
-            echo "exists=false" >> $GITHUB_OUTPUT
-            echo "Dockerfile not found, skipping rest of job"
-          fi
-
-      - name: Checkout connector workflows
-        if: steps.check-dockerfile.outputs.exists == 'true'
-        uses: actions/checkout@v5
-        with:
-          path: _workflows
-          repository: ConductorOne/github-workflows
-          ref: ${{ needs.determine-workflows-ref.outputs.ref }}
-
-      - name: Set up Go
-        if: steps.check-dockerfile.outputs.exists == 'true'
-        uses: actions/setup-go@v6
-        with:
-          go-version-file: "_caller/go.mod"
-
-      - name: Generate goreleaser configs
-        if: steps.check-dockerfile.outputs.exists == 'true'
-        env:
-          REPO_NAME: ${{ github.event.repository.name }}
-        run: |
-          envsubst < _workflows/.goreleaser-docker-template-no-lambda.yaml > _workflows/.goreleaser.docker.yaml
-          echo "_workflows/.goreleaser.docker.yaml:"
-          cat _workflows/.goreleaser.docker.yaml
-
-      - name: Docker Login
-        if: steps.check-dockerfile.outputs.exists == 'true'
-        uses: docker/login-action@v3
-        with:
-          registry: ghcr.io
-          username: ${{ github.repository_owner }}
-          password: ${{ secrets.RELENG_GITHUB_TOKEN }}
-
-      - name: Set up Docker Buildx
-        if: steps.check-dockerfile.outputs.exists == 'true'
-        uses: docker/setup-buildx-action@v3
-
-      - name: Run GoReleaser
-        if: steps.check-dockerfile.outputs.exists == 'true'
-        uses: goreleaser/goreleaser-action@v6
-        with:
-          workdir: _caller
-          version: "~> v2.5"
-          args: release --clean --config ../_workflows/.goreleaser.docker.yaml
-        env:
-          GITHUB_TOKEN: ${{ secrets.RELENG_GITHUB_TOKEN }}
-
-  # TODO: implement once pulumi is set up
-  # rename to record-binaries-release?
-  record-release:
-    needs: [
-        goreleaser-binaries,
-        # probably should require docker to complete before saying it's successful, but
-        # not strictly necessary if we decide not to include image urls in the manifest.json ...
-        goreleaser-docker-lambda,
-        goreleaser-docker-no-lambda,
-      ]
-    runs-on: ubuntu-latest
-    steps:
-      - name: Record release
-        run: |
-          echo "Placeholder for recording release to binaries registry"
-
   notify-release-failure:
     needs:
       [
         determine-workflows-ref,
         goreleaser-binaries,
-        goreleaser-docker-lambda,
-        goreleaser-docker-no-lambda,
-        record-lambda-release,
-        record-release,
+        goreleaser-docker,
+        record-connector-registry,
+        record-lambda-registry,
       ]
     if: failure()
     permissions:

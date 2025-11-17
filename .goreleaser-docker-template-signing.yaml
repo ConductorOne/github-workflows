@@ -1,0 +1,73 @@
+## NOTE: replaces .goreleaser-docker-template.yaml and .goreleaser-docker-template-no-lambda.yaml
+## Consolidated docker template for GoReleaser >= 2.12 with optional lambda build and signing
+version: 2
+project_name: "${REPO_NAME}"
+builds:
+  - binary: "${REPO_NAME}"
+    env:
+      - CGO_ENABLED=0
+    id: linux
+    main: ./cmd/${REPO_NAME}
+    goos:
+      - linux
+    goarch:
+      - amd64
+      - arm64
+    tags:
+      - "baton_lambda_support"
+dockers_v2:
+  - id: ghcr
+    images:
+      - "ghcr.io/conductorone/${REPO_NAME}"
+    tags:
+      - "{{ .Version }}"
+      - latest
+    platforms:
+      - linux/amd64
+      - linux/arm64
+    dockerfile: Dockerfile
+    ids:
+      - linux
+    disable: '{{ ne .Env.DOCKER "true" }}'
+    labels:
+      "org.opencontainers.image.created": "{{.Date}}"
+      "org.opencontainers.image.title": "{{.ProjectName}}"
+      "org.opencontainers.image.revision": "{{.FullCommit}}"
+      "org.opencontainers.image.version": "{{.Version}}"
+      "org.opencontainers.image.source": "{{ .GitURL }}"
+      "org.opencontainers.image.description": "ConductorOne Baton connector"
+  - id: ecr-lambda
+    images:
+      - "168442440833.dkr.ecr.us-west-2.amazonaws.com/${REPO_NAME}"
+    tags:
+      - "{{ .Version }}"
+    platforms:
+      - linux/arm64
+    dockerfile: Dockerfile.lambda
+    ids:
+      - linux
+    disable: '{{ ne .Env.LAMBDA "true" }}'
+    labels:
+      "org.opencontainers.image.created": "{{.Date}}"
+      "org.opencontainers.image.title": "{{.ProjectName}}"
+      "org.opencontainers.image.revision": "{{.FullCommit}}"
+      "org.opencontainers.image.version": "{{.Version}}"
+docker_digest:
+  name_template: "{{ .ProjectName }}_{{ .Version }}_digests.txt"
+# sign each image by digest
+docker_signs:
+  - id: cosign-images
+    output: true
+    cmd: cosign
+    env:
+      - COSIGN_EXPERIMENTAL=1
+    args:
+      - "sign"
+      - "--yes"
+      - "{{ .Env.artifact }}@{{ .Env.digest }}"
+checksum:
+  disable: true
+release:
+  disable: true
+changelog:
+  disable: true

@@ -83,6 +83,7 @@ sboms:
   - artifacts: archive
 signs:
   - id: cosign-archives
+    output: true
     cmd: cosign
     artifacts: archive
     ids:
@@ -99,6 +100,7 @@ signs:
     env:
       - COSIGN_EXPERIMENTAL=1
   - id: cosign-checksums
+    output: true
     cmd: cosign
     artifacts: checksum
     certificate: "{{ .Env.artifact }}.cert"
