@@ -1,13 +1,13 @@
-# Connector Account Status Test Action
+# Connector Account Status Lifecycle Test Action
 
-This action tests disable/enable account status changes for a baton connector that supports these capabilities.
+This action tests disable/enable account status changes for a baton connector that supports these capabilities. This is part of the lifecycle actions category, specifically scoped to account status (enable/disable) functionality.
 
 ## Usage
 
 ### Basic Usage (Default Configuration)
 ```yaml
 - name: Test Account Status Changes
-  uses: ./.github/actions/account-status-test
+  uses: ./.github/actions/account-status-lifecycle-test
   with:
     connector: './my-connector'
     account-id: 'user-12345'
@@ -16,7 +16,7 @@ This action tests disable/enable account status changes for a baton connector th
 ### Custom Action Names and Parameters
 ```yaml
 - name: Test Account Status Changes
-  uses: ./.github/actions/account-status-test
+  uses: ./.github/actions/account-status-lifecycle-test
   with:
     connector: './my-connector'
     account-id: 'user-12345'
@@ -28,7 +28,7 @@ This action tests disable/enable account status changes for a baton connector th
 ### Test Only Enable Action
 ```yaml
 - name: Test Enable Only
-  uses: ./.github/actions/account-status-test
+  uses: ./.github/actions/account-status-lifecycle-test
   with:
     connector: './my-connector'
     account-id: 'user-12345'
@@ -38,7 +38,7 @@ This action tests disable/enable account status changes for a baton connector th
 ### Test Only Disable Action
 ```yaml
 - name: Test Disable Only
-  uses: ./.github/actions/account-status-test
+  uses: ./.github/actions/account-status-lifecycle-test
   with:
     connector: './my-connector'
     account-id: 'user-12345'
@@ -48,7 +48,7 @@ This action tests disable/enable account status changes for a baton connector th
 ### Test Enable Then Disable
 ```yaml
 - name: Test Enable Then Disable
-  uses: ./.github/actions/account-status-test
+  uses: ./.github/actions/account-status-lifecycle-test
   with:
     connector: './my-connector'
     account-id: 'user-12345'
@@ -66,8 +66,9 @@ This action tests disable/enable account status changes for a baton connector th
   - Examples: `"enable_user"`, `"enableUser"`, `"activate_user"`, etc.
 - `disable-action-name`: Name of the action to disable the account (default: `"disable_user"`)
   - Examples: `"disable_user"`, `"disableUser"`, `"deactivate_user"`, etc.
-- `id-parameter-name`: Parameter name to send the account ID in the action (default: `"userId"`)
-  - Examples: `"userId"`, `"user-id"`, `"accountId"`, `"id"`, etc.
+- `id-parameter-name`: Parameter name to send the account ID in the action (default: `"user_id"`)
+  - Examples: `"user_id"`, `"user-id"`, `"accountId"`, `"id"`, etc.
+  - Note: Most connectors use `"user_id"` (snake_case) as the convention
 - `test-flow`: Test flow to execute (default: `"disable-enable"`)
   - `"disable-enable"`: Disable the account, then enable it (default)
   - `"enable-disable"`: Enable the account, then disable it
@@ -123,14 +124,14 @@ Different connectors may use different action names and parameter names. This ac
 - Some connectors use different names: `activate_user`, `deactivate_user`, etc.
 
 ### Parameter Names
-- Some connectors expect: `userId`
-- Some connectors expect: `user-id`
+- Most connectors use: `user_id` (snake_case) - this is the default and convention
+- Some connectors expect: `user-id` (kebab-case)
 - Some connectors expect: `accountId` or `id`
 
 ### Example: Custom Connector Configuration
 ```yaml
 - name: Test Custom Connector
-  uses: ./.github/actions/account-status-test
+  uses: ./.github/actions/account-status-lifecycle-test
   with:
     connector: './custom-connector'
     account-id: 'user-12345'
@@ -150,4 +151,5 @@ Use this action when you want to test that your connector properly supports:
 - Different action naming conventions
 - Testing only one direction (enable or disable) when needed
 
-This action is separate from other test actions since not all connectors support account status change capabilities.
+This action is separate from other test actions since not all connectors support account status change capabilities. It is specifically scoped to account status lifecycle actions (enable/disable), not all lifecycle actions (which may include update_profile, etc.).
+

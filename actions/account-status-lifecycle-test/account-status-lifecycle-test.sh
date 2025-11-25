@@ -20,7 +20,7 @@ fi
 # Set defaults
 ENABLE_ACTION_NAME="${ENABLE_ACTION_NAME:-enable_user}"
 DISABLE_ACTION_NAME="${DISABLE_ACTION_NAME:-disable_user}"
-ID_PARAMETER_NAME="${ID_PARAMETER_NAME:-userId}"
+ID_PARAMETER_NAME="${ID_PARAMETER_NAME:-user_id}"
 TEST_FLOW="${TEST_FLOW:-disable-enable}"
 
 # Validate test flow
