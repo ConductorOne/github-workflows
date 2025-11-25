@@ -36,8 +36,8 @@ on:
         required: true
 
 env:
-  CDN_BASE_URL: "https://d1v8j4ofspo67g.cloudfront.net"
-  S3_BUCKET: "gontzess-releases-registry"
+  CDN_BASE_URL: "https://dist.conductorone.com"
+  S3_BUCKET: "connector-artifact-registry"
 
 jobs:
   determine-workflows-ref:
@@ -125,14 +125,14 @@ jobs:
       - name: Configure AWS credentials via OIDC
         uses: aws-actions/configure-aws-credentials@v5
         with:
-          role-to-assume: arn:aws:iam::323258005321:role/gontzess-releases-binary-pusher-ConductorOne-baton-github-test
+          role-to-assume: arn:aws:iam::025044153841:role/GitHubActionsArtifactsPushRole-${{ github.event.repository.owner.login }}-${{ github.event.repository.name }}
           aws-region: us-west-2
 
       - name: Run GoReleaser
         uses: goreleaser/goreleaser-action@v6
         with:
           workdir: _caller
-          version: "~> v2.5"
+          version: "~> v2.12"
           args: release --clean --config ../_workflows/.goreleaser.binaries.yaml
         env:
           GITHUB_TOKEN: ${{ secrets.RELENG_GITHUB_TOKEN }}
@@ -436,7 +436,7 @@ jobs:
       - name: Configure AWS credentials via OIDC
         uses: aws-actions/configure-aws-credentials@v5
         with:
-          role-to-assume: arn:aws:iam::323258005321:role/gontzess-releases-binary-pusher-ConductorOne-baton-github-test
+          role-to-assume: arn:aws:iam::025044153841:role/GitHubActionsArtifactsPushRole-${{ github.event.repository.owner.login }}-${{ github.event.repository.name }}
           aws-region: us-west-2
 
       - name: Sign manifest.json
@@ -484,65 +484,63 @@ jobs:
               --content-type "application/octet-stream"
           fi
 
-      # - name: Configure AWS credentials via OIDC
-      #   uses: aws-actions/configure-aws-credentials@v5
-      #   with:
-      #     # TODO: update this to the real role
-      #     role-to-assume: "arn:aws:iam::168442440833:role/GitHubActionsRecordBinaryPushRole-${{ github.event.repository.name }}"
-      #     aws-region: us-west-2
+      - name: Configure AWS credentials via OIDC
+        uses: aws-actions/configure-aws-credentials@v5
+        with:
+          role-to-assume: "arn:aws:iam::025044153841:role/GitHubActionsArtifactsPushRole-${{ github.event.repository.owner.login }}-${{ github.event.repository.name }}"
+          aws-region: us-west-2
 
-      # - name: Invoke Lambda with retries
-      #   run: |
-      #     set +e    # Disable default fail-fast to support retries
-      #     if [[ "$ACTIONS_STEP_DEBUG" == "true" ]]; then
-      #       set -x  # Debug logging
-      #     fi
+      - name: Invoke Lambda with retries
+        run: |
+          set +e    # Disable default fail-fast to support retries
+          if [[ "$ACTIONS_STEP_DEBUG" == "true" ]]; then
+            set -x  # Debug logging
+          fi
 
-      #     TMPFILE=$(mktemp)
-      #     MAX_RETRIES=5
-      #     RETRY_DELAY=10  # seconds
+          TMPFILE=$(mktemp)
+          MAX_RETRIES=5
+          RETRY_DELAY=10  # seconds
 
-      #     for ((i=1; i<=MAX_RETRIES; i++)); do
-      #       echo "Attempt $i to invoke Lambda..."
+          for ((i=1; i<=MAX_RETRIES; i++)); do
+            echo "Attempt $i to invoke Lambda..."
 
-      #       # TODO: use real lambda name
-      #       RESPONSE=$(aws lambda invoke \
-      #         --function-name "${{ github.event.repository.name }}-binary-releases" \
-      #         --payload "{\"repository\":\"${{ github.event.repository.full_name }}\", \"tag\":\"${{ inputs.tag }}\", \"manifest_url\":\"${{ steps.upload-manifest.outputs.manifest_url }}\"}" \
-      #         --cli-binary-format raw-in-base64-out \
-      #         "$TMPFILE" 2>&1)
-      #       EXIT_CODE=$?
+            RESPONSE=$(aws lambda invoke \
+              --function-name "${{ github.event.repository.owner.login }}-${{ github.event.repository.name }}-artifact-releases" \
+              --payload "{\"tag\":\"${{ inputs.tag }}\"}" \
+              --cli-binary-format raw-in-base64-out \
+              "$TMPFILE" 2>&1)
+            EXIT_CODE=$?
 
-      #       echo "AWS CLI exited with code: $EXIT_CODE"
-      #       cat "$TMPFILE"
+            echo "AWS CLI exited with code: $EXIT_CODE"
+            cat "$TMPFILE"
 
-      #       STATUS_CODE=$(jq -r '.statusCode' < "$TMPFILE" 2>/dev/null)
+            STATUS_CODE=$(jq -r '.statusCode' < "$TMPFILE" 2>/dev/null)
 
-      #       if [[ $EXIT_CODE -eq 0 && "$STATUS_CODE" == "200" ]]; then
-      #         echo "Lambda invoked successfully."
-      #         break
+            if [[ $EXIT_CODE -eq 0 && "$STATUS_CODE" == "200" ]]; then
+              echo "Lambda invoked successfully."
+              break
 
-      #       elif [[ "$RESPONSE" == *"CodeArtifactUserPendingException"* ]]; then
-      #         echo "Lambda not ready (CodeArtifactUserPendingException)."
+            elif [[ "$RESPONSE" == *"CodeArtifactUserPendingException"* ]]; then
+              echo "Lambda not ready (CodeArtifactUserPendingException)."
 
-      #         if [[ $i -lt $MAX_RETRIES ]]; then
-      #           WAIT_TIME=$((i * RETRY_DELAY))
-      #           echo "Retrying in $WAIT_TIME seconds..."
-      #           sleep "$WAIT_TIME"
-      #         else
-      #           echo "Lambda still not ready after $MAX_RETRIES attempts."
-      #           rm -f "$TMPFILE"
-      #           exit 1
-      #         fi
+              if [[ $i -lt $MAX_RETRIES ]]; then
+                WAIT_TIME=$((i * RETRY_DELAY))
+                echo "Retrying in $WAIT_TIME seconds..."
+                sleep "$WAIT_TIME"
+              else
+                echo "Lambda still not ready after $MAX_RETRIES attempts."
+                rm -f "$TMPFILE"
+                exit 1
+              fi
 
-      #       else
-      #         echo "Lambda invoke failed with unexpected error: $RESPONSE"
-      #         rm -f "$TMPFILE"
-      #         exit 1
-      #       fi
-      #     done
+            else
+              echo "Lambda invoke failed with unexpected error: $RESPONSE"
+              rm -f "$TMPFILE"
+              exit 1
+            fi
+          done
 
-      #     rm -f "$TMPFILE"
+          rm -f "$TMPFILE"
 
   record-lambda-registry:
     if: inputs.lambda == true
@@ -575,7 +573,7 @@ jobs:
 
             RESPONSE=$(aws lambda invoke \
               --function-name "${{ github.event.repository.name }}-releases" \
-              --payload "{\"repository\":\"${{ github.event.repository.full_name }}\", \"tag\":\"${{ inputs.tag }}\"}" \
+              --payload "{\"tag\":\"${{ inputs.tag }}\"}" \
               --cli-binary-format raw-in-base64-out \
               "$TMPFILE" 2>&1)
             EXIT_CODE=$?
