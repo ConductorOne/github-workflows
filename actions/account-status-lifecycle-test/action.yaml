@@ -1,0 +1,44 @@
+name: Connector Account Status Lifecycle Test
+description: Test disable/enable account status changes for a baton connector that supports these capabilities.
+
+inputs:
+  connector:
+    description: 'Connector binary to test'
+    required: true
+  account-id:
+    description: 'Account ID to test status changes'
+    required: true
+  enable-action-name:
+    description: 'Name of the action to enable the account (default: "enable_user")'
+    required: false
+    default: 'enable_user'
+  disable-action-name:
+    description: 'Name of the action to disable the account (default: "disable_user")'
+    required: false
+    default: 'disable_user'
+  id-parameter-name:
+    description: 'Parameter name to send the account ID in the action (default: "user_id")'
+    required: false
+    default: 'user_id'
+  test-flow:
+    description: 'Test flow: "disable-enable", "enable-disable", "enable-only", or "disable-only" (default: "disable-enable")'
+    required: false
+    default: 'disable-enable'
+
+runs:
+  using: "composite"
+  steps:
+    - name: Download Baton
+      uses: ConductorOne/github-workflows/actions/get-baton@v2
+
+    - name: Account Status Lifecycle Test
+      env:
+        BATON_CONNECTOR: ${{ inputs.connector }}
+        CONNECTOR_ACCOUNT_ID_STATUS: ${{ inputs.account-id }}
+        ENABLE_ACTION_NAME: ${{ inputs.enable-action-name }}
+        DISABLE_ACTION_NAME: ${{ inputs.disable-action-name }}
+        ID_PARAMETER_NAME: ${{ inputs.id-parameter-name }}
+        TEST_FLOW: ${{ inputs.test-flow }}
+      run: ${{ github.action_path }}/account-status-lifecycle-test.sh
+      shell: bash
+
