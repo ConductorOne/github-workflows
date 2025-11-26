@@ -114,6 +114,30 @@ The account-provisioning action tests account provisioning and deprovisioning fo
     search-method: "email" # optional, defaults to 'email'
 ```
 
+### Account Status Lifecycle Test
+
+The account-status-lifecycle-test action tests disabling and enabling account status changes for a baton connector.
+
+#### Usage
+
+```yaml
+- name: Test Account Status Changes
+  uses: ConductorOne/github-workflows/actions/account-status-lifecycle-test@v3
+  with:
+    connector: "./my-connector"
+    account-id: "user-12345"
+    enable-action-name: "enable_user" # optional, defaults to 'enable_user'
+    disable-action-name: "disable_user" # optional, defaults to 'disable_user'
+    id-parameter-name: "user_id" # optional, defaults to 'user_id'
+    test-flow: "disable-enable" # optional, defaults to 'disable-enable'
+```
+
+The `test-flow` parameter can be:
+- `disable-enable`: Disable the account, then enable it (default)
+- `enable-disable`: Enable the account, then disable it
+- `enable-only`: Only test enabling the account
+- `disable-only`: Only test disabling the account
+
 ## Development
 
 To modify these workflows:
