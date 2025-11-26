@@ -15,7 +15,7 @@ search_by_email() {
   local search_value="$1"
   baton resources -t "$ACCOUNT_TYPE" --output-format=json \
     | jq -r --arg email "$search_value" \
-         '.resources[] |
+         '(.resources // [])[] |
           select(
             (.resource.annotations[]? | select(."@type" == "type.googleapis.com/c1.connector.v2.UserTrait")) as $trait |
             $trait != null and ($trait.emails[]?.address // empty) == $email
@@ -28,7 +28,7 @@ search_by_login() {
   local search_value="$1"
   baton resources -t "$ACCOUNT_TYPE" --output-format=json \
     | jq -r --arg login "$search_value" \
-         '.resources[] |
+         '(.resources // [])[] |
           select(
             (.resource.annotations[]? | select(."@type" == "type.googleapis.com/c1.connector.v2.UserTrait")) as $trait |
             $trait != null and $trait.login == $login
@@ -41,7 +41,7 @@ search_by_display_name() {
   local search_value="$1"
   baton resources -t "$ACCOUNT_TYPE" --output-format=json \
     | jq -r --arg display_name "$search_value" \
-         '.resources[] |
+         '(.resources // [])[] |
           select(.resource.displayName == $display_name) |
           .resource.id.resource'
 }

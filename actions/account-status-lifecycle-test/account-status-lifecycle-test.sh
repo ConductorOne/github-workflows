@@ -41,7 +41,7 @@ get_user_status() {
   local user_id="$1"
   local status=$(baton resources -t "user" --output-format=json \
     | jq -r --arg user_id "$user_id" \
-         '.resources[] |
+         '(.resources // [])[] |
           select(.resource.id.resource == $user_id) |
           (.resource.annotations[]? | select(."@type" == "type.googleapis.com/c1.connector.v2.UserTrait")) as $trait |
           if $trait != null and $trait.status != null then
