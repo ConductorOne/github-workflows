@@ -62,7 +62,7 @@ This action tests disable/enable account status changes for a baton connector th
   with:
     connector: './my-connector'
     account-id: 'user-12345'
-    sleep: 2  # Wait 2 seconds after each connector call
+    sleep: 2  # Wait 2 seconds after each write operation
 ```
 
 ## Inputs

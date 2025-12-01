@@ -49,7 +49,7 @@ This action tests account provisioning and deprovisioning for a baton connector 
     connector: './my-connector'
     account-email: 'test@example.com'
     account-type: 'user'
-    sleep: 2  # Wait 2 seconds after each connector call
+    sleep: 2  # Wait 2 seconds after each write operation
 ```
 
 ## Inputs
