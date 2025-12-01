@@ -79,7 +79,7 @@ jobs:
           repository: ConductorOne/github-workflows
           ref: ${{ needs.determine-workflows-ref.outputs.ref }}
 
-      - name: Set up Go
+      - name: Set up Go for caller
         uses: actions/setup-go@v6
         with:
           go-version-file: "_caller/go.mod"
@@ -139,74 +139,25 @@ jobs:
           AC_PASSWORD: ${{ secrets.AC_PASSWORD }}
           AC_PROVIDER: ${{ secrets.AC_PROVIDER }}
 
-      # TODO: move to a go file with proper structs
+      - name: Set up Go for workflows
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: "_workflows/go.mod"
+
       - name: Generate manifest.json
         id: generate-binaries-manifest
-        shell: bash
+        working-directory: _workflows
+        env:
+          GITHUB_OUTPUT: ${{ github.output }}
         run: |
-          set -euo pipefail
-          cd _caller/dist
-          TAG="${{ inputs.tag }}"
-          NOW="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
-          jq -n \
-            --arg v "1" \
-            --arg name "${{ github.event.repository.name }}" \
-            --arg org  "${{ github.event.repository.owner.login }}" \
-            --arg semver "$TAG" \
-            --arg releasedAt "$NOW" \
-            '{
-              version:$v, name:$name, org:$org,
-              semver:$semver, releasedAt:$releasedAt,
-              assets:{}
-            }' > manifest.json
-          add_asset() {
-            local key="$1" file="$2" mt="$3"
-            [ -f "$file" ] || return 0
-            local size sha
-            size=$(stat -c%s "$file" 2>/dev/null || stat -f%z "$file")
-            if command -v sha256sum >/dev/null; then sha=$(sha256sum "$file"|awk '{print $1}'); else sha=$(shasum -a 256 "$file"|awk '{print $1}'); fi
-            jq --arg k "$key" --arg f "$file" --arg mt "$mt" \
-              --argjson sz "$size" --arg sha "$sha" \
-              '.assets[$k] = { filename:$f, mediaType:$mt, sizeBytes:$sz, sha256:$sha }' \
-              manifest.json > .t && mv .t manifest.json
-          }
-          add_asset darwin-arm64   "$(ls -1 *darwin-arm64.zip    2>/dev/null | head -n1)" application/zip
-          add_asset darwin-amd64   "$(ls -1 *darwin-amd64.zip    2>/dev/null | head -n1)" application/zip
-          add_asset linux-arm64    "$(ls -1 *linux-arm64.tar.gz  2>/dev/null | head -n1)" application/gzip
-          add_asset linux-amd64    "$(ls -1 *linux-amd64.tar.gz  2>/dev/null | head -n1)" application/gzip
-          add_asset windows-amd64  "$(ls -1 *windows-amd64.zip   2>/dev/null | head -n1)" application/zip
-          add_asset checksums      "$(ls -1 *checksums.txt       2>/dev/null | head -n1)" text/plain
-
-          BASE="${{ env.CDN_BASE_URL }}/${{ steps.s3-directory.outputs.S3_DIRECTORY }}/"
-          enrich_key () {
-            local key="$1"
-            local fname
-            fname=$(jq -r --arg k "$key" '.assets[$k].filename // empty' manifest.json)
-            [ -n "$fname" ] || return 0
-            local sb=""
-            if [ -f "$fname.sbom.json" ]; then
-              sb="$fname.sbom.json"
-            fi
-            jq --arg k "$key" --arg base "$BASE" --arg f "$fname" --arg sb "$sb" \
-              '.assets[$k].href = ($base + $f)
-                | .assets[$k].signatureHref   = ($base + $f + ".sig")
-                | .assets[$k].certificateHref = ($base + $f + ".cert")
-                | (if ($sb | length) > 0 then (.assets[$k].sbomHref = ($base + $sb)) else . end)' \
-              manifest.json > .t && mv .t manifest.json
-          }
-          for k in darwin-arm64 darwin-amd64 linux-arm64 linux-amd64 windows-amd64 checksums; do
-            enrich_key "$k"
-          done
-          # Add top-level manifest signature and certificate pointers (files will exist after signing)
-          jq --arg base "$BASE" \
-            '.signatureHref   = ($base + "manifest.json.sig")
-             | .certificateHref = ($base + "manifest.json.cert")' \
-            manifest.json > .t && mv .t manifest.json
-
-          # Output manifest content as multiline output
-          echo "binaries_manifest<<EOF" >> "$GITHUB_OUTPUT"
-          cat manifest.json >> "$GITHUB_OUTPUT"
-          echo "EOF" >> "$GITHUB_OUTPUT"
+          go run ./cmd/generate-manifest \
+            -asset-dir ../_caller/dist \
+            -repo-name "${{ github.event.repository.name }}" \
+            -org-name "${{ github.event.repository.owner.login }}" \
+            -tag "${{ inputs.tag }}" \
+            -base-url "${{ env.CDN_BASE_URL }}/${{ steps.s3-directory.outputs.S3_DIRECTORY }}" \
+            -output ../_caller/dist/manifest.json \
+            -github-output "$GITHUB_OUTPUT"
 
   goreleaser-docker:
     if: inputs.docker == true || inputs.lambda == true
@@ -244,7 +195,7 @@ jobs:
           repository: ConductorOne/github-workflows
           ref: ${{ needs.determine-workflows-ref.outputs.ref }}
 
-      - name: Set up Go
+      - name: Set up Go for caller
         if: inputs.docker == true || inputs.lambda == true
         uses: actions/setup-go@v6
         with:
@@ -314,130 +265,61 @@ jobs:
           LAMBDA: ${{ inputs.lambda }}
           DOCKER: ${{ inputs.docker }}
 
+      - name: Set up Go for workflows
+        if: inputs.docker == true
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: "_workflows/go.mod"
+
       - name: Extract GHCR image digests from GoReleaser output
         id: extract-images
         if: inputs.docker == true
-        working-directory: _caller
+        working-directory: _workflows
         env:
           REPO_NAME: ${{ github.event.repository.name }}
           TAG: ${{ inputs.tag }}
+          GITHUB_OUTPUT: ${{ github.output }}
         run: |
-          python3 - << 'PY'
-          import json, os, sys
-
-          repo_name = os.environ['REPO_NAME']
-          tag = os.environ['TAG']           # e.g. v0.1.65
-          version = tag.lstrip('v')        # e.g. 0.1.65
-          digest_file = f"dist/{repo_name}_{version}_digests.txt"
-
-          if not os.path.exists(digest_file):
-              print(f"::error::Digest file not found: {digest_file}", file=sys.stderr)
-              sys.exit(1)
-
-          images = {}
-          with open(digest_file, "r", encoding="utf-8") as f:
-              for raw in f:
-                  line = raw.strip()
-                  if not line:
-                      continue
-
-                  # docker_digest prints "<digest>  <ref>"
-                  parts = line.split()
-                  if len(parts) != 2:
-                      continue
-                  digest_hex, ref = parts
-
-                  # We only care about GHCR; skip ECR lines
-                  if not ref.startswith("ghcr.io/conductorone/"):
-                      continue
-
-                  digest = f"sha256:{digest_hex}"
-                  # multi-arch image
-                  if ref.endswith(f":{version}"):
-                      images["index"] = {"ref": ref, "digest": digest}
-                  elif ref.endswith(f":{version}-amd64"):
-                      images["linux-amd64"] = {"ref": ref, "digest": digest}
-                  elif ref.endswith(f":{version}-arm64"):
-                      images["linux-arm64"] = {"ref": ref, "digest": digest}
-
-          if "index" not in images:
-              with open(digest_file, "r", encoding="utf-8") as f:
-                  content = f.read()
-              print(f"::error::Could not find GHCR index line in {digest_file}", file=sys.stderr)
-              print("Contents of digest file:", file=sys.stderr)
-              print(content, file=sys.stderr)
-              sys.exit(1)
-
-          images_json = json.dumps(images, indent=2)
-          github_output = os.environ["GITHUB_OUTPUT"]
-          with open(github_output, "a", encoding="utf-8") as f:
-              f.write("images_manifest<<EOF\n")
-              f.write(images_json)
-              f.write("\nEOF\n")
-
-          print("✅ Extracted image digests:")
-          print(images_json)
-          PY
+          go run ./cmd/extract-images \
+            -asset-dir ../_caller/dist \
+            -repo-name "${{ github.event.repository.name }}" \
+            -tag "${{ inputs.tag }}" \
+            -github-output "$GITHUB_OUTPUT"
 
   record-connector-registry:
     # require binaries and docker to complete before recording, since we include both in the manifest
-    needs: [goreleaser-binaries, goreleaser-docker]
+    needs: [determine-workflows-ref, goreleaser-binaries, goreleaser-docker]
     permissions:
       id-token: write
       contents: read
     runs-on: ubuntu-latest
     steps:
+      - name: Checkout connector workflows
+        uses: actions/checkout@v5
+        with:
+          path: _workflows
+          repository: ConductorOne/github-workflows
+          ref: ${{ needs.determine-workflows-ref.outputs.ref }}
+
+      - name: Set up Go for workflows
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: "_workflows/go.mod"
+
       - name: Prepare manifest with images
-        shell: bash
+        working-directory: _workflows
         env:
           BINARIES_MANIFEST: ${{ needs.goreleaser-binaries.outputs.binaries_manifest }}
           IMAGES_MANIFEST: ${{ needs.goreleaser-docker.outputs.images_manifest }}
         run: |
-          set -euo pipefail
-          mkdir -p dist
-          # Write binaries manifest to file, preserving JSON formatting
-          printf '%s\n' "$BINARIES_MANIFEST" > dist/binaries_manifest.json
-          # Validate the JSON
-          if ! jq empty dist/binaries_manifest.json >/dev/null 2>&1; then
-            echo "::error::Invalid JSON in binaries_manifest output"
-            echo "Raw content:"
-            cat dist/binaries_manifest.json
-            exit 1
-          fi
-          if [ ! -s "dist/binaries_manifest.json" ]; then
-            echo "::error::Binaries manifest is empty"
-            exit 1
-          fi
-          # Start with binaries manifest as the base
-          cp dist/binaries_manifest.json dist/manifest.json
-          # Merge images if present
-          if [ -n "$IMAGES_MANIFEST" ] && [ "$IMAGES_MANIFEST" != "{}" ]; then
-            # Write images manifest to temp file
-            printf '%s\n' "$IMAGES_MANIFEST" > /tmp/images.json
-            # Validate the JSON
-            if ! jq empty /tmp/images.json >/dev/null 2>&1; then
-              echo "::error::Invalid JSON in images_manifest output"
-              echo "Raw content:"
-              cat /tmp/images.json
-              exit 1
-            fi
-            # Merge images into manifest
-            jq --slurpfile images /tmp/images.json '.images = $images[0]' dist/manifest.json > dist/manifest.json.tmp
-            mv dist/manifest.json.tmp dist/manifest.json
-            echo "✅ Added images to manifest:"
-            jq '.images' dist/manifest.json
-          else
-            echo "ℹ️  No images to add to manifest (docker job may have been skipped if no Dockerfile)"
-          fi
+          mkdir -p ../dist
+          go run ./cmd/merge-manifests \
+            -binaries-manifest "$BINARIES_MANIFEST" \
+            -images-manifest "$IMAGES_MANIFEST" \
+            -output ../dist/manifest.json
 
       - name: Install cosign
         uses: sigstore/cosign-installer@v3
-
-      - name: Configure AWS credentials via OIDC
-        uses: aws-actions/configure-aws-credentials@v5
-        with:
-          role-to-assume: arn:aws:iam::025044153841:role/GitHubActionsArtifactsPushRole-${{ github.event.repository.owner.login }}-${{ github.event.repository.name }}
-          aws-region: us-west-2
 
       - name: Sign manifest.json
         env: { COSIGN_EXPERIMENTAL: "1" }
@@ -448,6 +330,12 @@ jobs:
           cosign sign-blob --yes "manifest.json" \
             --output-signature "manifest.json.sig" \
             --output-certificate "manifest.json.cert"
+
+      - name: Configure AWS credentials via OIDC
+        uses: aws-actions/configure-aws-credentials@v5
+        with:
+          role-to-assume: arn:aws:iam::025044153841:role/GitHubActionsArtifactsPushRole-${{ github.event.repository.owner.login }}-${{ github.event.repository.name }}
+          aws-region: us-west-2
 
       - name: Upload manifest.json to S3
         id: upload-manifest
@@ -483,12 +371,6 @@ jobs:
               --cache-control "public,max-age=31536000,immutable" \
               --content-type "application/octet-stream"
           fi
-
-      - name: Configure AWS credentials via OIDC
-        uses: aws-actions/configure-aws-credentials@v5
-        with:
-          role-to-assume: "arn:aws:iam::025044153841:role/GitHubActionsArtifactsPushRole-${{ github.event.repository.owner.login }}-${{ github.event.repository.name }}"
-          aws-region: us-west-2
 
       - name: Invoke Lambda with retries
         run: |
