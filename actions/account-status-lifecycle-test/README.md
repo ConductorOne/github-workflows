@@ -55,6 +55,16 @@ This action tests disable/enable account status changes for a baton connector th
     test-flow: 'enable-disable'  # Enable first, then disable
 ```
 
+### With Sleep Delay
+```yaml
+- name: Test Account Status Changes with Sleep
+  uses: ./.github/actions/account-status-lifecycle-test
+  with:
+    connector: './my-connector'
+    account-id: 'user-12345'
+    sleep: 2  # Wait 2 seconds after each write operation
+```
+
 ## Inputs
 
 ### Required
@@ -74,6 +84,7 @@ This action tests disable/enable account status changes for a baton connector th
   - `"enable-disable"`: Enable the account, then disable it
   - `"enable-only"`: Only test enabling the account (with verification)
   - `"disable-only"`: Only test disabling the account (with verification)
+- `sleep`: Sleep time in seconds to wait after each write operation. If not provided, no sleep will be performed.
 
 ## What it tests
 

@@ -10,6 +10,10 @@ fi
 # Error on unbound variables now that we've set BATON
 set -u
 
+# Source shared helper functions
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "${SCRIPT_DIR}/../_helpers/sleep.sh"
+
 # Function to search for users by email
 search_by_email() {
   local search_value="$1"
@@ -151,6 +155,7 @@ fi
 
 # create account
 create_account
+sleep_if_configured
 
 # check if account was created
 $BATON_CONNECTOR
@@ -185,11 +190,13 @@ fi
 if [ -n "$CAPABILITY_RESOURCE_DELETE" ]; then
   # delete account
   $BATON_CONNECTOR --delete-resource "$CREATED_ACCOUNT_ID" --delete-resource-type "$ACCOUNT_TYPE"
+  sleep_if_configured
 
   # delete account already deleted (this should fail gracefully)
   set +e
   $BATON_CONNECTOR --delete-resource "$CREATED_ACCOUNT_ID" --delete-resource-type "$ACCOUNT_TYPE"
   set -e
+  sleep_if_configured
 
   # check if account was deleted
   $BATON_CONNECTOR
