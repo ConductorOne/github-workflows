@@ -41,6 +41,17 @@ This action tests account provisioning and deprovisioning for a baton connector 
     search-method: 'display_name'
 ```
 
+### With Sleep Delay
+```yaml
+- name: Test Account Provisioning with Sleep
+  uses: ./.github/actions/account-provisioning
+  with:
+    connector: './my-connector'
+    account-email: 'test@example.com'
+    account-type: 'user'
+    sleep: 2  # Wait 2 seconds after each connector call
+```
+
 ## Inputs
 
 ### Required
@@ -56,6 +67,7 @@ This action tests account provisioning and deprovisioning for a baton connector 
   - `email`: Search by email address (default, backward compatible)
   - `login`: Search by login/username (requires `account-login` to be set)
   - `display_name`: Search by display name (requires `account-display-name` to be set)
+- `sleep`: Sleep time in seconds to wait after each write operation. If not provided, no sleep will be performed.
 
 ## What it tests
 

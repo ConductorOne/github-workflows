@@ -19,6 +19,10 @@ fi
 # Error on unbound variables now that we've set BATON
 set -u
 
+# Source shared helper functions
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "${SCRIPT_DIR}/../_helpers/sleep.sh"
+
 # Sync
 $BATON_CONNECTOR
 
@@ -33,6 +37,7 @@ fi
 
 # Grant entitlement
 $BATON_CONNECTOR --grant-entitlement="$BATON_ENTITLEMENT" --grant-principal="$BATON_PRINCIPAL" --grant-principal-type="$BATON_PRINCIPAL_TYPE"
+sleep_if_configured
 
 # Check for grant before revoking
 $BATON_CONNECTOR
@@ -40,6 +45,7 @@ $BATON grants --entitlement="$BATON_ENTITLEMENT" --output-format=json | jq --exi
 
 # Grant already-granted entitlement
 $BATON_CONNECTOR --grant-entitlement="$BATON_ENTITLEMENT" --grant-principal="$BATON_PRINCIPAL" --grant-principal-type="$BATON_PRINCIPAL_TYPE"
+sleep_if_configured
 
 set +u
 # Get grant ID
@@ -48,9 +54,11 @@ set -u
 
 # Revoke grant
 $BATON_CONNECTOR --revoke-grant="$BATON_GRANT"
+sleep_if_configured
 
 # Revoke already-revoked grant
 $BATON_CONNECTOR --revoke-grant="$BATON_GRANT"
+sleep_if_configured
 
 # Check grant was revoked
 $BATON_CONNECTOR
@@ -58,6 +66,7 @@ $BATON grants --entitlement="$BATON_ENTITLEMENT" --output-format=json | jq --exi
 
 # Re-grant entitlement
 $BATON_CONNECTOR --grant-entitlement="$BATON_ENTITLEMENT" --grant-principal="$BATON_PRINCIPAL" --grant-principal-type="$BATON_PRINCIPAL_TYPE"
+sleep_if_configured
 
 # Check grant was re-granted
 $BATON_CONNECTOR

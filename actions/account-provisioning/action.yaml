@@ -25,6 +25,9 @@ inputs:
     description: 'Method to search for the created user: "email", "login", or "display_name". Defaults to "email".'
     required: false
     default: 'email'
+  sleep:
+    description: 'Sleep time in seconds to wait after each write operation. If not provided, no sleep will be performed.'
+    required: false
 
 runs:
   using: "composite"
@@ -41,5 +44,6 @@ runs:
         ACCOUNT_PROFILE: ${{ inputs.account-profile }}
         ACCOUNT_TYPE: ${{ inputs.account-type }}
         SEARCH_METHOD: ${{ inputs.search-method }}
+        SLEEP: ${{ inputs.sleep }}
       run: ${{ github.action_path }}/account-provisioning.sh
       shell: bash

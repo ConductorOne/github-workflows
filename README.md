@@ -93,6 +93,7 @@ The sync-test action tests syncing, granting, and revoking for a baton connector
     baton-entitlement: "admin-role"
     baton-principal: "user123"
     baton-principal-type: "user"
+    sleep: 2  # optional, wait 2 seconds after each write operation
 ```
 
 ### Account Provisioning Test
@@ -112,6 +113,7 @@ The account-provisioning action tests account provisioning and deprovisioning fo
     account-profile: '{"first_name": "Test", "last_name": "User", "username": "testuser", "email": "test@example.com"}' # optional
     account-type: "user" # optional, defaults to 'user'
     search-method: "email" # optional, defaults to 'email'
+    sleep: 2  # optional, wait 2 seconds after each write operation
 ```
 
 ### Account Status Lifecycle Test
@@ -130,6 +132,7 @@ The account-status-lifecycle-test action tests disabling and enabling account st
     disable-action-name: "disable_user" # optional, defaults to 'disable_user'
     id-parameter-name: "user_id" # optional, defaults to 'user_id'
     test-flow: "disable-enable" # optional, defaults to 'disable-enable'
+    sleep: 2  # optional, wait 2 seconds after each write operation
 ```
 
 The `test-flow` parameter can be:

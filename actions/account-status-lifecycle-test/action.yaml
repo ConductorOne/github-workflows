@@ -24,6 +24,9 @@ inputs:
     description: 'Test flow: "disable-enable", "enable-disable", "enable-only", or "disable-only" (default: "disable-enable")'
     required: false
     default: 'disable-enable'
+  sleep:
+    description: 'Sleep time in seconds to wait after each write operation. If not provided, no sleep will be performed.'
+    required: false
 
 runs:
   using: "composite"
@@ -39,6 +42,7 @@ runs:
         DISABLE_ACTION_NAME: ${{ inputs.disable-action-name }}
         ID_PARAMETER_NAME: ${{ inputs.id-parameter-name }}
         TEST_FLOW: ${{ inputs.test-flow }}
+        SLEEP: ${{ inputs.sleep }}
       run: ${{ github.action_path }}/account-status-lifecycle-test.sh
       shell: bash
 

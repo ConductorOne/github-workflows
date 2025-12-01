@@ -15,6 +15,9 @@ inputs:
     description: 'Type of principal to test. If not provided, will default to "user".'
     required: false
     default: 'user'
+  sleep:
+    description: 'Sleep time in seconds to wait after each write operation. If not provided, no sleep will be performed.'
+    required: false
 
 runs:
   using: "composite"
@@ -29,5 +32,6 @@ runs:
         BATON_PRINCIPAL: ${{ inputs.baton-principal }}
         BATON_PRINCIPAL_TYPE: ${{ inputs.baton-principal-type }}
         BATON: baton
+        SLEEP: ${{ inputs.sleep }}
       run: ${{ github.action_path }}/grant-revoke.sh
       shell: bash

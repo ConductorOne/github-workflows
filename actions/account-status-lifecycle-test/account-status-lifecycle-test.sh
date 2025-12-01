@@ -36,6 +36,10 @@ esac
 # Error on unbound variables now that we've set BATON
 set -u
 
+# Source shared helper functions
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "${SCRIPT_DIR}/../_helpers/sleep.sh"
+
 # Function to get user status (enabled/disabled)
 get_user_status() {
   local user_id="$1"
@@ -180,6 +184,7 @@ case "$TEST_FLOW" in
       echo "Failed to disable user"
       exit 1
     fi
+    sleep_if_configured
 
     # Verify user is disabled
     if ! verify_user_status "$CONNECTOR_ACCOUNT_ID_STATUS" "DISABLED"; then
@@ -203,6 +208,7 @@ case "$TEST_FLOW" in
       echo "Failed to enable user"
       exit 1
     fi
+    sleep_if_configured
 
     # Verify user is enabled
     if ! verify_user_status "$CONNECTOR_ACCOUNT_ID_STATUS" "ENABLED"; then
@@ -219,6 +225,7 @@ case "$TEST_FLOW" in
       echo "Failed to enable user"
       exit 1
     fi
+    sleep_if_configured
 
     # Verify user is enabled
     if ! verify_user_status "$CONNECTOR_ACCOUNT_ID_STATUS" "ENABLED"; then
@@ -242,6 +249,7 @@ case "$TEST_FLOW" in
       echo "Failed to disable user"
       exit 1
     fi
+    sleep_if_configured
 
     # Verify user is disabled
     if ! verify_user_status "$CONNECTOR_ACCOUNT_ID_STATUS" "DISABLED"; then
@@ -258,6 +266,7 @@ case "$TEST_FLOW" in
       echo "Failed to enable user"
       exit 1
     fi
+    sleep_if_configured
 
     # Verify user is enabled
     if ! verify_user_status "$CONNECTOR_ACCOUNT_ID_STATUS" "ENABLED"; then
@@ -274,6 +283,7 @@ case "$TEST_FLOW" in
       echo "Failed to disable user"
       exit 1
     fi
+    sleep_if_configured
 
     # Verify user is disabled
     if ! verify_user_status "$CONNECTOR_ACCOUNT_ID_STATUS" "DISABLED"; then
