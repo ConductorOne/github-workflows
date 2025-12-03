@@ -25,7 +25,7 @@ dockers_v2:
     platforms:
       - linux/amd64
       - linux/arm64
-    dockerfile: Dockerfile
+    dockerfile: ${DOCKERFILE_PATH}
     ids:
       - linux
     disable: '{{ ne .Env.DOCKER "true" }}'
@@ -43,7 +43,7 @@ dockers_v2:
       - "{{ .Version }}"
     platforms:
       - linux/arm64
-    dockerfile: Dockerfile.lambda
+    dockerfile: ${DOCKERFILE_LAMBDA_PATH}
     ids:
       - linux
     disable: '{{ ne .Env.LAMBDA "true" }}'

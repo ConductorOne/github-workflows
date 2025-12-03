@@ -8,14 +8,12 @@ This repository contains shared GitHub workflows for ConductorOne connector repo
 
 The release workflow handles the release process for connector repos, including:
 
-- Rendering the latest goreleaser and gon configuration files from template
-- Building binaries for multiple platforms
+- Rendering the latest goreleaser, gon, and dockerfile files from template
 - Creating GitHub releases
-- Building and pushing Docker images
-- Building and pushing ECR images
+- Building, signing, and pushing binaries to the C1 Connector Registry
+- Building, signing, and pushing Docker images to GHCR
+- Building, signing, and pushing ECR lambda images for use in C1
 - Recording releases in the release tracking system
-
-#### Usage
 
 To use the release workflow in your connector repository:
 
@@ -31,11 +29,9 @@ on:
 
 jobs:
   release:
-    uses: ConductorOne/github-workflows/.github/workflows/release.yaml@v3
+    uses: ConductorOne/github-workflows/.github/workflows/release.yaml@v4
     with:
       tag: ${{ github.ref_name }}
-      # defaults to true
-      # lambda: false
     secrets:
       RELENG_GITHUB_TOKEN: ${{ secrets.RELENG_GITHUB_TOKEN }}
       APPLE_SIGNING_KEY_P12: ${{ secrets.APPLE_SIGNING_KEY_P12 }}
@@ -44,6 +40,15 @@ jobs:
       AC_PROVIDER: ${{ secrets.AC_PROVIDER }}
       DATADOG_API_KEY: ${{ secrets.DATADOG_API_KEY }}
 ```
+
+The release workflow accepts the following input parameters:
+
+| Parameter | Required | Default | Description                                  |
+| --------- | -------- | ------- | -------------------------------------------- |
+| `tag`     | Yes      | -       | The release tag (e.g., "v1.0.0")             |
+| `lambda`  | No       | `true`  | Whether to release with Lambda image support |
+| `docker`  | No       | `true`  | Whether to release with Docker image support |
+| `msi`     | No       | `false` | Whether to release with MSI support          |
 
 2. Ensure your repository has the following secrets configured:
 
@@ -54,15 +59,7 @@ jobs:
    - `AC_PROVIDER`: Apple Connect provider
    - `DATADOG_API_KEY`: Datadog API key for monitoring releases
 
-3. Remove all GoReleaser and gon files from your repository, if they were previously created there.
-
-#### Input Parameters
-
-The release workflow accepts the following input parameters:
-
-| Parameter | Required | Description                      |
-| --------- | -------- | -------------------------------- |
-| `tag`     | Yes      | The release tag (e.g., "v1.0.0") |
+3. Remove all GoReleaser, gon files, Dockerfile, and Dockerfile.lambda files from your connector repository, if they were previously created there.
 
 ## Available Actions
 
@@ -70,11 +67,9 @@ The release workflow accepts the following input parameters:
 
 The get-baton action downloads the latest version of [Baton](https://github.com/conductorone/baton) and installs it to /usr/local/bin/baton.
 
-#### Usage
-
 ```yaml
 - name: Install baton
-  uses: ConductorOne/github-workflows/actions/get-baton@v3
+  uses: ConductorOne/github-workflows/actions/get-baton@v4
 ```
 
 You can then use the baton command in your workflow.
@@ -83,11 +78,9 @@ You can then use the baton command in your workflow.
 
 The sync-test action tests syncing, granting, and revoking for a baton connector.
 
-#### Usage
-
 ```yaml
 - name: Test Connector Sync
-  uses: ConductorOne/github-workflows/actions/sync-test@v3
+  uses: ConductorOne/github-workflows/actions/sync-test@v4
   with:
     connector: "./my-connector"
     baton-entitlement: "admin-role"
@@ -99,11 +92,9 @@ The sync-test action tests syncing, granting, and revoking for a baton connector
 
 The account-provisioning action tests account provisioning and deprovisioning for a baton connector that supports these capabilities.
 
-#### Usage
-
 ```yaml
 - name: Test Account Provisioning
-  uses: ConductorOne/github-workflows/actions/account-provisioning@v3
+  uses: ConductorOne/github-workflows/actions/account-provisioning@v4
   with:
     connector: "./my-connector"
     account-email: "test@example.com"
@@ -122,10 +113,10 @@ To modify these workflows:
 2. Test the changes in a connector repository _pointing at your branch_
 3. Create a pull request for review
 4. Once approved, merge to main
-5. Tag the release: `git tag v3.0.1`
-6. Push the tag: `git push origin v3.0.1`
-7. Update the major version tag `git tag -f v3 v3.0.1`
-8. Push the major version tag `git push origin v3 --force`
+5. Tag the release: `git tag v4.0.1`
+6. Push the tag: `git push origin v4.0.1`
+7. Update the major version tag `git tag -f v4 v4.0.1`
+8. Push the major version tag `git push origin v4 --force`
 
 ## Versioning
 
