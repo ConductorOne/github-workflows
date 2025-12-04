@@ -1,0 +1,56 @@
+on:
+  workflow_call:
+    inputs:
+      ref:
+        required: true
+        type: string
+      run_tests:
+        required: false
+        type: boolean
+        default: true
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+    - name: Checkout caller repo
+      uses: actions/checkout@v5
+      with:
+        path: _caller
+        repository: ${{ github.event.repository.full_name }}
+        fetch-depth: 0
+        ref: ${{ inputs.ref }}
+    - name: Install Go
+      uses: actions/setup-go@v5
+      with:
+        go-version-file: _caller/go.mod
+    - name: Run linters
+      uses: golangci/golangci-lint-action@v8
+      with:
+       version: latest
+       args: --timeout=3m
+       working-directory: _caller
+  test:
+    if: inputs.run_tests == true
+    strategy:
+      matrix:
+        platform: [ubuntu-latest]
+    runs-on: ${{ matrix.platform }}
+    steps:
+      - name: Checkout caller repo
+        uses: actions/checkout@v5
+        with:
+          repository: ${{ github.event.repository.full_name }}
+          fetch-depth: 0
+          ref: ${{ inputs.ref }}
+      - name: Install Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - name: go tests
+        run: go test -v -covermode=count -json ./... | tee test.json
+      - name: annotate go tests
+        if: always()
+        uses: guyarb/golang-test-annotations@v0.8.0
+        with:
+          test-results: test.json
+
