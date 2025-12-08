@@ -1,7 +1,6 @@
 package main
 
 import (
-	"bufio"
 	"flag"
 	"fmt"
 	"os"
@@ -44,19 +43,17 @@ func main() {
 		digestFile = fmt.Sprintf("%s/%s_%s_digests.txt", assetDir, repoName, version)
 	}
 
-	file, err := os.Open(digestFile)
+	content, err := os.ReadFile(digestFile)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "extract-images: ::error::Digest file not found: %s\n", digestFile)
 		os.Exit(1)
 	}
-	defer file.Close()
 
 	images := make(map[string]*pb.Image)
 	foundIndex := false
 
-	scanner := bufio.NewScanner(file)
-	for scanner.Scan() {
-		line := strings.TrimSpace(scanner.Text())
+	for _, line := range strings.Split(string(content), "\n") {
+		line = strings.TrimSpace(line)
 		if line == "" {
 			continue
 		}
@@ -96,13 +93,7 @@ func main() {
 		}
 	}
 
-	if err := scanner.Err(); err != nil {
-		fmt.Fprintf(os.Stderr, "extract-images: error: reading digest file: %v\n", err)
-		os.Exit(1)
-	}
-
 	if !foundIndex {
-		content, _ := os.ReadFile(digestFile)
 		fmt.Fprintf(os.Stderr, "extract-images: ::error::Could not find GHCR index line in %s\n", digestFile)
 		fmt.Fprintf(os.Stderr, "extract-images: Contents of digest file:\n%s\n", content)
 		os.Exit(1)
