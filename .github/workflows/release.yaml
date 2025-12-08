@@ -125,7 +125,7 @@ jobs:
       - name: Configure AWS credentials via OIDC
         uses: aws-actions/configure-aws-credentials@v5
         with:
-          role-to-assume: arn:aws:iam::025044153841:role/GitHubActionsArtifactsPushRole-${{ github.event.repository.owner.login }}-${{ github.event.repository.name }}
+          role-to-assume: arn:aws:iam::025044153841:role/GHA-Artifacts-${{ github.event.repository.owner.login }}-${{ github.event.repository.name }}
           aws-region: us-west-2
 
       - name: Run GoReleaser
@@ -329,7 +329,7 @@ jobs:
       - name: Configure AWS credentials via OIDC
         uses: aws-actions/configure-aws-credentials@v5
         with:
-          role-to-assume: arn:aws:iam::025044153841:role/GitHubActionsArtifactsPushRole-${{ github.event.repository.owner.login }}-${{ github.event.repository.name }}
+          role-to-assume: arn:aws:iam::025044153841:role/GHA-Artifacts-${{ github.event.repository.owner.login }}-${{ github.event.repository.name }}
           aws-region: us-west-2
 
       - name: Upload manifest.json to S3
