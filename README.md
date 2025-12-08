@@ -48,7 +48,6 @@ The release workflow accepts the following input parameters:
 | `tag`     | Yes      | -       | The release tag (e.g., "v1.0.0")             |
 | `lambda`  | No       | `true`  | Whether to release with Lambda image support |
 | `docker`  | No       | `true`  | Whether to release with Docker image support |
-| `msi`     | No       | `false` | Whether to release with MSI support          |
 
 2. Ensure your repository has the following secrets configured:
 
