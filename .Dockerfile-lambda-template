@@ -1,3 +1,3 @@
 FROM public.ecr.aws/lambda/provided:al2023
 ENTRYPOINT ["/${REPO_NAME}", "lambda"]
-COPY linux/arm64/${REPO_NAME} /${REPO_NAME}
+COPY ${REPO_NAME} /${REPO_NAME}

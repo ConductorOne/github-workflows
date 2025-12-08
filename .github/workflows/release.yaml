@@ -132,7 +132,7 @@ jobs:
         uses: goreleaser/goreleaser-action@v6
         with:
           workdir: _caller
-          version: "~> v2.12"
+          version: "~> v2.13"
           args: release --clean --config ../_workflows/.goreleaser.binaries.yaml
         env:
           GITHUB_TOKEN: ${{ secrets.RELENG_GITHUB_TOKEN }}
@@ -252,7 +252,7 @@ jobs:
         uses: goreleaser/goreleaser-action@v6
         with:
           workdir: _caller
-          version: "~> v2.12"
+          version: "~> v2.13"
           args: release --clean --config ../_workflows/.goreleaser.docker.yaml
         env:
           GITHUB_TOKEN: ${{ secrets.RELENG_GITHUB_TOKEN }}
