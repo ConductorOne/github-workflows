@@ -213,16 +213,25 @@ jobs:
           echo "Generated Dockerfile.lambda:"
           cat _workflows/Dockerfile.lambda
 
-      - name: Generate goreleaser configs
-        if: inputs.docker == true || inputs.lambda == true
+      - name: Generate goreleaser docker config
+        if: inputs.docker == true
         env:
           REPO_NAME: ${{ github.event.repository.name }}
           DOCKERFILE_PATH: ../_workflows/Dockerfile
-          DOCKERFILE_LAMBDA_PATH: ../_workflows/Dockerfile.lambda
         run: |
-          envsubst < _workflows/templates/.goreleaser-docker-template-signing.yaml > _workflows/.goreleaser.docker.yaml
+          envsubst < _workflows/templates/.goreleaser-docker-oci-template.yaml > _workflows/.goreleaser.docker.yaml
           echo "_workflows/.goreleaser.docker.yaml:"
           cat _workflows/.goreleaser.docker.yaml
+
+      - name: Generate goreleaser lambda config
+        if: inputs.lambda == true
+        env:
+          REPO_NAME: ${{ github.event.repository.name }}
+          DOCKERFILE_LAMBDA_PATH: ../_workflows/Dockerfile.lambda
+        run: |
+          envsubst < _workflows/templates/.goreleaser-docker-lambda-template.yaml > _workflows/.goreleaser.lambda.yaml
+          echo "_workflows/.goreleaser.lambda.yaml:"
+          cat _workflows/.goreleaser.lambda.yaml
 
       - name: Docker Login
         if: inputs.docker == true
@@ -242,8 +251,8 @@ jobs:
         if: inputs.docker == true || inputs.lambda == true
         uses: docker/setup-buildx-action@v3
 
-      - name: Run GoReleaser
-        if: inputs.docker == true || inputs.lambda == true
+      - name: Run GoReleaser for Docker
+        if: inputs.docker == true
         uses: goreleaser/goreleaser-action@v6
         with:
           workdir: _caller
@@ -252,8 +261,16 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.RELENG_GITHUB_TOKEN }}
           COSIGN_EXPERIMENTAL: "1"
-          LAMBDA: ${{ inputs.lambda }}
-          DOCKER: ${{ inputs.docker }}
+
+      - name: Run GoReleaser for Lambda
+        if: inputs.lambda == true
+        uses: goreleaser/goreleaser-action@v6
+        with:
+          workdir: _caller
+          version: "~> v2.13"
+          args: release --skip=clean --config ../_workflows/.goreleaser.lambda.yaml
+        env:
+          GITHUB_TOKEN: ${{ secrets.RELENG_GITHUB_TOKEN }}
 
       - name: Set up Go for workflows
         if: inputs.docker == true
