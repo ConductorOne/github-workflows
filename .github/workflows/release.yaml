@@ -97,7 +97,7 @@ jobs:
         run: |
           envsubst < _workflows/.gon-amd64-template.json > _workflows/.gon-amd64.json
           envsubst < _workflows/.gon-arm64-template.json > _workflows/.gon-arm64.json
-          envsubst < _workflows/.goreleaser-binaries-template.yaml > _workflows/.goreleaser.binaries.yaml
+          envsubst < _workflows/templates/.goreleaser-binaries-template.yaml > _workflows/.goreleaser.binaries.yaml
           echo "_workflows/.gon-amd64.json:"; cat _workflows/.gon-amd64.json
           echo "_workflows/.gon-arm64.json:"; cat _workflows/.gon-arm64.json
           echo "_workflows/.goreleaser.binaries.yaml:"; cat _workflows/.goreleaser.binaries.yaml
@@ -206,10 +206,10 @@ jobs:
           REPO_NAME: ${{ github.event.repository.name }}
         run: |
           # Generate Dockerfiles in _workflows/ to avoid dirty git state in _caller
-          envsubst '$REPO_NAME' < _workflows/.Dockerfile-template > _workflows/Dockerfile
+          envsubst '$REPO_NAME' < _workflows/templates/.Dockerfile-template > _workflows/Dockerfile
           echo "Generated Dockerfile:"
           cat _workflows/Dockerfile
-          envsubst '$REPO_NAME' < _workflows/.Dockerfile-lambda-template > _workflows/Dockerfile.lambda
+          envsubst '$REPO_NAME' < _workflows/templates/.Dockerfile-lambda-template > _workflows/Dockerfile.lambda
           echo "Generated Dockerfile.lambda:"
           cat _workflows/Dockerfile.lambda
 
@@ -220,7 +220,7 @@ jobs:
           DOCKERFILE_PATH: ../_workflows/Dockerfile
           DOCKERFILE_LAMBDA_PATH: ../_workflows/Dockerfile.lambda
         run: |
-          envsubst < _workflows/.goreleaser-docker-template-signing.yaml > _workflows/.goreleaser.docker.yaml
+          envsubst < _workflows/templates/.goreleaser-docker-template-signing.yaml > _workflows/.goreleaser.docker.yaml
           echo "_workflows/.goreleaser.docker.yaml:"
           cat _workflows/.goreleaser.docker.yaml
 

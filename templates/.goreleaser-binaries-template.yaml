@@ -1,3 +1,4 @@
+## NOTE: replaces .goreleaser-template.yaml
 version: 2
 project_name: "${REPO_NAME}"
 builds:
