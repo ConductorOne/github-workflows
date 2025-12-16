@@ -1,4 +1,4 @@
-## Lambda Docker template for ECR builds
+## Docker template for private Lambda ECR builds
 ## Uses older dockers config since Lambda doesn't support OCI manifests
 version: 2
 project_name: "${REPO_NAME}"

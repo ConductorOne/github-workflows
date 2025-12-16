@@ -1,4 +1,4 @@
-## DEPRECATED: starting in v3, use templates/.goreleaser-docker-template-signing.yaml instead.
+## DEPRECATED: starting in v3, use files in templates/ instead.
 ## NOTE: v1 and v2 of release.yaml workflow reference this file directly from main,
 ## so you cannot change this file in any ways that breaks those workflow versions.
 version: 2

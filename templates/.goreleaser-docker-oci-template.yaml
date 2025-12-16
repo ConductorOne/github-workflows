@@ -1,4 +1,4 @@
-## Docker template for GHCR builds
+## Docker template for signed OCI images, pushes to GHCR
 ## GoReleaser >= 2.12 required for dockers_v2
 version: 2
 project_name: "${REPO_NAME}"

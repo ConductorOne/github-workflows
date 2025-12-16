@@ -1,4 +1,4 @@
-## NOTE: replaces .goreleaser-template.yaml
+## Binary template for signed artifacts, pushes to public registry (S3 bucket)
 version: 2
 project_name: "${REPO_NAME}"
 builds:
