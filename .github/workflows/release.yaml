@@ -171,17 +171,6 @@ jobs:
           repository: ${{ github.event.repository.full_name }}
           fetch-depth: 0
 
-      - name: Configure AWS credentials via OIDC
-        if: inputs.lambda == true
-        uses: aws-actions/configure-aws-credentials@v5
-        with:
-          role-to-assume: "arn:aws:iam::168442440833:role/GitHubActionsECRPushRole-${{ github.event.repository.name }}"
-          aws-region: us-west-2
-
-      - name: Login to Amazon ECR
-        if: inputs.lambda == true
-        uses: aws-actions/amazon-ecr-login@v2
-
       - name: Checkout connector workflows
         if: inputs.docker == true || inputs.lambda == true
         uses: actions/checkout@v5
@@ -207,11 +196,10 @@ jobs:
           DOCKERFILE_PATH: ../_workflows/Dockerfile
         run: |
           envsubst '$REPO_NAME' < _workflows/templates/.Dockerfile-template > _workflows/Dockerfile
-          echo "Generated Dockerfile:"
-          cat _workflows/Dockerfile
+          echo "Generated Dockerfile:"; cat _workflows/Dockerfile
+
           envsubst < _workflows/templates/.goreleaser-docker-oci-template.yaml > _workflows/.goreleaser.docker.yaml
-          echo "_workflows/.goreleaser.docker.yaml:"
-          cat _workflows/.goreleaser.docker.yaml
+          echo "_workflows/.goreleaser.docker.yaml:"; cat _workflows/.goreleaser.docker.yaml
 
       - name: Generate Lambda Dockerfile and goreleaser config
         if: inputs.lambda == true
@@ -220,11 +208,10 @@ jobs:
           DOCKERFILE_LAMBDA_PATH: ../_workflows/Dockerfile.lambda
         run: |
           envsubst '$REPO_NAME' < _workflows/templates/.Dockerfile-lambda-template > _workflows/Dockerfile.lambda
-          echo "Generated Dockerfile.lambda:"
-          cat _workflows/Dockerfile.lambda
+          echo "Generated Dockerfile.lambda:"; cat _workflows/Dockerfile.lambda
+
           envsubst < _workflows/templates/.goreleaser-docker-lambda-template.yaml > _workflows/.goreleaser.lambda.yaml
-          echo "_workflows/.goreleaser.lambda.yaml:"
-          cat _workflows/.goreleaser.lambda.yaml
+          echo "_workflows/.goreleaser.lambda.yaml:"; cat _workflows/.goreleaser.lambda.yaml
 
       - name: Docker Login
         if: inputs.docker == true
@@ -244,7 +231,20 @@ jobs:
         if: inputs.docker == true || inputs.lambda == true
         uses: docker/setup-buildx-action@v3
 
-      - name: Run GoReleaser for Docker
+      - name: Configure Public ECR AWS credentials via OIDC
+        if: inputs.docker == true
+        uses: aws-actions/configure-aws-credentials@v5
+        with:
+          role-to-assume: arn:aws:iam::025044153841:role/GHA-Artifacts-${{ github.event.repository.owner.login }}-${{ github.event.repository.name }}
+          aws-region: us-east-1
+
+      - name: Login to Public ECR
+        if: inputs.docker == true
+        uses: aws-actions/amazon-ecr-login@v2
+        with:
+          registry-type: public
+
+      - name: Run GoReleaser for Docker OCI
         if: inputs.docker == true
         uses: goreleaser/goreleaser-action@v6
         with:
@@ -254,6 +254,17 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.RELENG_GITHUB_TOKEN }}
           COSIGN_EXPERIMENTAL: "1"
+
+      - name: Configure Lambda ECR AWS credentials via OIDC
+        if: inputs.lambda == true
+        uses: aws-actions/configure-aws-credentials@v5
+        with:
+          role-to-assume: "arn:aws:iam::168442440833:role/GitHubActionsECRPushRole-${{ github.event.repository.name }}"
+          aws-region: us-west-2
+
+      - name: Login to Lambda ECR
+        if: inputs.lambda == true
+        uses: aws-actions/amazon-ecr-login@v2
 
       - name: Run GoReleaser for Lambda
         if: inputs.lambda == true
