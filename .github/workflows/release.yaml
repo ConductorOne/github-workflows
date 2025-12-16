@@ -282,7 +282,7 @@ jobs:
         with:
           go-version-file: "_workflows/go.mod"
 
-      - name: Extract GHCR image digests from GoReleaser output
+      - name: Extract GHCR and ECR public image digests from GoReleaser output
         id: extract-images
         if: inputs.docker == true
         working-directory: _workflows

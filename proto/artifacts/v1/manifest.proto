@@ -32,8 +32,8 @@ message Manifest {
   // Keys are platform identifiers like "darwin-arm64", "linux-amd64", "windows-amd64", "checksums"
   map<string, Asset> assets = 6;
   
-  // images is a map of platform identifiers to container image metadata.
-  // Keys are platform identifiers like "index", "linux-amd64", "linux-arm64"
+  // images is a map of registry identifiers to container image metadata.
+  // Keys are registry identifiers like "ghcr", "ecr-public"
   map<string, Image> images = 7;
   
   // signature_href is the URL to the manifest signature file (manifest.json.sig)
