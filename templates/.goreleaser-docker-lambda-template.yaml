@@ -1,0 +1,40 @@
+## Docker template for private Lambda ECR builds
+## Uses older dockers config since Lambda doesn't support OCI manifests
+version: 2
+project_name: "${REPO_NAME}"
+builds:
+  - binary: "${REPO_NAME}"
+    env:
+      - CGO_ENABLED=0
+    id: linux
+    main: ./cmd/${REPO_NAME}
+    goos:
+      - linux
+    goarch:
+      - arm64
+    tags:
+      - "baton_lambda_support"
+# note: ECR supports multi-arch images and OCI manifests, but annoyingly Lambda does not,
+# so use the older dockers config to build a single-platform image with Docker v2 manifest
+dockers:
+  - id: ecr-lambda
+    use: buildx
+    goos: linux
+    goarch: arm64
+    dockerfile: ${DOCKERFILE_LAMBDA_PATH}
+    image_templates:
+      - "168442440833.dkr.ecr.us-west-2.amazonaws.com/${REPO_NAME}:{{ .Version }}-arm64"
+    build_flag_templates:
+      - "--platform=linux/arm64"
+      - "--label=org.opencontainers.image.created={{.Date}}"
+      - "--label=org.opencontainers.image.title={{.ProjectName}}"
+      - "--label=org.opencontainers.image.revision={{.FullCommit}}"
+      - "--label=org.opencontainers.image.version={{.Version}}"
+      - "--label=org.opencontainers.image.source={{.GitURL}}"
+      - "--label=org.opencontainers.image.description={{.ProjectName}}"
+checksum:
+  disable: true
+release:
+  disable: true
+changelog:
+  disable: true

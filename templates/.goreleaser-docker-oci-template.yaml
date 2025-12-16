@@ -1,5 +1,5 @@
-## NOTE: replaces .goreleaser-docker-template.yaml and .goreleaser-docker-template-no-lambda.yaml
-## Consolidated docker template for GoReleaser >= 2.12 with optional lambda build
+## Docker template for signed OCI images, pushes to GHCR
+## GoReleaser >= 2.12 required for dockers_v2
 version: 2
 project_name: "${REPO_NAME}"
 builds:
@@ -13,8 +13,6 @@ builds:
     goarch:
       - amd64
       - arm64
-    tags:
-      - "baton_lambda_support"
 dockers_v2:
   - id: ghcr
     images:
@@ -28,7 +26,6 @@ dockers_v2:
     dockerfile: ${DOCKERFILE_PATH}
     ids:
       - linux
-    disable: '{{ ne .Env.DOCKER "true" }}'
     labels:
       "org.opencontainers.image.created": "{{.Date}}"
       "org.opencontainers.image.title": "{{.ProjectName}}"
@@ -36,25 +33,6 @@ dockers_v2:
       "org.opencontainers.image.version": "{{.Version}}"
       "org.opencontainers.image.source": "{{ .GitURL }}"
       "org.opencontainers.image.description": "ConductorOne Baton connector"
-# note: ECR supports multi-arch images and OCI manifests, but annoyingly Lambda does not,
-# so use the older dockers config to build a single-platform image with Docker v2 manifest
-dockers:
-  - id: ecr-lambda
-    use: buildx
-    goos: linux
-    goarch: arm64
-    dockerfile: ${DOCKERFILE_LAMBDA_PATH}
-    image_templates:
-      - "168442440833.dkr.ecr.us-west-2.amazonaws.com/${REPO_NAME}:{{ .Version }}-arm64"
-    skip_push: '{{ ne .Env.LAMBDA "true" }}'
-    build_flag_templates:
-      - "--platform=linux/arm64"
-      - "--label=org.opencontainers.image.created={{.Date}}"
-      - "--label=org.opencontainers.image.title={{.ProjectName}}"
-      - "--label=org.opencontainers.image.revision={{.FullCommit}}"
-      - "--label=org.opencontainers.image.version={{.Version}}"
-      - "--label=org.opencontainers.image.source={{.GitURL}}"
-      - "--label=org.opencontainers.image.description={{.ProjectName}}"
 docker_digest:
   name_template: "{{ .ProjectName }}_{{ .Version }}_digests.txt"
 # sign each image by digest
@@ -62,6 +40,7 @@ docker_signs:
   - id: cosign-images
     output: true
     cmd: cosign
+    artifacts: image
     env:
       - COSIGN_EXPERIMENTAL=1
     args:
