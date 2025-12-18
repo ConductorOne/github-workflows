@@ -289,7 +289,7 @@ type Manifest_builder struct {
 	// Keys are platform identifiers like "darwin-arm64", "linux-amd64", "windows-amd64", "checksums"
 	Assets map[string]*Asset
 	// images is a map of registry identifiers to container image metadata.
-	// Keys are registry identifiers like "ghcr", "ecr-public"
+	// Keys are registry identifiers like "ghcr", "ecrPublic"
 	Images map[string]*Image
 	// signature_href is the URL to the manifest signature file (manifest.json.sig)
 	SignatureHref *string

@@ -312,8 +312,8 @@ type Stable_builder struct {
 	// assets is a map of platform/type identifiers to asset metadata.
 	// Keys are platform identifiers like "darwin-arm64", "linux-amd64", "windows-amd64", "checksums"
 	Assets map[string]*Asset
-	// images is a map of platform identifiers to container image metadata.
-	// Keys are platform identifiers like "index", "linux-amd64", "linux-arm64"
+	// images is a map of registry identifiers to container image metadata.
+	// Keys are registry identifiers like "ghcr", "ecrPublic"
 	Images map[string]*Image
 	// signature_href is the URL to the manifest signature file (manifest.json.sig)
 	SignatureHref *string

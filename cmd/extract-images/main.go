@@ -82,7 +82,7 @@ func main() {
 			image := &pb.Image{}
 			image.SetRef(ref)
 			image.SetDigest(digest)
-			images["ecr-public"] = image
+			images["ecrPublic"] = image
 			foundECR = true
 		}
 	}

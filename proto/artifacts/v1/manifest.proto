@@ -33,7 +33,7 @@ message Manifest {
   map<string, Asset> assets = 6;
   
   // images is a map of registry identifiers to container image metadata.
-  // Keys are registry identifiers like "ghcr", "ecr-public"
+  // Keys are registry identifiers like "ghcr", "ecrPublic"
   map<string, Image> images = 7;
   
   // signature_href is the URL to the manifest signature file (manifest.json.sig)

@@ -194,6 +194,7 @@ jobs:
         env:
           REPO_NAME: ${{ github.event.repository.name }}
           DOCKERFILE_PATH: ../_workflows/Dockerfile
+          DIST_DIR: dist/oci
         run: |
           envsubst '$REPO_NAME' < _workflows/templates/.Dockerfile-template > _workflows/Dockerfile
           echo "Generated Dockerfile:"; cat _workflows/Dockerfile
@@ -206,6 +207,7 @@ jobs:
         env:
           REPO_NAME: ${{ github.event.repository.name }}
           DOCKERFILE_LAMBDA_PATH: ../_workflows/Dockerfile.lambda
+          DIST_DIR: dist/lambda
         run: |
           envsubst '$REPO_NAME' < _workflows/templates/.Dockerfile-lambda-template > _workflows/Dockerfile.lambda
           echo "Generated Dockerfile.lambda:"; cat _workflows/Dockerfile.lambda
@@ -272,7 +274,7 @@ jobs:
         with:
           workdir: _caller
           version: "~> v2.13"
-          args: release --skip=clean --config ../_workflows/.goreleaser.lambda.yaml
+          args: release --clean --config ../_workflows/.goreleaser.lambda.yaml
         env:
           GITHUB_TOKEN: ${{ secrets.RELENG_GITHUB_TOKEN }}
 
@@ -282,7 +284,7 @@ jobs:
         with:
           go-version-file: "_workflows/go.mod"
 
-      - name: Extract GHCR and ECR public image digests from GoReleaser output
+      - name: Extract GHCR and ECR public image digests from OCI assets
         id: extract-images
         if: inputs.docker == true
         working-directory: _workflows
@@ -290,9 +292,10 @@ jobs:
           REPO_NAME: ${{ github.event.repository.name }}
           TAG: ${{ inputs.tag }}
           GITHUB_OUTPUT: ${{ github.output }}
+          DIST_DIR: "dist/oci"
         run: |
           go run ./cmd/extract-images \
-            -asset-dir ../_caller/dist \
+            -asset-dir ../_caller/$DIST_DIR \
             -repo-name "${{ github.event.repository.name }}" \
             -tag "${{ inputs.tag }}" \
             -github-output "$GITHUB_OUTPUT"
