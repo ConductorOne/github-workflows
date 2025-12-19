@@ -26,20 +26,22 @@ const (
 // Manifest represents the immutable artifact metadata for a specific release version.
 // This manifest is stored at the versioned path: releases/{org}/{repo}/{tag}/manifest.json
 type Manifest struct {
-	state                      protoimpl.MessageState `protogen:"opaque.v1"`
-	xxx_hidden_Version         *string                `protobuf:"bytes,1,opt,name=version"`
-	xxx_hidden_Name            *string                `protobuf:"bytes,2,opt,name=name"`
-	xxx_hidden_Org             *string                `protobuf:"bytes,3,opt,name=org"`
-	xxx_hidden_Semver          *string                `protobuf:"bytes,4,opt,name=semver"`
-	xxx_hidden_ReleasedAt      *timestamppb.Timestamp `protobuf:"bytes,5,opt,name=released_at,json=releasedAt"`
-	xxx_hidden_Assets          map[string]*Asset      `protobuf:"bytes,6,rep,name=assets" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
-	xxx_hidden_Images          map[string]*Image      `protobuf:"bytes,7,rep,name=images" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
-	xxx_hidden_SignatureHref   *string                `protobuf:"bytes,8,opt,name=signature_href,json=signatureHref"`
-	xxx_hidden_CertificateHref *string                `protobuf:"bytes,9,opt,name=certificate_href,json=certificateHref"`
-	XXX_raceDetectHookData     protoimpl.RaceDetectHookData
-	XXX_presence               [1]uint32
-	unknownFields              protoimpl.UnknownFields
-	sizeCache                  protoimpl.SizeCache
+	state                       protoimpl.MessageState `protogen:"opaque.v1"`
+	xxx_hidden_Version          *string                `protobuf:"bytes,1,opt,name=version"`
+	xxx_hidden_Name             *string                `protobuf:"bytes,2,opt,name=name"`
+	xxx_hidden_Org              *string                `protobuf:"bytes,3,opt,name=org"`
+	xxx_hidden_Semver           *string                `protobuf:"bytes,4,opt,name=semver"`
+	xxx_hidden_ReleasedAt       *timestamppb.Timestamp `protobuf:"bytes,5,opt,name=released_at,json=releasedAt"`
+	xxx_hidden_Assets           map[string]*Asset      `protobuf:"bytes,6,rep,name=assets" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
+	xxx_hidden_Images           map[string]*Image      `protobuf:"bytes,7,rep,name=images" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
+	xxx_hidden_SignatureHref    *string                `protobuf:"bytes,8,opt,name=signature_href,json=signatureHref"`
+	xxx_hidden_CertificateHref  *string                `protobuf:"bytes,9,opt,name=certificate_href,json=certificateHref"`
+	xxx_hidden_ImageAttestation *AttestationDescriptor `protobuf:"bytes,10,opt,name=image_attestation,json=imageAttestation"`
+	xxx_hidden_AssetAttestation *AttestationDescriptor `protobuf:"bytes,11,opt,name=asset_attestation,json=assetAttestation"`
+	XXX_raceDetectHookData      protoimpl.RaceDetectHookData
+	XXX_presence                [1]uint32
+	unknownFields               protoimpl.UnknownFields
+	sizeCache                   protoimpl.SizeCache
 }
 
 func (x *Manifest) Reset() {
@@ -148,24 +150,38 @@ func (x *Manifest) GetCertificateHref() string {
 	return ""
 }
 
+func (x *Manifest) GetImageAttestation() *AttestationDescriptor {
+	if x != nil {
+		return x.xxx_hidden_ImageAttestation
+	}
+	return nil
+}
+
+func (x *Manifest) GetAssetAttestation() *AttestationDescriptor {
+	if x != nil {
+		return x.xxx_hidden_AssetAttestation
+	}
+	return nil
+}
+
 func (x *Manifest) SetVersion(v string) {
 	x.xxx_hidden_Version = &v
-	protoimpl.X.SetPresent(&(x.XXX_presence[0]), 0, 9)
+	protoimpl.X.SetPresent(&(x.XXX_presence[0]), 0, 11)
 }
 
 func (x *Manifest) SetName(v string) {
 	x.xxx_hidden_Name = &v
-	protoimpl.X.SetPresent(&(x.XXX_presence[0]), 1, 9)
+	protoimpl.X.SetPresent(&(x.XXX_presence[0]), 1, 11)
 }
 
 func (x *Manifest) SetOrg(v string) {
 	x.xxx_hidden_Org = &v
-	protoimpl.X.SetPresent(&(x.XXX_presence[0]), 2, 9)
+	protoimpl.X.SetPresent(&(x.XXX_presence[0]), 2, 11)
 }
 
 func (x *Manifest) SetSemver(v string) {
 	x.xxx_hidden_Semver = &v
-	protoimpl.X.SetPresent(&(x.XXX_presence[0]), 3, 9)
+	protoimpl.X.SetPresent(&(x.XXX_presence[0]), 3, 11)
 }
 
 func (x *Manifest) SetReleasedAt(v *timestamppb.Timestamp) {
@@ -182,12 +198,20 @@ func (x *Manifest) SetImages(v map[string]*Image) {
 
 func (x *Manifest) SetSignatureHref(v string) {
 	x.xxx_hidden_SignatureHref = &v
-	protoimpl.X.SetPresent(&(x.XXX_presence[0]), 7, 9)
+	protoimpl.X.SetPresent(&(x.XXX_presence[0]), 7, 11)
 }
 
 func (x *Manifest) SetCertificateHref(v string) {
 	x.xxx_hidden_CertificateHref = &v
-	protoimpl.X.SetPresent(&(x.XXX_presence[0]), 8, 9)
+	protoimpl.X.SetPresent(&(x.XXX_presence[0]), 8, 11)
+}
+
+func (x *Manifest) SetImageAttestation(v *AttestationDescriptor) {
+	x.xxx_hidden_ImageAttestation = v
+}
+
+func (x *Manifest) SetAssetAttestation(v *AttestationDescriptor) {
+	x.xxx_hidden_AssetAttestation = v
 }
 
 func (x *Manifest) HasVersion() bool {
@@ -239,6 +263,20 @@ func (x *Manifest) HasCertificateHref() bool {
 	return protoimpl.X.Present(&(x.XXX_presence[0]), 8)
 }
 
+func (x *Manifest) HasImageAttestation() bool {
+	if x == nil {
+		return false
+	}
+	return x.xxx_hidden_ImageAttestation != nil
+}
+
+func (x *Manifest) HasAssetAttestation() bool {
+	if x == nil {
+		return false
+	}
+	return x.xxx_hidden_AssetAttestation != nil
+}
+
 func (x *Manifest) ClearVersion() {
 	protoimpl.X.ClearPresent(&(x.XXX_presence[0]), 0)
 	x.xxx_hidden_Version = nil
@@ -273,10 +311,18 @@ func (x *Manifest) ClearCertificateHref() {
 	x.xxx_hidden_CertificateHref = nil
 }
 
+func (x *Manifest) ClearImageAttestation() {
+	x.xxx_hidden_ImageAttestation = nil
+}
+
+func (x *Manifest) ClearAssetAttestation() {
+	x.xxx_hidden_AssetAttestation = nil
+}
+
 type Manifest_builder struct {
 	_ [0]func() // Prevents comparability and use of unkeyed literals for the builder.
 
-	// version is the manifest schema version (currently "1")
+	// version is the manifest schema version (currently "1" or "2")
 	Version *string
 	// name is the repository name (e.g., "baton-ukg")
 	Name *string
@@ -296,6 +342,14 @@ type Manifest_builder struct {
 	SignatureHref *string
 	// certificate_href is the URL to the manifest certificate file (manifest.json.cert)
 	CertificateHref *string
+	// image_attestation describes OCI-native attestation conventions for images in this release.
+	// For OCI-native (registry) attestations, bundle_href is omitted because discovery is via OCI referrers.
+	// Use predicate_type to filter (e.g., provenance vs SBOM).
+	ImageAttestation *AttestationDescriptor
+	// asset_attestation describes attestation conventions for S3-hosted binary artifacts.
+	// Per-asset attestations (provenance, SBOM) are in Asset.attestations[].
+	// This field documents the types used across all assets.
+	AssetAttestation *AttestationDescriptor
 }
 
 func (b0 Manifest_builder) Build() *Manifest {
@@ -303,46 +357,49 @@ func (b0 Manifest_builder) Build() *Manifest {
 	b, x := &b0, m0
 	_, _ = b, x
 	if b.Version != nil {
-		protoimpl.X.SetPresentNonAtomic(&(x.XXX_presence[0]), 0, 9)
+		protoimpl.X.SetPresentNonAtomic(&(x.XXX_presence[0]), 0, 11)
 		x.xxx_hidden_Version = b.Version
 	}
 	if b.Name != nil {
-		protoimpl.X.SetPresentNonAtomic(&(x.XXX_presence[0]), 1, 9)
+		protoimpl.X.SetPresentNonAtomic(&(x.XXX_presence[0]), 1, 11)
 		x.xxx_hidden_Name = b.Name
 	}
 	if b.Org != nil {
-		protoimpl.X.SetPresentNonAtomic(&(x.XXX_presence[0]), 2, 9)
+		protoimpl.X.SetPresentNonAtomic(&(x.XXX_presence[0]), 2, 11)
 		x.xxx_hidden_Org = b.Org
 	}
 	if b.Semver != nil {
-		protoimpl.X.SetPresentNonAtomic(&(x.XXX_presence[0]), 3, 9)
+		protoimpl.X.SetPresentNonAtomic(&(x.XXX_presence[0]), 3, 11)
 		x.xxx_hidden_Semver = b.Semver
 	}
 	x.xxx_hidden_ReleasedAt = b.ReleasedAt
 	x.xxx_hidden_Assets = b.Assets
 	x.xxx_hidden_Images = b.Images
 	if b.SignatureHref != nil {
-		protoimpl.X.SetPresentNonAtomic(&(x.XXX_presence[0]), 7, 9)
+		protoimpl.X.SetPresentNonAtomic(&(x.XXX_presence[0]), 7, 11)
 		x.xxx_hidden_SignatureHref = b.SignatureHref
 	}
 	if b.CertificateHref != nil {
-		protoimpl.X.SetPresentNonAtomic(&(x.XXX_presence[0]), 8, 9)
+		protoimpl.X.SetPresentNonAtomic(&(x.XXX_presence[0]), 8, 11)
 		x.xxx_hidden_CertificateHref = b.CertificateHref
 	}
+	x.xxx_hidden_ImageAttestation = b.ImageAttestation
+	x.xxx_hidden_AssetAttestation = b.AssetAttestation
 	return m0
 }
 
 // Asset represents metadata for a single binary artifact.
 type Asset struct {
-	state                      protoimpl.MessageState `protogen:"opaque.v1"`
-	xxx_hidden_Filename        *string                `protobuf:"bytes,1,opt,name=filename"`
-	xxx_hidden_MediaType       *string                `protobuf:"bytes,2,opt,name=media_type,json=mediaType"`
-	xxx_hidden_SizeBytes       int64                  `protobuf:"varint,3,opt,name=size_bytes,json=sizeBytes"`
-	xxx_hidden_Sha256          *string                `protobuf:"bytes,4,opt,name=sha256"`
-	xxx_hidden_Href            *string                `protobuf:"bytes,5,opt,name=href"`
-	xxx_hidden_SignatureHref   *string                `protobuf:"bytes,6,opt,name=signature_href,json=signatureHref"`
-	xxx_hidden_CertificateHref *string                `protobuf:"bytes,7,opt,name=certificate_href,json=certificateHref"`
-	xxx_hidden_SbomHref        *string                `protobuf:"bytes,8,opt,name=sbom_href,json=sbomHref"`
+	state                      protoimpl.MessageState    `protogen:"opaque.v1"`
+	xxx_hidden_Filename        *string                   `protobuf:"bytes,1,opt,name=filename"`
+	xxx_hidden_MediaType       *string                   `protobuf:"bytes,2,opt,name=media_type,json=mediaType"`
+	xxx_hidden_SizeBytes       int64                     `protobuf:"varint,3,opt,name=size_bytes,json=sizeBytes"`
+	xxx_hidden_Sha256          *string                   `protobuf:"bytes,4,opt,name=sha256"`
+	xxx_hidden_Href            *string                   `protobuf:"bytes,5,opt,name=href"`
+	xxx_hidden_SignatureHref   *string                   `protobuf:"bytes,6,opt,name=signature_href,json=signatureHref"`
+	xxx_hidden_CertificateHref *string                   `protobuf:"bytes,7,opt,name=certificate_href,json=certificateHref"`
+	xxx_hidden_SbomHref        *string                   `protobuf:"bytes,8,opt,name=sbom_href,json=sbomHref"`
+	xxx_hidden_Attestations    *[]*AttestationDescriptor `protobuf:"bytes,9,rep,name=attestations"`
 	XXX_raceDetectHookData     protoimpl.RaceDetectHookData
 	XXX_presence               [1]uint32
 	unknownFields              protoimpl.UnknownFields
@@ -441,6 +498,7 @@ func (x *Asset) GetCertificateHref() string {
 	return ""
 }
 
+// Deprecated: Marked as deprecated in artifacts/v1/manifest.proto.
 func (x *Asset) GetSbomHref() string {
 	if x != nil {
 		if x.xxx_hidden_SbomHref != nil {
@@ -451,44 +509,58 @@ func (x *Asset) GetSbomHref() string {
 	return ""
 }
 
+func (x *Asset) GetAttestations() []*AttestationDescriptor {
+	if x != nil {
+		if x.xxx_hidden_Attestations != nil {
+			return *x.xxx_hidden_Attestations
+		}
+	}
+	return nil
+}
+
 func (x *Asset) SetFilename(v string) {
 	x.xxx_hidden_Filename = &v
-	protoimpl.X.SetPresent(&(x.XXX_presence[0]), 0, 8)
+	protoimpl.X.SetPresent(&(x.XXX_presence[0]), 0, 9)
 }
 
 func (x *Asset) SetMediaType(v string) {
 	x.xxx_hidden_MediaType = &v
-	protoimpl.X.SetPresent(&(x.XXX_presence[0]), 1, 8)
+	protoimpl.X.SetPresent(&(x.XXX_presence[0]), 1, 9)
 }
 
 func (x *Asset) SetSizeBytes(v int64) {
 	x.xxx_hidden_SizeBytes = v
-	protoimpl.X.SetPresent(&(x.XXX_presence[0]), 2, 8)
+	protoimpl.X.SetPresent(&(x.XXX_presence[0]), 2, 9)
 }
 
 func (x *Asset) SetSha256(v string) {
 	x.xxx_hidden_Sha256 = &v
-	protoimpl.X.SetPresent(&(x.XXX_presence[0]), 3, 8)
+	protoimpl.X.SetPresent(&(x.XXX_presence[0]), 3, 9)
 }
 
 func (x *Asset) SetHref(v string) {
 	x.xxx_hidden_Href = &v
-	protoimpl.X.SetPresent(&(x.XXX_presence[0]), 4, 8)
+	protoimpl.X.SetPresent(&(x.XXX_presence[0]), 4, 9)
 }
 
 func (x *Asset) SetSignatureHref(v string) {
 	x.xxx_hidden_SignatureHref = &v
-	protoimpl.X.SetPresent(&(x.XXX_presence[0]), 5, 8)
+	protoimpl.X.SetPresent(&(x.XXX_presence[0]), 5, 9)
 }
 
 func (x *Asset) SetCertificateHref(v string) {
 	x.xxx_hidden_CertificateHref = &v
-	protoimpl.X.SetPresent(&(x.XXX_presence[0]), 6, 8)
+	protoimpl.X.SetPresent(&(x.XXX_presence[0]), 6, 9)
 }
 
+// Deprecated: Marked as deprecated in artifacts/v1/manifest.proto.
 func (x *Asset) SetSbomHref(v string) {
 	x.xxx_hidden_SbomHref = &v
-	protoimpl.X.SetPresent(&(x.XXX_presence[0]), 7, 8)
+	protoimpl.X.SetPresent(&(x.XXX_presence[0]), 7, 9)
+}
+
+func (x *Asset) SetAttestations(v []*AttestationDescriptor) {
+	x.xxx_hidden_Attestations = &v
 }
 
 func (x *Asset) HasFilename() bool {
@@ -540,6 +612,7 @@ func (x *Asset) HasCertificateHref() bool {
 	return protoimpl.X.Present(&(x.XXX_presence[0]), 6)
 }
 
+// Deprecated: Marked as deprecated in artifacts/v1/manifest.proto.
 func (x *Asset) HasSbomHref() bool {
 	if x == nil {
 		return false
@@ -582,6 +655,7 @@ func (x *Asset) ClearCertificateHref() {
 	x.xxx_hidden_CertificateHref = nil
 }
 
+// Deprecated: Marked as deprecated in artifacts/v1/manifest.proto.
 func (x *Asset) ClearSbomHref() {
 	protoimpl.X.ClearPresent(&(x.XXX_presence[0]), 7)
 	x.xxx_hidden_SbomHref = nil
@@ -604,8 +678,15 @@ type Asset_builder struct {
 	SignatureHref *string
 	// certificate_href is the URL to the artifact certificate file (filename.cert)
 	CertificateHref *string
-	// sbom_href is the optional URL to the Software Bill of Materials file (filename.sbom.json)
+	// sbom_href is the optional URL to the Software Bill of Materials file (filename.sbom.json).
+	// DEPRECATED: Use attestations with predicate_type "https://spdx.dev/Document" instead.
+	//
+	// Deprecated: Marked as deprecated in artifacts/v1/manifest.proto.
 	SbomHref *string
+	// attestations is an optional list of attestations specific to this asset (e.g., per-archive provenance).
+	// For your customer flow (verify one OS artifact at a time), this is the recommended place to link
+	// per-artifact provenance and/or SBOM attestations stored in S3.
+	Attestations []*AttestationDescriptor
 }
 
 func (b0 Asset_builder) Build() *Asset {
@@ -613,45 +694,49 @@ func (b0 Asset_builder) Build() *Asset {
 	b, x := &b0, m0
 	_, _ = b, x
 	if b.Filename != nil {
-		protoimpl.X.SetPresentNonAtomic(&(x.XXX_presence[0]), 0, 8)
+		protoimpl.X.SetPresentNonAtomic(&(x.XXX_presence[0]), 0, 9)
 		x.xxx_hidden_Filename = b.Filename
 	}
 	if b.MediaType != nil {
-		protoimpl.X.SetPresentNonAtomic(&(x.XXX_presence[0]), 1, 8)
+		protoimpl.X.SetPresentNonAtomic(&(x.XXX_presence[0]), 1, 9)
 		x.xxx_hidden_MediaType = b.MediaType
 	}
 	if b.SizeBytes != nil {
-		protoimpl.X.SetPresentNonAtomic(&(x.XXX_presence[0]), 2, 8)
+		protoimpl.X.SetPresentNonAtomic(&(x.XXX_presence[0]), 2, 9)
 		x.xxx_hidden_SizeBytes = *b.SizeBytes
 	}
 	if b.Sha256 != nil {
-		protoimpl.X.SetPresentNonAtomic(&(x.XXX_presence[0]), 3, 8)
+		protoimpl.X.SetPresentNonAtomic(&(x.XXX_presence[0]), 3, 9)
 		x.xxx_hidden_Sha256 = b.Sha256
 	}
 	if b.Href != nil {
-		protoimpl.X.SetPresentNonAtomic(&(x.XXX_presence[0]), 4, 8)
+		protoimpl.X.SetPresentNonAtomic(&(x.XXX_presence[0]), 4, 9)
 		x.xxx_hidden_Href = b.Href
 	}
 	if b.SignatureHref != nil {
-		protoimpl.X.SetPresentNonAtomic(&(x.XXX_presence[0]), 5, 8)
+		protoimpl.X.SetPresentNonAtomic(&(x.XXX_presence[0]), 5, 9)
 		x.xxx_hidden_SignatureHref = b.SignatureHref
 	}
 	if b.CertificateHref != nil {
-		protoimpl.X.SetPresentNonAtomic(&(x.XXX_presence[0]), 6, 8)
+		protoimpl.X.SetPresentNonAtomic(&(x.XXX_presence[0]), 6, 9)
 		x.xxx_hidden_CertificateHref = b.CertificateHref
 	}
 	if b.SbomHref != nil {
-		protoimpl.X.SetPresentNonAtomic(&(x.XXX_presence[0]), 7, 8)
+		protoimpl.X.SetPresentNonAtomic(&(x.XXX_presence[0]), 7, 9)
 		x.xxx_hidden_SbomHref = b.SbomHref
 	}
+	x.xxx_hidden_Attestations = &b.Attestations
 	return m0
 }
 
-// Image represents metadata for a container image.
+// Image represents metadata for a container image (digest-first).
 type Image struct {
 	state                  protoimpl.MessageState `protogen:"opaque.v1"`
 	xxx_hidden_Ref         *string                `protobuf:"bytes,1,opt,name=ref"`
 	xxx_hidden_Digest      *string                `protobuf:"bytes,2,opt,name=digest"`
+	xxx_hidden_Tag         *string                `protobuf:"bytes,3,opt,name=tag"`
+	xxx_hidden_Uri         *string                `protobuf:"bytes,4,opt,name=uri"`
+	xxx_hidden_IsIndex     bool                   `protobuf:"varint,5,opt,name=is_index,json=isIndex"`
 	XXX_raceDetectHookData protoimpl.RaceDetectHookData
 	XXX_presence           [1]uint32
 	unknownFields          protoimpl.UnknownFields
@@ -703,14 +788,56 @@ func (x *Image) GetDigest() string {
 	return ""
 }
 
+func (x *Image) GetTag() string {
+	if x != nil {
+		if x.xxx_hidden_Tag != nil {
+			return *x.xxx_hidden_Tag
+		}
+		return ""
+	}
+	return ""
+}
+
+func (x *Image) GetUri() string {
+	if x != nil {
+		if x.xxx_hidden_Uri != nil {
+			return *x.xxx_hidden_Uri
+		}
+		return ""
+	}
+	return ""
+}
+
+func (x *Image) GetIsIndex() bool {
+	if x != nil {
+		return x.xxx_hidden_IsIndex
+	}
+	return false
+}
+
 func (x *Image) SetRef(v string) {
 	x.xxx_hidden_Ref = &v
-	protoimpl.X.SetPresent(&(x.XXX_presence[0]), 0, 2)
+	protoimpl.X.SetPresent(&(x.XXX_presence[0]), 0, 5)
 }
 
 func (x *Image) SetDigest(v string) {
 	x.xxx_hidden_Digest = &v
-	protoimpl.X.SetPresent(&(x.XXX_presence[0]), 1, 2)
+	protoimpl.X.SetPresent(&(x.XXX_presence[0]), 1, 5)
+}
+
+func (x *Image) SetTag(v string) {
+	x.xxx_hidden_Tag = &v
+	protoimpl.X.SetPresent(&(x.XXX_presence[0]), 2, 5)
+}
+
+func (x *Image) SetUri(v string) {
+	x.xxx_hidden_Uri = &v
+	protoimpl.X.SetPresent(&(x.XXX_presence[0]), 3, 5)
+}
+
+func (x *Image) SetIsIndex(v bool) {
+	x.xxx_hidden_IsIndex = v
+	protoimpl.X.SetPresent(&(x.XXX_presence[0]), 4, 5)
 }
 
 func (x *Image) HasRef() bool {
@@ -727,6 +854,27 @@ func (x *Image) HasDigest() bool {
 	return protoimpl.X.Present(&(x.XXX_presence[0]), 1)
 }
 
+func (x *Image) HasTag() bool {
+	if x == nil {
+		return false
+	}
+	return protoimpl.X.Present(&(x.XXX_presence[0]), 2)
+}
+
+func (x *Image) HasUri() bool {
+	if x == nil {
+		return false
+	}
+	return protoimpl.X.Present(&(x.XXX_presence[0]), 3)
+}
+
+func (x *Image) HasIsIndex() bool {
+	if x == nil {
+		return false
+	}
+	return protoimpl.X.Present(&(x.XXX_presence[0]), 4)
+}
+
 func (x *Image) ClearRef() {
 	protoimpl.X.ClearPresent(&(x.XXX_presence[0]), 0)
 	x.xxx_hidden_Ref = nil
@@ -737,13 +885,34 @@ func (x *Image) ClearDigest() {
 	x.xxx_hidden_Digest = nil
 }
 
+func (x *Image) ClearTag() {
+	protoimpl.X.ClearPresent(&(x.XXX_presence[0]), 2)
+	x.xxx_hidden_Tag = nil
+}
+
+func (x *Image) ClearUri() {
+	protoimpl.X.ClearPresent(&(x.XXX_presence[0]), 3)
+	x.xxx_hidden_Uri = nil
+}
+
+func (x *Image) ClearIsIndex() {
+	protoimpl.X.ClearPresent(&(x.XXX_presence[0]), 4)
+	x.xxx_hidden_IsIndex = false
+}
+
 type Image_builder struct {
 	_ [0]func() // Prevents comparability and use of unkeyed literals for the builder.
 
-	// ref is the full image reference (e.g., "ghcr.io/conductorone/baton-ukg:v0.0.8")
+	// ref is the tag-based image reference (e.g., "ghcr.io/conductorone/baton-ukg:0.1.98")
 	Ref *string
-	// digest is the image digest in the format "sha256:<hex>" (e.g., "sha256:abc123...")
+	// digest is the immutable image digest in the format "sha256:<hex>" (e.g., "sha256:abc123...")
 	Digest *string
+	// tag is the tag portion of ref (e.g., "0.1.98").
+	Tag *string
+	// uri is the canonical digest-pinned OCI reference (e.g., "…@sha256:<hex>")
+	Uri *string
+	// is_index indicates whether this digest refers to a multi-arch index (manifest list).
+	IsIndex *bool
 }
 
 func (b0 Image_builder) Build() *Image {
@@ -751,12 +920,182 @@ func (b0 Image_builder) Build() *Image {
 	b, x := &b0, m0
 	_, _ = b, x
 	if b.Ref != nil {
-		protoimpl.X.SetPresentNonAtomic(&(x.XXX_presence[0]), 0, 2)
+		protoimpl.X.SetPresentNonAtomic(&(x.XXX_presence[0]), 0, 5)
 		x.xxx_hidden_Ref = b.Ref
 	}
 	if b.Digest != nil {
-		protoimpl.X.SetPresentNonAtomic(&(x.XXX_presence[0]), 1, 2)
+		protoimpl.X.SetPresentNonAtomic(&(x.XXX_presence[0]), 1, 5)
 		x.xxx_hidden_Digest = b.Digest
+	}
+	if b.Tag != nil {
+		protoimpl.X.SetPresentNonAtomic(&(x.XXX_presence[0]), 2, 5)
+		x.xxx_hidden_Tag = b.Tag
+	}
+	if b.Uri != nil {
+		protoimpl.X.SetPresentNonAtomic(&(x.XXX_presence[0]), 3, 5)
+		x.xxx_hidden_Uri = b.Uri
+	}
+	if b.IsIndex != nil {
+		protoimpl.X.SetPresentNonAtomic(&(x.XXX_presence[0]), 4, 5)
+		x.xxx_hidden_IsIndex = *b.IsIndex
+	}
+	return m0
+}
+
+// AttestationDescriptor describes how an attestation is represented and where it can be retrieved.
+//
+// For OCI-native (registry) attestations, bundle_href is omitted because attestations are discovered
+// via OCI referrers for the image digest (e.g., cosign verify-attestation).
+//
+// For S3-hosted binary attestations, bundle_href points to the .sigstore.json bundle containing
+// the DSSE envelope, signature, certificate, and transparency log proof.
+type AttestationDescriptor struct {
+	state                      protoimpl.MessageState `protogen:"opaque.v1"`
+	xxx_hidden_AttestationType *string                `protobuf:"bytes,1,opt,name=attestation_type,json=attestationType"`
+	xxx_hidden_PredicateType   *string                `protobuf:"bytes,2,opt,name=predicate_type,json=predicateType"`
+	xxx_hidden_BundleHref      *string                `protobuf:"bytes,3,opt,name=bundle_href,json=bundleHref"`
+	XXX_raceDetectHookData     protoimpl.RaceDetectHookData
+	XXX_presence               [1]uint32
+	unknownFields              protoimpl.UnknownFields
+	sizeCache                  protoimpl.SizeCache
+}
+
+func (x *AttestationDescriptor) Reset() {
+	*x = AttestationDescriptor{}
+	mi := &file_artifacts_v1_manifest_proto_msgTypes[3]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *AttestationDescriptor) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*AttestationDescriptor) ProtoMessage() {}
+
+func (x *AttestationDescriptor) ProtoReflect() protoreflect.Message {
+	mi := &file_artifacts_v1_manifest_proto_msgTypes[3]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+func (x *AttestationDescriptor) GetAttestationType() string {
+	if x != nil {
+		if x.xxx_hidden_AttestationType != nil {
+			return *x.xxx_hidden_AttestationType
+		}
+		return ""
+	}
+	return ""
+}
+
+func (x *AttestationDescriptor) GetPredicateType() string {
+	if x != nil {
+		if x.xxx_hidden_PredicateType != nil {
+			return *x.xxx_hidden_PredicateType
+		}
+		return ""
+	}
+	return ""
+}
+
+func (x *AttestationDescriptor) GetBundleHref() string {
+	if x != nil {
+		if x.xxx_hidden_BundleHref != nil {
+			return *x.xxx_hidden_BundleHref
+		}
+		return ""
+	}
+	return ""
+}
+
+func (x *AttestationDescriptor) SetAttestationType(v string) {
+	x.xxx_hidden_AttestationType = &v
+	protoimpl.X.SetPresent(&(x.XXX_presence[0]), 0, 3)
+}
+
+func (x *AttestationDescriptor) SetPredicateType(v string) {
+	x.xxx_hidden_PredicateType = &v
+	protoimpl.X.SetPresent(&(x.XXX_presence[0]), 1, 3)
+}
+
+func (x *AttestationDescriptor) SetBundleHref(v string) {
+	x.xxx_hidden_BundleHref = &v
+	protoimpl.X.SetPresent(&(x.XXX_presence[0]), 2, 3)
+}
+
+func (x *AttestationDescriptor) HasAttestationType() bool {
+	if x == nil {
+		return false
+	}
+	return protoimpl.X.Present(&(x.XXX_presence[0]), 0)
+}
+
+func (x *AttestationDescriptor) HasPredicateType() bool {
+	if x == nil {
+		return false
+	}
+	return protoimpl.X.Present(&(x.XXX_presence[0]), 1)
+}
+
+func (x *AttestationDescriptor) HasBundleHref() bool {
+	if x == nil {
+		return false
+	}
+	return protoimpl.X.Present(&(x.XXX_presence[0]), 2)
+}
+
+func (x *AttestationDescriptor) ClearAttestationType() {
+	protoimpl.X.ClearPresent(&(x.XXX_presence[0]), 0)
+	x.xxx_hidden_AttestationType = nil
+}
+
+func (x *AttestationDescriptor) ClearPredicateType() {
+	protoimpl.X.ClearPresent(&(x.XXX_presence[0]), 1)
+	x.xxx_hidden_PredicateType = nil
+}
+
+func (x *AttestationDescriptor) ClearBundleHref() {
+	protoimpl.X.ClearPresent(&(x.XXX_presence[0]), 2)
+	x.xxx_hidden_BundleHref = nil
+}
+
+type AttestationDescriptor_builder struct {
+	_ [0]func() // Prevents comparability and use of unkeyed literals for the builder.
+
+	// attestation_type is the envelope type, typically "https://in-toto.io/Statement/v1".
+	AttestationType *string
+	// predicate_type identifies the attestation predicate, e.g.:
+	// - provenance: "https://slsa.dev/provenance/v1"
+	// - sbom:       "https://spdx.dev/Document"
+	PredicateType *string
+	// bundle_href is the URL to the Sigstore bundle (.sigstore.json) containing
+	// the attestation, signature, certificate, and transparency log proof.
+	// For OCI-native attestations (images), this is omitted - use OCI referrers.
+	BundleHref *string
+}
+
+func (b0 AttestationDescriptor_builder) Build() *AttestationDescriptor {
+	m0 := &AttestationDescriptor{}
+	b, x := &b0, m0
+	_, _ = b, x
+	if b.AttestationType != nil {
+		protoimpl.X.SetPresentNonAtomic(&(x.XXX_presence[0]), 0, 3)
+		x.xxx_hidden_AttestationType = b.AttestationType
+	}
+	if b.PredicateType != nil {
+		protoimpl.X.SetPresentNonAtomic(&(x.XXX_presence[0]), 1, 3)
+		x.xxx_hidden_PredicateType = b.PredicateType
+	}
+	if b.BundleHref != nil {
+		protoimpl.X.SetPresentNonAtomic(&(x.XXX_presence[0]), 2, 3)
+		x.xxx_hidden_BundleHref = b.BundleHref
 	}
 	return m0
 }
@@ -765,7 +1104,7 @@ var File_artifacts_v1_manifest_proto protoreflect.FileDescriptor
 
 const file_artifacts_v1_manifest_proto_rawDesc = "" +
 	"\n" +
-	"\x1bartifacts/v1/manifest.proto\x12\fartifacts.v1\x1a\x1fgoogle/protobuf/timestamp.proto\x1a!google/protobuf/go_features.proto\"\x89\x04\n" +
+	"\x1bartifacts/v1/manifest.proto\x12\fartifacts.v1\x1a\x1fgoogle/protobuf/timestamp.proto\x1a!google/protobuf/go_features.proto\"\xad\x05\n" +
 	"\bManifest\x12\x18\n" +
 	"\aversion\x18\x01 \x01(\tR\aversion\x12\x12\n" +
 	"\x04name\x18\x02 \x01(\tR\x04name\x12\x10\n" +
@@ -776,13 +1115,16 @@ const file_artifacts_v1_manifest_proto_rawDesc = "" +
 	"\x06assets\x18\x06 \x03(\v2\".artifacts.v1.Manifest.AssetsEntryR\x06assets\x12:\n" +
 	"\x06images\x18\a \x03(\v2\".artifacts.v1.Manifest.ImagesEntryR\x06images\x12%\n" +
 	"\x0esignature_href\x18\b \x01(\tR\rsignatureHref\x12)\n" +
-	"\x10certificate_href\x18\t \x01(\tR\x0fcertificateHref\x1aN\n" +
+	"\x10certificate_href\x18\t \x01(\tR\x0fcertificateHref\x12P\n" +
+	"\x11image_attestation\x18\n" +
+	" \x01(\v2#.artifacts.v1.AttestationDescriptorR\x10imageAttestation\x12P\n" +
+	"\x11asset_attestation\x18\v \x01(\v2#.artifacts.v1.AttestationDescriptorR\x10assetAttestation\x1aN\n" +
 	"\vAssetsEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12)\n" +
 	"\x05value\x18\x02 \x01(\v2\x13.artifacts.v1.AssetR\x05value:\x028\x01\x1aN\n" +
 	"\vImagesEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12)\n" +
-	"\x05value\x18\x02 \x01(\v2\x13.artifacts.v1.ImageR\x05value:\x028\x01\"\xfc\x01\n" +
+	"\x05value\x18\x02 \x01(\v2\x13.artifacts.v1.ImageR\x05value:\x028\x01\"\xc9\x02\n" +
 	"\x05Asset\x12\x1a\n" +
 	"\bfilename\x18\x01 \x01(\tR\bfilename\x12\x1d\n" +
 	"\n" +
@@ -792,32 +1134,45 @@ const file_artifacts_v1_manifest_proto_rawDesc = "" +
 	"\x06sha256\x18\x04 \x01(\tR\x06sha256\x12\x12\n" +
 	"\x04href\x18\x05 \x01(\tR\x04href\x12%\n" +
 	"\x0esignature_href\x18\x06 \x01(\tR\rsignatureHref\x12)\n" +
-	"\x10certificate_href\x18\a \x01(\tR\x0fcertificateHref\x12\x1b\n" +
-	"\tsbom_href\x18\b \x01(\tR\bsbomHref\"1\n" +
+	"\x10certificate_href\x18\a \x01(\tR\x0fcertificateHref\x12\x1f\n" +
+	"\tsbom_href\x18\b \x01(\tB\x02\x18\x01R\bsbomHref\x12G\n" +
+	"\fattestations\x18\t \x03(\v2#.artifacts.v1.AttestationDescriptorR\fattestations\"p\n" +
 	"\x05Image\x12\x10\n" +
 	"\x03ref\x18\x01 \x01(\tR\x03ref\x12\x16\n" +
-	"\x06digest\x18\x02 \x01(\tR\x06digestBBZ8github.com/ConductorOne/github-workflows/pb/artifacts/v1\x92\x03\x05\xd2>\x02\x10\x03b\beditionsp\xe8\a"
+	"\x06digest\x18\x02 \x01(\tR\x06digest\x12\x10\n" +
+	"\x03tag\x18\x03 \x01(\tR\x03tag\x12\x10\n" +
+	"\x03uri\x18\x04 \x01(\tR\x03uri\x12\x19\n" +
+	"\bis_index\x18\x05 \x01(\bR\aisIndex\"\x8a\x01\n" +
+	"\x15AttestationDescriptor\x12)\n" +
+	"\x10attestation_type\x18\x01 \x01(\tR\x0fattestationType\x12%\n" +
+	"\x0epredicate_type\x18\x02 \x01(\tR\rpredicateType\x12\x1f\n" +
+	"\vbundle_href\x18\x03 \x01(\tR\n" +
+	"bundleHrefBBZ8github.com/ConductorOne/github-workflows/pb/artifacts/v1\x92\x03\x05\xd2>\x02\x10\x03b\beditionsp\xe8\a"
 
-var file_artifacts_v1_manifest_proto_msgTypes = make([]protoimpl.MessageInfo, 5)
+var file_artifacts_v1_manifest_proto_msgTypes = make([]protoimpl.MessageInfo, 6)
 var file_artifacts_v1_manifest_proto_goTypes = []any{
 	(*Manifest)(nil),              // 0: artifacts.v1.Manifest
 	(*Asset)(nil),                 // 1: artifacts.v1.Asset
 	(*Image)(nil),                 // 2: artifacts.v1.Image
-	nil,                           // 3: artifacts.v1.Manifest.AssetsEntry
-	nil,                           // 4: artifacts.v1.Manifest.ImagesEntry
-	(*timestamppb.Timestamp)(nil), // 5: google.protobuf.Timestamp
+	(*AttestationDescriptor)(nil), // 3: artifacts.v1.AttestationDescriptor
+	nil,                           // 4: artifacts.v1.Manifest.AssetsEntry
+	nil,                           // 5: artifacts.v1.Manifest.ImagesEntry
+	(*timestamppb.Timestamp)(nil), // 6: google.protobuf.Timestamp
 }
 var file_artifacts_v1_manifest_proto_depIdxs = []int32{
-	5, // 0: artifacts.v1.Manifest.released_at:type_name -> google.protobuf.Timestamp
-	3, // 1: artifacts.v1.Manifest.assets:type_name -> artifacts.v1.Manifest.AssetsEntry
-	4, // 2: artifacts.v1.Manifest.images:type_name -> artifacts.v1.Manifest.ImagesEntry
-	1, // 3: artifacts.v1.Manifest.AssetsEntry.value:type_name -> artifacts.v1.Asset
-	2, // 4: artifacts.v1.Manifest.ImagesEntry.value:type_name -> artifacts.v1.Image
-	5, // [5:5] is the sub-list for method output_type
-	5, // [5:5] is the sub-list for method input_type
-	5, // [5:5] is the sub-list for extension type_name
-	5, // [5:5] is the sub-list for extension extendee
-	0, // [0:5] is the sub-list for field type_name
+	6, // 0: artifacts.v1.Manifest.released_at:type_name -> google.protobuf.Timestamp
+	4, // 1: artifacts.v1.Manifest.assets:type_name -> artifacts.v1.Manifest.AssetsEntry
+	5, // 2: artifacts.v1.Manifest.images:type_name -> artifacts.v1.Manifest.ImagesEntry
+	3, // 3: artifacts.v1.Manifest.image_attestation:type_name -> artifacts.v1.AttestationDescriptor
+	3, // 4: artifacts.v1.Manifest.asset_attestation:type_name -> artifacts.v1.AttestationDescriptor
+	3, // 5: artifacts.v1.Asset.attestations:type_name -> artifacts.v1.AttestationDescriptor
+	1, // 6: artifacts.v1.Manifest.AssetsEntry.value:type_name -> artifacts.v1.Asset
+	2, // 7: artifacts.v1.Manifest.ImagesEntry.value:type_name -> artifacts.v1.Image
+	8, // [8:8] is the sub-list for method output_type
+	8, // [8:8] is the sub-list for method input_type
+	8, // [8:8] is the sub-list for extension type_name
+	8, // [8:8] is the sub-list for extension extendee
+	0, // [0:8] is the sub-list for field type_name
 }
 
 func init() { file_artifacts_v1_manifest_proto_init() }
@@ -831,7 +1186,7 @@ func file_artifacts_v1_manifest_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_artifacts_v1_manifest_proto_rawDesc), len(file_artifacts_v1_manifest_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   5,
+			NumMessages:   6,
 			NumExtensions: 0,
 			NumServices:   0,
 		},
