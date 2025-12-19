@@ -107,13 +107,6 @@ func main() {
 			CertificateHref: stringPtr(href + ".cert"),
 		}
 
-		// Check for SBOM file (deprecated - will move to attestations)
-		sbomPath := filepath.Join(assetDir, filename+".sbom.json")
-		if _, err := os.Stat(sbomPath); err == nil {
-			sbomHref := fmt.Sprintf("%s/%s.sbom.json", strings.TrimSuffix(baseURL, "/"), filename)
-			builder.SbomHref = &sbomHref
-		}
-
 		// Check for provenance attestation bundle
 		var attestations []*pb.AttestationDescriptor
 		provenancePath := filepath.Join(assetDir, filename+".provenance.sigstore.json")
@@ -128,7 +121,7 @@ func main() {
 			}.Build())
 		}
 
-		// Check for SBOM attestation bundle (future)
+		// Check for SBOM attestation bundle
 		sbomBundlePath := filepath.Join(assetDir, filename+".sbom.sigstore.json")
 		if _, err := os.Stat(sbomBundlePath); err == nil {
 			attestationType := "https://in-toto.io/Statement/v1"
