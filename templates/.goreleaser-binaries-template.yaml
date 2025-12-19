@@ -32,7 +32,7 @@ builds:
       - amd64
     hooks:
       post:
-        - gon ../_workflows/.gon-amd64.json
+        - gon ../_workflows/_generated/.gon-amd64.json
   - binary: "${REPO_NAME}"
     env:
       - CGO_ENABLED=0
@@ -44,7 +44,7 @@ builds:
       - arm64
     hooks:
       post:
-        - gon ../_workflows/.gon-arm64.json
+        - gon ../_workflows/_generated/.gon-arm64.json
 archives:
   - id: linux-archive
     builds:

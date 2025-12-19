@@ -11,15 +11,20 @@ import (
 	pb "github.com/ConductorOne/github-workflows/pb/artifacts/v1"
 )
 
+const (
+	// AttestationTypeInTotoV1 is the in-toto Statement v1 envelope type
+	AttestationTypeInTotoV1 = "https://in-toto.io/Statement/v1"
+	// PredicateTypeSLSAProvenanceV1 is the SLSA v1 provenance predicate type
+	PredicateTypeSLSAProvenanceV1 = "https://slsa.dev/provenance/v1"
+)
+
 func main() {
 	var (
 		binariesManifest string
 		imagesManifest   string
-		outputFile       string
 	)
 	flag.StringVar(&binariesManifest, "binaries-manifest", "", "JSON string of binaries manifest")
 	flag.StringVar(&imagesManifest, "images-manifest", "", "JSON string of images manifest (optional)")
-	flag.StringVar(&outputFile, "output", "manifest.json", "Output file path")
 	flag.Parse()
 
 	if binariesManifest == "" {
@@ -82,27 +87,51 @@ func main() {
 			images[key] = image
 		}
 
-		fmt.Println("✅ Added images to manifest:")
+		// Set manifest-level image attestation descriptor
+		// Images use OCI referrers for attestation discovery, so bundle_href is omitted
+		attestationType := AttestationTypeInTotoV1
+		predicateType := PredicateTypeSLSAProvenanceV1
+		manifest.SetImageAttestation(pb.AttestationDescriptor_builder{
+			AttestationType: &attestationType,
+			PredicateType:   &predicateType,
+		}.Build())
+
+		fmt.Fprintln(os.Stderr, "✅ Added images to manifest:")
 		for key, image := range images {
 			imageJSON, _ := marshalOpts.Marshal(image)
-			fmt.Printf("  %s: %s\n", key, string(imageJSON))
+			fmt.Fprintf(os.Stderr, "  %s: %s\n", key, string(imageJSON))
 		}
+		fmt.Fprintln(os.Stderr, "✅ Set image_attestation descriptor (OCI referrers for discovery)")
 	} else {
-		fmt.Println("ℹ️  No images to add to manifest (docker job may have been skipped if no Dockerfile)")
+		fmt.Fprintln(os.Stderr, "ℹ️  No images to add to manifest (docker job may have been skipped if no Dockerfile)")
 	}
 
-	// Marshal to JSON
+	// Set manifest-level asset attestation descriptor if any assets have attestations
+	hasAssetAttestations := false
+	for _, asset := range manifest.GetAssets() {
+		if len(asset.GetAttestations()) > 0 {
+			hasAssetAttestations = true
+			break
+		}
+	}
+	if hasAssetAttestations {
+		attestationType := AttestationTypeInTotoV1
+		predicateType := PredicateTypeSLSAProvenanceV1
+		manifest.SetAssetAttestation(pb.AttestationDescriptor_builder{
+			AttestationType: &attestationType,
+			PredicateType:   &predicateType,
+		}.Build())
+		fmt.Fprintln(os.Stderr, "✅ Set asset_attestation descriptor")
+	}
+
+	// Marshal to JSON and write to stdout
 	jsonBytes, err := marshalOpts.Marshal(manifest)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "merge-manifests: error: marshaling merged manifest: %v\n", err)
 		os.Exit(1)
 	}
 
-	// Write to output file
-	if err := os.WriteFile(outputFile, jsonBytes, 0644); err != nil {
-		fmt.Fprintf(os.Stderr, "merge-manifests: error: writing manifest file: %v\n", err)
-		os.Exit(1)
-	}
-
-	fmt.Printf("✅ Merged manifest written to: %s\n", outputFile)
+	// Write JSON to stdout (progress messages go to stderr)
+	fmt.Println(string(jsonBytes))
+	fmt.Fprintln(os.Stderr, "✅ Merged manifest complete")
 }

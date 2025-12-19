@@ -33,6 +33,7 @@ on:
 env:
   CDN_BASE_URL: "https://dist.conductorone.com"
   S3_BUCKET: "connector-artifact-registry"
+  GENERATED_DIR: "_generated"
 
 jobs:
   determine-workflows-ref:
@@ -88,19 +89,21 @@ jobs:
           TAG="${{ inputs.tag }}"
           echo "S3_DIRECTORY=releases/$ORG/$REPO/$TAG" >> "$GITHUB_OUTPUT"
 
-      - name: Generate gon and goreleaser configs for binaries
+      - name: Generate configs for binaries
+        working-directory: _workflows
         env:
           REPO_NAME: ${{ github.event.repository.name }}
           S3_BUCKET: ${{ env.S3_BUCKET }}
           S3_REGION: "us-west-2"
           S3_DIRECTORY: ${{ steps.s3-directory.outputs.S3_DIRECTORY }}
         run: |
-          envsubst < _workflows/.gon-amd64-template.json > _workflows/.gon-amd64.json
-          envsubst < _workflows/.gon-arm64-template.json > _workflows/.gon-arm64.json
-          envsubst < _workflows/templates/.goreleaser-binaries-template.yaml > _workflows/.goreleaser.binaries.yaml
-          echo "_workflows/.gon-amd64.json:"; cat _workflows/.gon-amd64.json
-          echo "_workflows/.gon-arm64.json:"; cat _workflows/.gon-arm64.json
-          echo "_workflows/.goreleaser.binaries.yaml:"; cat _workflows/.goreleaser.binaries.yaml
+          mkdir -p "${GENERATED_DIR}"
+          envsubst < .gon-amd64-template.json > "${GENERATED_DIR}/.gon-amd64.json"
+          envsubst < .gon-arm64-template.json > "${GENERATED_DIR}/.gon-arm64.json"
+          envsubst < templates/.goreleaser-binaries-template.yaml > "${GENERATED_DIR}/.goreleaser.binaries.yaml"
+          envsubst < templates/.slsa-provenance-predicate-template.json > "${GENERATED_DIR}/predicate.json"
+          echo "Generated configs:"
+          ls -la "${GENERATED_DIR}/"
 
       - name: Set up Gon
         run: brew tap conductorone/gon && brew install conductorone/gon/gon
@@ -128,11 +131,73 @@ jobs:
         with:
           workdir: _caller
           version: "~> v2.13"
-          args: release --clean --config ../_workflows/.goreleaser.binaries.yaml
+          args: release --clean --config ../_workflows/_generated/.goreleaser.binaries.yaml
         env:
           GITHUB_TOKEN: ${{ secrets.RELENG_GITHUB_TOKEN }}
           AC_PASSWORD: ${{ secrets.AC_PASSWORD }}
           AC_PROVIDER: ${{ secrets.AC_PROVIDER }}
+
+      - name: Generate SLSA provenance for archives
+        working-directory: _workflows
+        env:
+          CALLER_DIST: ../_caller/dist
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          # Find all downloadable archives (not checksums, not signatures, not sboms)
+          for artifact in "${CALLER_DIST}"/*.zip "${CALLER_DIST}"/*.tar.gz; do
+            [ -f "$artifact" ] || continue
+            # Skip if it's not an archive we want to attest
+            [[ "$artifact" == *checksums* ]] && continue
+
+            BASENAME=$(basename "$artifact")
+            echo "Generating provenance for: $BASENAME"
+            cosign attest-blob \
+              --yes \
+              --predicate "${GENERATED_DIR}/predicate.json" \
+              --type slsaprovenance1 \
+              --bundle "${CALLER_DIST}/${BASENAME}.provenance.sigstore.json" \
+              "$artifact"
+            echo "✅ Created ${BASENAME}.provenance.sigstore.json"
+          done
+
+          # Also generate provenance for checksums file
+          for checksums in "${CALLER_DIST}"/*checksums.txt; do
+            [ -f "$checksums" ] || continue
+            BASENAME=$(basename "$checksums")
+            echo "Generating provenance for: $BASENAME"
+            cosign attest-blob \
+              --yes \
+              --predicate "${GENERATED_DIR}/predicate.json" \
+              --type slsaprovenance1 \
+              --bundle "${CALLER_DIST}/${BASENAME}.provenance.sigstore.json" \
+              "$checksums"
+            echo "✅ Created ${BASENAME}.provenance.sigstore.json"
+          done
+
+          echo "Generated provenance bundles:"
+          ls -la "${CALLER_DIST}"/*.provenance.sigstore.json || echo "No provenance files generated"
+
+      - name: Upload provenance to S3
+        working-directory: _workflows
+        env:
+          CALLER_DIST: ../_caller/dist
+        shell: bash
+        run: |
+          set -euo pipefail
+          BUCKET="${{ env.S3_BUCKET }}"
+          DIRECTORY="${{ steps.s3-directory.outputs.S3_DIRECTORY }}"
+
+          for provenance in "${CALLER_DIST}"/*.provenance.sigstore.json; do
+            [ -f "$provenance" ] || continue
+            BASENAME=$(basename "$provenance")
+            echo "Uploading $BASENAME to S3..."
+            aws s3 cp "$provenance" "s3://$BUCKET/$DIRECTORY/$BASENAME" \
+              --cache-control "public,max-age=31536000,immutable" \
+              --content-type "application/json"
+          done
+          echo "✅ Provenance files uploaded to S3"
 
       - name: Set up Go for workflows
         uses: actions/setup-go@v6
@@ -143,16 +208,24 @@ jobs:
         id: generate-binaries-manifest
         working-directory: _workflows
         env:
-          GITHUB_OUTPUT: ${{ github.output }}
+          CALLER_DIST: ../_caller/dist
         run: |
-          go run ./cmd/generate-manifest \
-            -asset-dir ../_caller/dist \
+          MANIFEST_JSON=$(go run ./cmd/generate-manifest \
+            -asset-dir "${CALLER_DIST}" \
             -repo-name "${{ github.event.repository.name }}" \
             -org-name "${{ github.event.repository.owner.login }}" \
             -tag "${{ inputs.tag }}" \
-            -base-url "${{ env.CDN_BASE_URL }}/${{ steps.s3-directory.outputs.S3_DIRECTORY }}" \
-            -output ../_caller/dist/manifest.json \
-            -github-output "$GITHUB_OUTPUT"
+            -base-url "${{ env.CDN_BASE_URL }}/${{ steps.s3-directory.outputs.S3_DIRECTORY }}")
+
+          # Write to file for local use
+          echo "$MANIFEST_JSON" > "${CALLER_DIST}/manifest.json"
+
+          # Write to GITHUB_OUTPUT for job output
+          {
+            echo "binaries_manifest<<EOF"
+            echo "$MANIFEST_JSON"
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
 
   goreleaser-docker:
     if: inputs.docker == true || inputs.lambda == true
@@ -189,31 +262,34 @@ jobs:
         if: inputs.docker == true
         uses: sigstore/cosign-installer@v3
 
-      - name: Generate OCI Dockerfile and goreleaser config
+      - name: Generate configs for Docker OCI
         if: inputs.docker == true
+        working-directory: _workflows
         env:
           REPO_NAME: ${{ github.event.repository.name }}
-          DOCKERFILE_PATH: ../_workflows/Dockerfile
+          DOCKERFILE_PATH: ../_workflows/_generated/Dockerfile
           DIST_DIR: dist/oci
         run: |
-          envsubst '$REPO_NAME' < _workflows/templates/.Dockerfile-template > _workflows/Dockerfile
-          echo "Generated Dockerfile:"; cat _workflows/Dockerfile
+          mkdir -p "${GENERATED_DIR}"
+          envsubst '$REPO_NAME' < templates/.Dockerfile-template > "${GENERATED_DIR}/Dockerfile"
+          envsubst < templates/.goreleaser-docker-oci-template.yaml > "${GENERATED_DIR}/.goreleaser.docker.yaml"
+          envsubst < templates/.slsa-provenance-predicate-template.json > "${GENERATED_DIR}/predicate.json"
+          echo "Generated Docker OCI configs:"
+          ls -la "${GENERATED_DIR}/"
 
-          envsubst < _workflows/templates/.goreleaser-docker-oci-template.yaml > _workflows/.goreleaser.docker.yaml
-          echo "_workflows/.goreleaser.docker.yaml:"; cat _workflows/.goreleaser.docker.yaml
-
-      - name: Generate Lambda Dockerfile and goreleaser config
+      - name: Generate configs for Lambda
         if: inputs.lambda == true
+        working-directory: _workflows
         env:
           REPO_NAME: ${{ github.event.repository.name }}
-          DOCKERFILE_LAMBDA_PATH: ../_workflows/Dockerfile.lambda
+          DOCKERFILE_LAMBDA_PATH: ../_workflows/_generated/Dockerfile.lambda
           DIST_DIR: dist/lambda
         run: |
-          envsubst '$REPO_NAME' < _workflows/templates/.Dockerfile-lambda-template > _workflows/Dockerfile.lambda
-          echo "Generated Dockerfile.lambda:"; cat _workflows/Dockerfile.lambda
-
-          envsubst < _workflows/templates/.goreleaser-docker-lambda-template.yaml > _workflows/.goreleaser.lambda.yaml
-          echo "_workflows/.goreleaser.lambda.yaml:"; cat _workflows/.goreleaser.lambda.yaml
+          mkdir -p "${GENERATED_DIR}"
+          envsubst '$REPO_NAME' < templates/.Dockerfile-lambda-template > "${GENERATED_DIR}/Dockerfile.lambda"
+          envsubst < templates/.goreleaser-docker-lambda-template.yaml > "${GENERATED_DIR}/.goreleaser.lambda.yaml"
+          echo "Generated Lambda configs:"
+          ls -la "${GENERATED_DIR}/"
 
       - name: Docker Login
         if: inputs.docker == true
@@ -252,7 +328,7 @@ jobs:
         with:
           workdir: _caller
           version: "~> v2.13"
-          args: release --clean --config ../_workflows/.goreleaser.docker.yaml
+          args: release --clean --config ../_workflows/_generated/.goreleaser.docker.yaml
         env:
           GITHUB_TOKEN: ${{ secrets.RELENG_GITHUB_TOKEN }}
           COSIGN_EXPERIMENTAL: "1"
@@ -274,7 +350,7 @@ jobs:
         with:
           workdir: _caller
           version: "~> v2.13"
-          args: release --clean --config ../_workflows/.goreleaser.lambda.yaml
+          args: release --clean --config ../_workflows/_generated/.goreleaser.lambda.yaml
         env:
           GITHUB_TOKEN: ${{ secrets.RELENG_GITHUB_TOKEN }}
 
@@ -289,16 +365,62 @@ jobs:
         if: inputs.docker == true
         working-directory: _workflows
         env:
-          REPO_NAME: ${{ github.event.repository.name }}
-          TAG: ${{ inputs.tag }}
-          GITHUB_OUTPUT: ${{ github.output }}
-          DIST_DIR: "dist/oci"
+          CALLER_DIST_OCI: ../_caller/dist/oci
         run: |
-          go run ./cmd/extract-images \
-            -asset-dir ../_caller/$DIST_DIR \
+          IMAGES_JSON=$(go run ./cmd/extract-images \
+            -asset-dir "${CALLER_DIST_OCI}" \
             -repo-name "${{ github.event.repository.name }}" \
-            -tag "${{ inputs.tag }}" \
-            -github-output "$GITHUB_OUTPUT"
+            -tag "${{ inputs.tag }}")
+
+          # Write to GITHUB_OUTPUT for job output
+          {
+            echo "images_manifest<<EOF"
+            echo "$IMAGES_JSON"
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Generate SLSA provenance for images
+        if: inputs.docker == true
+        working-directory: _workflows
+        env:
+          RELEASE_TAG: ${{ inputs.tag }}
+          CALLER_DIST_OCI: ../_caller/dist/oci
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          VERSION="${RELEASE_TAG#v}"  # Remove 'v' prefix
+
+          # Read digests from the digest file
+          DIGEST_FILE="${CALLER_DIST_OCI}/${{ github.event.repository.name }}_${VERSION}_digests.txt"
+          if [ ! -f "$DIGEST_FILE" ]; then
+            echo "::warning::Digest file not found: $DIGEST_FILE"
+            exit 0
+          fi
+
+          # Attest each multi-arch index image (tagged with just version, not version-arch)
+          while IFS= read -r line || [ -n "$line" ]; do
+            [ -z "$line" ] && continue
+            DIGEST_HEX=$(echo "$line" | awk '{print $1}')
+            REF=$(echo "$line" | awk '{print $2}')
+
+            # Only attest multi-arch index images (tagged with just version)
+            if [[ "$REF" != *":${VERSION}" ]]; then
+              continue
+            fi
+
+            # Build the digest-pinned reference
+            IMAGE_BASE="${REF%:*}"
+            URI="${IMAGE_BASE}@sha256:${DIGEST_HEX}"
+
+            echo "Attesting image: $URI"
+            cosign attest \
+              --yes \
+              --type https://slsa.dev/provenance/v1 \
+              --predicate "${GENERATED_DIR}/predicate.json" \
+              "$URI"
+            echo "✅ Attested $URI"
+          done < "$DIGEST_FILE"
 
   record-connector-registry:
     # require binaries and docker to complete before recording, since we include both in the manifest
@@ -325,22 +447,23 @@ jobs:
         env:
           BINARIES_MANIFEST: ${{ needs.goreleaser-binaries.outputs.binaries_manifest }}
           IMAGES_MANIFEST: ${{ needs.goreleaser-docker.outputs.images_manifest }}
+          OUTPUT_DIR: _output
         run: |
-          mkdir -p ../dist
+          mkdir -p "${OUTPUT_DIR}"
           go run ./cmd/merge-manifests \
             -binaries-manifest "$BINARIES_MANIFEST" \
             -images-manifest "$IMAGES_MANIFEST" \
-            -output ../dist/manifest.json
+            > "${OUTPUT_DIR}/manifest.json"
 
       - name: Install cosign
         uses: sigstore/cosign-installer@v3
 
       - name: Sign manifest.json
+        working-directory: _workflows/_output
         env: { COSIGN_EXPERIMENTAL: "1" }
         shell: bash
         run: |
           set -euo pipefail
-          cd dist
           cosign sign-blob --yes "manifest.json" \
             --output-signature "manifest.json.sig" \
             --output-certificate "manifest.json.cert"
@@ -353,13 +476,14 @@ jobs:
 
       - name: Upload manifest.json to S3
         id: upload-manifest
+        working-directory: _workflows/_output
         shell: bash
         run: |
           set -euo pipefail
           BUCKET="${{ env.S3_BUCKET }}"
           DIRECTORY="${{ needs.goreleaser-binaries.outputs.s3_directory }}"
           CDN_BASE="${{ env.CDN_BASE_URL }}"
-          cd dist
+
           # manifest.json is required
           if [ ! -f "manifest.json" ]; then
             echo "::error::manifest.json not found in $(pwd)"
