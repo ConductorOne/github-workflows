@@ -96,12 +96,7 @@ func main() {
 			PredicateType:   &predicateType,
 		}.Build())
 
-		fmt.Fprintln(os.Stderr, "✅ Added images to manifest:")
-		for key, image := range images {
-			imageJSON, _ := marshalOpts.Marshal(image)
-			fmt.Fprintf(os.Stderr, "  %s: %s\n", key, string(imageJSON))
-		}
-		fmt.Fprintln(os.Stderr, "✅ Set image_attestation descriptor (OCI referrers for discovery)")
+		fmt.Fprintf(os.Stderr, "✅ Added %d images to manifest\n", len(images))
 	} else {
 		fmt.Fprintln(os.Stderr, "ℹ️  No images to add to manifest (docker job may have been skipped if no Dockerfile)")
 	}
