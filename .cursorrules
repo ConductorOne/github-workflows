@@ -1,0 +1,38 @@
+# ConductorOne github-workflows Repository Rules
+
+## Repository Overview
+
+This repository contains shared GitHub workflows and actions for ConductorOne connector repositories. The primary workflow is `release.yaml` which handles building, signing, and publishing connector releases.
+
+## Key Documentation
+
+Before modifying this repository, read:
+
+- `docs/release-workflow.md` - Pipeline overview, security properties, testing
+- `docs/diagrams/DIAGRAM_RULES.md` - When and how to update documentation
+
+## When Modifying `.github/workflows/release.yaml`
+
+1. **Read documentation first** - Understand the security properties and job structure
+2. **Update documentation** if your changes affect:
+   - Job structure or dependencies → update `docs/diagrams/release-workflow.dot`
+   - Security properties (signing, attestations) → update `docs/release-workflow.md`
+   - Testing procedures → update `docs/testing.md`
+3. **Run `make docs`** to regenerate the diagram PNG after modifying the .dot file
+4. **Test changes** using `scripts/validate-release-artifacts.sh` after a test release
+
+## Code Style
+
+- Go commands output data to stdout, progress/logs to stderr
+- Use builder pattern for protobuf structs with >2 fields
+- YAML workflow files should use `set -euo pipefail` in bash scripts
+- File-level env vars for values shared across steps
+
+## Security-Critical Components
+
+These require extra care when modifying:
+
+- Sigstore/cosign signing steps
+- Provenance predicate generation (`templates/.slsa-provenance-predicate-template.json`)
+- Attestation bundle creation and upload
+- OIDC credential configuration

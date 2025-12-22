@@ -1,3 +1,14 @@
+# Reusable Release Workflow for ConductorOne Connectors
+#
+# Documentation:
+#   - docs/release-workflow.md - Pipeline overview, security properties, testing
+#   - docs/diagrams/DIAGRAM_RULES.md - When to update documentation
+#
+# When modifying this file, update documentation if you change:
+#   - Job structure or dependencies → update docs/diagrams/release-workflow.dot
+#   - Security properties → update docs/release-workflow.md
+#   - Run `make docs` to regenerate the diagram
+
 name: Reusable Release Workflow
 
 on:
@@ -695,6 +706,35 @@ jobs:
 
           rm -f "$TMPFILE"
 
+  verify-release:
+    # Verify release artifacts and attestations after publishing
+    # This job is not blocking - failures trigger Datadog notification but don't fail the release
+    needs: [determine-workflows-ref, record-connector-registry]
+    if: always() && needs.record-connector-registry.result == 'success'
+    permissions:
+      id-token: write # Required for cosign verification
+      contents: read
+      packages: read # Required for GHCR image verification
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout shared workflows
+        uses: actions/checkout@v5
+        with:
+          repository: ConductorOne/github-workflows
+          ref: ${{ needs.determine-workflows-ref.outputs.ref }}
+          path: _workflows
+
+      - name: Install cosign
+        uses: sigstore/cosign-installer@v3
+
+      - name: Validate release artifacts
+        working-directory: _workflows
+        env:
+          ORG_REPO: ${{ github.event.repository.owner.login }}/${{ github.event.repository.name }}
+          VERSION: ${{ inputs.tag }}
+        run: |
+          ./scripts/validate-release-artifacts.sh "$ORG_REPO" "$VERSION"
+
   notify-release-failure:
     needs:
       [
@@ -703,6 +743,7 @@ jobs:
         goreleaser-docker,
         record-connector-registry,
         record-lambda-registry,
+        verify-release,
       ]
     if: failure()
     permissions:

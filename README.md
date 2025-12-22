@@ -1,21 +1,12 @@
-# Github Workflows
+# GitHub Workflows
 
-This repository contains shared GitHub workflows for ConductorOne connector repositories.
+Shared GitHub workflows and actions for ConductorOne connector repositories.
 
-## Available Workflows
+## Release Workflow
 
-### Release Workflow
+Handles building, signing, and publishing connector releases. See [detailed documentation](docs/release-workflow.md) for security properties and internals.
 
-The release workflow handles the release process for connector repos, including:
-
-- Rendering the latest goreleaser, gon, and dockerfile files from template
-- Creating GitHub releases
-- Building, signing, and pushing binaries to the C1 Connector Registry
-- Building, signing, and pushing Docker images to GHCR
-- Building, signing, and pushing ECR lambda images for use in C1
-- Recording releases in the release tracking system
-
-To use the release workflow in your connector repository:
+### Usage
 
 1. Create a `.github/workflows/release.yaml` file with the following content:
 
@@ -85,7 +76,7 @@ The sync-test action tests syncing, granting, and revoking for a baton connector
     baton-entitlement: "admin-role"
     baton-principal: "user123"
     baton-principal-type: "user"
-    sleep: 2  # optional, wait 2 seconds after each write operation
+    sleep: 2 # optional, wait 2 seconds after each write operation
 ```
 
 ### Account Provisioning Test
@@ -103,7 +94,7 @@ The account-provisioning action tests account provisioning and deprovisioning fo
     account-profile: '{"first_name": "Test", "last_name": "User", "username": "testuser", "email": "test@example.com"}' # optional
     account-type: "user" # optional, defaults to 'user'
     search-method: "email" # optional, defaults to 'email'
-    sleep: 2  # optional, wait 2 seconds after each write operation
+    sleep: 2 # optional, wait 2 seconds after each write operation
 ```
 
 ### Account Status Lifecycle Test
@@ -122,10 +113,11 @@ The account-status-lifecycle-test action tests disabling and enabling account st
     disable-action-name: "disable_user" # optional, defaults to 'disable_user'
     id-parameter-name: "user_id" # optional, defaults to 'user_id'
     test-flow: "disable-enable" # optional, defaults to 'disable-enable'
-    sleep: 2  # optional, wait 2 seconds after each write operation
+    sleep: 2 # optional, wait 2 seconds after each write operation
 ```
 
 The `test-flow` parameter can be:
+
 - `disable-enable`: Disable the account, then enable it (default)
 - `enable-disable`: Enable the account, then disable it
 - `enable-only`: Only test enabling the account
@@ -133,23 +125,19 @@ The `test-flow` parameter can be:
 
 ## Development
 
-To modify these workflows:
+See [release-workflow.md](docs/release-workflow.md) for testing and modification guidance.
 
-1. Make your changes in this repository
-2. Test the changes in a connector repository _pointing at your branch_
-3. Create a pull request for review
-4. Once approved, merge to main
-5. Tag the release: `git tag v4.0.1`
-6. Push the tag: `git push origin v4.0.1`
-7. Update the major version tag `git tag -f v4 v4.0.1`
-8. Push the major version tag `git push origin v4 --force`
+### Versioning
 
-## Versioning
+Workflows are versioned using Git tags. The major version tag (e.g., `v4`) must float:
 
-The workflows are versioned using Git tags. When testing a new version of the workflows in your repository, you can specify a specific version:
+```bash
+git tag v4.0.1 && git push origin v4.0.1
+git tag -f v4 v4.0.1 && git push origin v4 --force
+```
+
+To test changes, point a connector at your branch:
 
 ```yaml
 uses: ConductorOne/github-workflows/.github/workflows/release.yaml@my-branch
 ```
-
-Github does not resolve semantic versioning - tags must match exactly. The major version must _float_.
