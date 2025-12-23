@@ -727,6 +727,14 @@ jobs:
       - name: Install cosign
         uses: sigstore/cosign-installer@v3
 
+      - name: Docker Login
+        if: inputs.docker == true
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.repository_owner }}
+          password: ${{ secrets.RELENG_GITHUB_TOKEN }}
+
       - name: Validate release artifacts
         working-directory: _workflows
         env:
