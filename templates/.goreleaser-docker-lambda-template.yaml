@@ -2,6 +2,7 @@
 ## Uses older dockers config since Lambda doesn't support OCI manifests
 version: 2
 project_name: "${REPO_NAME}"
+dist: "${DIST_DIR}"
 builds:
   - binary: "${REPO_NAME}"
     env:

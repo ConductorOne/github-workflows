@@ -1,7 +1,8 @@
-## Docker template for signed OCI images, pushes to GHCR
+## Docker template for signed OCI images, pushes to GHCR and ECR public
 ## GoReleaser >= 2.12 required for dockers_v2
 version: 2
 project_name: "${REPO_NAME}"
+dist: "${DIST_DIR}"
 builds:
   - binary: "${REPO_NAME}"
     env:
@@ -33,6 +34,25 @@ dockers_v2:
       "org.opencontainers.image.version": "{{.Version}}"
       "org.opencontainers.image.source": "{{ .GitURL }}"
       "org.opencontainers.image.description": "ConductorOne Baton connector"
+  - id: ecr-public
+    images:
+      - "public.ecr.aws/conductorone/${REPO_NAME}"
+    tags:
+      - "{{ .Version }}"
+      - latest
+    platforms:
+      - linux/amd64
+      - linux/arm64
+    dockerfile: ${DOCKERFILE_PATH}
+    ids:
+      - linux
+    labels:
+      "org.opencontainers.image.created": "{{ .Date }}"
+      "org.opencontainers.image.title": "{{ .ProjectName }}"
+      "org.opencontainers.image.revision": "{{ .FullCommit }}"
+      "org.opencontainers.image.version": "{{ .Version }}"
+      "org.opencontainers.image.source": "{{ .GitURL }}"
+      "org.opencontainers.image.description": "ConductorOne Baton connector"
 docker_digest:
   name_template: "{{ .ProjectName }}_{{ .Version }}_digests.txt"
 # sign each image by digest
@@ -40,7 +60,6 @@ docker_signs:
   - id: cosign-images
     output: true
     cmd: cosign
-    artifacts: image
     env:
       - COSIGN_EXPERIMENTAL=1
     args:

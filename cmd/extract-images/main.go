@@ -50,7 +50,7 @@ func main() {
 	}
 
 	images := make(map[string]*pb.Image)
-	foundIndex := false
+	var foundGHCR, foundECR bool
 
 	for _, line := range strings.Split(string(content), "\n") {
 		line = strings.TrimSpace(line)
@@ -65,38 +65,38 @@ func main() {
 		}
 
 		digestHex, ref := parts[0], parts[1]
+		digest := fmt.Sprintf("sha256:%s", digestHex)
 
-		// We only care about GHCR; skip ECR lines
-		if !strings.HasPrefix(ref, "ghcr.io/conductorone/") {
+		// Only capture the multi-arch index images (tagged with just version, not version-arch)
+		if !strings.HasSuffix(ref, fmt.Sprintf(":%s", version)) {
 			continue
 		}
 
-		digest := fmt.Sprintf("sha256:%s", digestHex)
-
-		// multi-arch image
-		if strings.HasSuffix(ref, fmt.Sprintf(":%s", version)) {
+		if strings.HasPrefix(ref, "ghcr.io/conductorone/") {
 			image := &pb.Image{}
 			image.SetRef(ref)
 			image.SetDigest(digest)
-			images["index"] = image
-			foundIndex = true
-		} else if strings.HasSuffix(ref, fmt.Sprintf(":%s-amd64", version)) {
+			images["ghcr"] = image
+			foundGHCR = true
+		} else if strings.HasPrefix(ref, "public.ecr.aws/conductorone/") {
 			image := &pb.Image{}
 			image.SetRef(ref)
 			image.SetDigest(digest)
-			images["linux-amd64"] = image
-		} else if strings.HasSuffix(ref, fmt.Sprintf(":%s-arm64", version)) {
-			image := &pb.Image{}
-			image.SetRef(ref)
-			image.SetDigest(digest)
-			images["linux-arm64"] = image
+			images["ecrPublic"] = image
+			foundECR = true
 		}
 	}
 
-	if !foundIndex {
-		fmt.Fprintf(os.Stderr, "extract-images: ::error::Could not find GHCR index line in %s\n", digestFile)
+	if !foundGHCR && !foundECR {
+		fmt.Fprintf(os.Stderr, "extract-images: ::error::Could not find GHCR or ECR public index image in %s\n", digestFile)
 		fmt.Fprintf(os.Stderr, "extract-images: Contents of digest file:\n%s\n", content)
 		os.Exit(1)
+	}
+	if !foundGHCR {
+		fmt.Fprintf(os.Stderr, "extract-images: ::warning::Could not find GHCR index image in %s\n", digestFile)
+	}
+	if !foundECR {
+		fmt.Fprintf(os.Stderr, "extract-images: ::warning::Could not find ECR public index image in %s\n", digestFile)
 	}
 
 	// Marshal images map to JSON using protojson
