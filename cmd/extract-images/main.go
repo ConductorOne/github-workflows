@@ -17,13 +17,11 @@ func main() {
 		digestFile string
 		repoName   string
 		tag        string
-		githubOut  string
 	)
 	flag.StringVar(&assetDir, "asset-dir", "../_caller/dist", "Directory containing asset files")
 	flag.StringVar(&digestFile, "digest-file", "", "Path to digest file (if not provided, will be constructed from repo-name, tag, and asset-dir)")
 	flag.StringVar(&repoName, "repo-name", "", "Repository name")
 	flag.StringVar(&tag, "tag", "", "Release tag (e.g., v0.1.65 or 0.1.65)")
-	flag.StringVar(&githubOut, "github-output", "", "Path to GITHUB_OUTPUT file")
 	flag.Parse()
 
 	if tag == "" {
@@ -72,17 +70,35 @@ func main() {
 			continue
 		}
 
+		// Build the canonical digest-pinned URI
+		// ref is like "ghcr.io/conductorone/baton-ukg:0.1.98"
+		// uri should be "ghcr.io/conductorone/baton-ukg@sha256:abc123..."
+		refParts := strings.Split(ref, ":")
+		if len(refParts) < 2 {
+			continue
+		}
+		imageBase := refParts[0]
+		uri := fmt.Sprintf("%s@%s", imageBase, digest)
+
 		if strings.HasPrefix(ref, "ghcr.io/conductorone/") {
-			image := &pb.Image{}
-			image.SetRef(ref)
-			image.SetDigest(digest)
-			images["ghcr"] = image
+			isIndex := true
+			images["ghcr"] = pb.Image_builder{
+				Ref:     &ref,
+				Digest:  &digest,
+				Tag:     &version,
+				Uri:     &uri,
+				IsIndex: &isIndex,
+			}.Build()
 			foundGHCR = true
 		} else if strings.HasPrefix(ref, "public.ecr.aws/conductorone/") {
-			image := &pb.Image{}
-			image.SetRef(ref)
-			image.SetDigest(digest)
-			images["ecrPublic"] = image
+			isIndex := true
+			images["ecrPublic"] = pb.Image_builder{
+				Ref:     &ref,
+				Digest:  &digest,
+				Tag:     &version,
+				Uri:     &uri,
+				IsIndex: &isIndex,
+			}.Build()
 			foundECR = true
 		}
 	}
@@ -108,8 +124,8 @@ func main() {
 		EmitUnpopulated: true,
 	}
 
-	// Marshal each image individually and build the JSON object
-	// Since protojson doesn't directly support map[string]*Image, we'll construct it manually
+	// Marshal each image individually and build the JSON object.
+	// protojson.Marshal only works on proto.Message, not on Go maps, so we construct the JSON manually.
 	imagesJSONParts := []string{"{"}
 	first := true
 	for key, image := range images {
@@ -125,22 +141,9 @@ func main() {
 		imagesJSONParts = append(imagesJSONParts, fmt.Sprintf("  %q: %s", key, string(imageJSON)))
 	}
 	imagesJSONParts = append(imagesJSONParts, "}")
-	imagesJSON := []byte(strings.Join(imagesJSONParts, "\n"))
+	imagesJSON := strings.Join(imagesJSONParts, "\n")
 
-	// If github-output is set, write to GITHUB_OUTPUT
-	if githubOut != "" {
-		f, err := os.OpenFile(githubOut, os.O_APPEND|os.O_WRONLY|os.O_CREATE, 0644)
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "extract-images: error: opening GITHUB_OUTPUT: %v\n", err)
-			os.Exit(1)
-		}
-		defer f.Close()
-
-		fmt.Fprintf(f, "images_manifest<<EOF\n")
-		f.Write(imagesJSON)
-		fmt.Fprintf(f, "\nEOF\n")
-	}
-
-	fmt.Println("✅ Extracted image digests:")
-	fmt.Println(string(imagesJSON))
+	// Write JSON to stdout (progress messages go to stderr)
+	fmt.Println(imagesJSON)
+	fmt.Fprintln(os.Stderr, "✅ Extracted image digests")
 }

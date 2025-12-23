@@ -11,41 +11,17 @@ import "artifacts/v1/manifest.proto";
 option go_package = "github.com/ConductorOne/github-workflows/pb/artifacts/v1";
 option features.(pb.go).api_level = API_OPAQUE;
 
-// Stable represents a stable release manifest with an additional updated_at timestamp.
+// Stable represents a pointer to the current stable release with metadata.
 // This manifest is stored at the catalog-level path: releases/{org}/{repo}/stable.json
-// It contains the same structure as Manifest but includes when it was last updated.
 message Stable {
-  // version is the manifest schema version (currently "1")
+  // version is the stable schema version (currently "1")
   string version = 1;
-  
-  // name is the repository name (e.g., "baton-ukg")
-  string name = 2;
-  
-  // org is the organization name (e.g., "ConductorOne")
-  string org = 3;
-  
-  // semver is the semantic version tag (e.g., "v0.0.8")
-  string semver = 4;
-  
-  // released_at is the timestamp when the release was created
-  google.protobuf.Timestamp released_at = 5;
-  
-  // assets is a map of platform/type identifiers to asset metadata.
-  // Keys are platform identifiers like "darwin-arm64", "linux-amd64", "windows-amd64", "checksums"
-  map<string, Asset> assets = 6;
-  
-  // images is a map of registry identifiers to container image metadata.
-  // Keys are registry identifiers like "ghcr", "ecrPublic"
-  map<string, Image> images = 7;
-  
-  // signature_href is the URL to the manifest signature file (manifest.json.sig)
-  string signature_href = 8;
-  
-  // certificate_href is the URL to the manifest certificate file (manifest.json.cert)
-  string certificate_href = 9;
-  
-  // updated_at is the timestamp when this stable release was last updated.
-  // This differs from released_at which is when the original release was created.
-  google.protobuf.Timestamp updated_at = 10;
+
+  // updated_at is the timestamp when stable.json was last updated.
+  // This differs from manifest.released_at which is when the release was originally created.
+  google.protobuf.Timestamp updated_at = 2;
+
+  // manifest is the manifest for the current stable release
+  Manifest manifest = 3;
 }
 

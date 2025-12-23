@@ -1,0 +1,45 @@
+{
+  "buildDefinition": {
+    "buildType": "https://github.com/ConductorOne/github-workflows/blob/main/.github/workflows/release.yaml",
+    "externalParameters": {
+      "repository": "${GITHUB_REPOSITORY}",
+      "ref": "${GITHUB_REF}",
+      "tag": "${RELEASE_TAG}",
+      "workflow": {
+        "repository": "ConductorOne/github-workflows",
+        "ref": "${WORKFLOWS_REF}",
+        "path": ".github/workflows/release.yaml"
+      }
+    },
+    "internalParameters": {
+      "github": {
+        "event_name": "${GITHUB_EVENT_NAME}",
+        "runner_os": "${RUNNER_OS}",
+        "runner_arch": "${RUNNER_ARCH}"
+      }
+    },
+    "resolvedDependencies": [
+      {
+        "uri": "git+https://github.com/${GITHUB_REPOSITORY}@${GITHUB_REF}",
+        "digest": {
+          "gitCommit": "${GITHUB_SHA}"
+        }
+      },
+      {
+        "uri": "git+https://github.com/ConductorOne/github-workflows@${WORKFLOWS_REF}",
+        "digest": {
+          "gitCommit": "${WORKFLOWS_REF}"
+        }
+      }
+    ]
+  },
+  "runDetails": {
+    "builder": {
+      "id": "https://github.com/ConductorOne/github-workflows/.github/workflows/release.yaml@${WORKFLOWS_REF}"
+    },
+    "metadata": {
+      "invocationId": "https://github.com/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}/attempts/${GITHUB_RUN_ATTEMPT}",
+      "startedOn": "${BUILD_STARTED_ON}"
+    }
+  }
+}

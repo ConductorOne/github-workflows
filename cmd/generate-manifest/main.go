@@ -20,21 +20,17 @@ import (
 
 func main() {
 	var (
-		assetDir   string
-		repoName   string
-		orgName    string
-		tag        string
-		baseURL    string
-		outputFile string
-		githubOut  string
+		assetDir string
+		repoName string
+		orgName  string
+		tag      string
+		baseURL  string
 	)
 	flag.StringVar(&assetDir, "asset-dir", ".", "Directory containing distribution artifacts")
 	flag.StringVar(&repoName, "repo-name", "", "Repository name")
 	flag.StringVar(&orgName, "org-name", "", "Organization name")
 	flag.StringVar(&tag, "tag", "", "Release tag (e.g., v0.0.8)")
 	flag.StringVar(&baseURL, "base-url", "", "Base URL for artifact downloads")
-	flag.StringVar(&outputFile, "output", "manifest.json", "Output file path")
-	flag.StringVar(&githubOut, "github-output", "", "Path to GITHUB_OUTPUT file (if set, writes binaries_manifest output)")
 	flag.Parse()
 
 	if repoName == "" || orgName == "" || tag == "" || baseURL == "" {
@@ -111,11 +107,35 @@ func main() {
 			CertificateHref: stringPtr(href + ".cert"),
 		}
 
-		// Check for SBOM file
-		sbomPath := filepath.Join(assetDir, filename+".sbom.json")
-		if _, err := os.Stat(sbomPath); err == nil {
-			sbomHref := fmt.Sprintf("%s/%s.sbom.json", strings.TrimSuffix(baseURL, "/"), filename)
-			builder.SbomHref = &sbomHref
+		// Check for provenance attestation bundle
+		var attestations []*pb.AttestationDescriptor
+		provenancePath := filepath.Join(assetDir, filename+".provenance.sigstore.json")
+		if _, err := os.Stat(provenancePath); err == nil {
+			attestationType := "https://in-toto.io/Statement/v1"
+			predicateType := "https://slsa.dev/provenance/v1"
+			bundleHref := fmt.Sprintf("%s/%s.provenance.sigstore.json", strings.TrimSuffix(baseURL, "/"), filename)
+			attestations = append(attestations, pb.AttestationDescriptor_builder{
+				AttestationType: &attestationType,
+				PredicateType:   &predicateType,
+				BundleHref:      &bundleHref,
+			}.Build())
+		}
+
+		// Check for SBOM attestation bundle
+		sbomBundlePath := filepath.Join(assetDir, filename+".sbom.sigstore.json")
+		if _, err := os.Stat(sbomBundlePath); err == nil {
+			attestationType := "https://in-toto.io/Statement/v1"
+			predicateType := "https://spdx.dev/Document"
+			bundleHref := fmt.Sprintf("%s/%s.sbom.sigstore.json", strings.TrimSuffix(baseURL, "/"), filename)
+			attestations = append(attestations, pb.AttestationDescriptor_builder{
+				AttestationType: &attestationType,
+				PredicateType:   &predicateType,
+				BundleHref:      &bundleHref,
+			}.Build())
+		}
+
+		if len(attestations) > 0 {
+			builder.Attestations = attestations
 		}
 
 		asset := builder.Build()
@@ -123,10 +143,11 @@ func main() {
 	}
 
 	// Build manifest with builder pattern
-	version := "1"
+	version := "2"
 	baseURLTrimmed := strings.TrimSuffix(baseURL, "/")
 	signatureHref := fmt.Sprintf("%s/manifest.json.sig", baseURLTrimmed)
 	certificateHref := fmt.Sprintf("%s/manifest.json.cert", baseURLTrimmed)
+
 	manifest := pb.Manifest_builder{
 		Version:         &version,
 		Name:            &repoName,
@@ -151,27 +172,9 @@ func main() {
 		os.Exit(1)
 	}
 
-	// Write to output file
-	if err := os.WriteFile(outputFile, jsonBytes, 0644); err != nil {
-		fmt.Fprintf(os.Stderr, "generate-manifest: error: writing manifest file: %v\n", err)
-		os.Exit(1)
-	}
-
-	// If github-output is set, also write to GITHUB_OUTPUT
-	if githubOut != "" {
-		f, err := os.OpenFile(githubOut, os.O_APPEND|os.O_WRONLY|os.O_CREATE, 0644)
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "generate-manifest: error: opening GITHUB_OUTPUT: %v\n", err)
-			os.Exit(1)
-		}
-		defer f.Close()
-
-		fmt.Fprintf(f, "binaries_manifest<<EOF\n")
-		f.Write(jsonBytes)
-		fmt.Fprintf(f, "\nEOF\n")
-	}
-
-	fmt.Printf("✅ Generated manifest: %s\n", outputFile)
+	// Write JSON to stdout (progress messages go to stderr)
+	fmt.Println(string(jsonBytes))
+	fmt.Fprintln(os.Stderr, "✅ Generated manifest")
 }
 
 // parseChecksumsFile parses the goreleaser checksums file and returns a map of filename -> SHA256 hash.

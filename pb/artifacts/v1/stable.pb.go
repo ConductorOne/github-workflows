@@ -22,25 +22,17 @@ const (
 	_ = protoimpl.EnforceVersion(protoimpl.MaxVersion - 20)
 )
 
-// Stable represents a stable release manifest with an additional updated_at timestamp.
+// Stable represents a pointer to the current stable release with metadata.
 // This manifest is stored at the catalog-level path: releases/{org}/{repo}/stable.json
-// It contains the same structure as Manifest but includes when it was last updated.
 type Stable struct {
-	state                      protoimpl.MessageState `protogen:"opaque.v1"`
-	xxx_hidden_Version         *string                `protobuf:"bytes,1,opt,name=version"`
-	xxx_hidden_Name            *string                `protobuf:"bytes,2,opt,name=name"`
-	xxx_hidden_Org             *string                `protobuf:"bytes,3,opt,name=org"`
-	xxx_hidden_Semver          *string                `protobuf:"bytes,4,opt,name=semver"`
-	xxx_hidden_ReleasedAt      *timestamppb.Timestamp `protobuf:"bytes,5,opt,name=released_at,json=releasedAt"`
-	xxx_hidden_Assets          map[string]*Asset      `protobuf:"bytes,6,rep,name=assets" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
-	xxx_hidden_Images          map[string]*Image      `protobuf:"bytes,7,rep,name=images" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
-	xxx_hidden_SignatureHref   *string                `protobuf:"bytes,8,opt,name=signature_href,json=signatureHref"`
-	xxx_hidden_CertificateHref *string                `protobuf:"bytes,9,opt,name=certificate_href,json=certificateHref"`
-	xxx_hidden_UpdatedAt       *timestamppb.Timestamp `protobuf:"bytes,10,opt,name=updated_at,json=updatedAt"`
-	XXX_raceDetectHookData     protoimpl.RaceDetectHookData
-	XXX_presence               [1]uint32
-	unknownFields              protoimpl.UnknownFields
-	sizeCache                  protoimpl.SizeCache
+	state                  protoimpl.MessageState `protogen:"opaque.v1"`
+	xxx_hidden_Version     *string                `protobuf:"bytes,1,opt,name=version"`
+	xxx_hidden_UpdatedAt   *timestamppb.Timestamp `protobuf:"bytes,2,opt,name=updated_at,json=updatedAt"`
+	xxx_hidden_Manifest    *Manifest              `protobuf:"bytes,3,opt,name=manifest"`
+	XXX_raceDetectHookData protoimpl.RaceDetectHookData
+	XXX_presence           [1]uint32
+	unknownFields          protoimpl.UnknownFields
+	sizeCache              protoimpl.SizeCache
 }
 
 func (x *Stable) Reset() {
@@ -78,77 +70,6 @@ func (x *Stable) GetVersion() string {
 	return ""
 }
 
-func (x *Stable) GetName() string {
-	if x != nil {
-		if x.xxx_hidden_Name != nil {
-			return *x.xxx_hidden_Name
-		}
-		return ""
-	}
-	return ""
-}
-
-func (x *Stable) GetOrg() string {
-	if x != nil {
-		if x.xxx_hidden_Org != nil {
-			return *x.xxx_hidden_Org
-		}
-		return ""
-	}
-	return ""
-}
-
-func (x *Stable) GetSemver() string {
-	if x != nil {
-		if x.xxx_hidden_Semver != nil {
-			return *x.xxx_hidden_Semver
-		}
-		return ""
-	}
-	return ""
-}
-
-func (x *Stable) GetReleasedAt() *timestamppb.Timestamp {
-	if x != nil {
-		return x.xxx_hidden_ReleasedAt
-	}
-	return nil
-}
-
-func (x *Stable) GetAssets() map[string]*Asset {
-	if x != nil {
-		return x.xxx_hidden_Assets
-	}
-	return nil
-}
-
-func (x *Stable) GetImages() map[string]*Image {
-	if x != nil {
-		return x.xxx_hidden_Images
-	}
-	return nil
-}
-
-func (x *Stable) GetSignatureHref() string {
-	if x != nil {
-		if x.xxx_hidden_SignatureHref != nil {
-			return *x.xxx_hidden_SignatureHref
-		}
-		return ""
-	}
-	return ""
-}
-
-func (x *Stable) GetCertificateHref() string {
-	if x != nil {
-		if x.xxx_hidden_CertificateHref != nil {
-			return *x.xxx_hidden_CertificateHref
-		}
-		return ""
-	}
-	return ""
-}
-
 func (x *Stable) GetUpdatedAt() *timestamppb.Timestamp {
 	if x != nil {
 		return x.xxx_hidden_UpdatedAt
@@ -156,50 +77,24 @@ func (x *Stable) GetUpdatedAt() *timestamppb.Timestamp {
 	return nil
 }
 
+func (x *Stable) GetManifest() *Manifest {
+	if x != nil {
+		return x.xxx_hidden_Manifest
+	}
+	return nil
+}
+
 func (x *Stable) SetVersion(v string) {
 	x.xxx_hidden_Version = &v
-	protoimpl.X.SetPresent(&(x.XXX_presence[0]), 0, 10)
-}
-
-func (x *Stable) SetName(v string) {
-	x.xxx_hidden_Name = &v
-	protoimpl.X.SetPresent(&(x.XXX_presence[0]), 1, 10)
-}
-
-func (x *Stable) SetOrg(v string) {
-	x.xxx_hidden_Org = &v
-	protoimpl.X.SetPresent(&(x.XXX_presence[0]), 2, 10)
-}
-
-func (x *Stable) SetSemver(v string) {
-	x.xxx_hidden_Semver = &v
-	protoimpl.X.SetPresent(&(x.XXX_presence[0]), 3, 10)
-}
-
-func (x *Stable) SetReleasedAt(v *timestamppb.Timestamp) {
-	x.xxx_hidden_ReleasedAt = v
-}
-
-func (x *Stable) SetAssets(v map[string]*Asset) {
-	x.xxx_hidden_Assets = v
-}
-
-func (x *Stable) SetImages(v map[string]*Image) {
-	x.xxx_hidden_Images = v
-}
-
-func (x *Stable) SetSignatureHref(v string) {
-	x.xxx_hidden_SignatureHref = &v
-	protoimpl.X.SetPresent(&(x.XXX_presence[0]), 7, 10)
-}
-
-func (x *Stable) SetCertificateHref(v string) {
-	x.xxx_hidden_CertificateHref = &v
-	protoimpl.X.SetPresent(&(x.XXX_presence[0]), 8, 10)
+	protoimpl.X.SetPresent(&(x.XXX_presence[0]), 0, 3)
 }
 
 func (x *Stable) SetUpdatedAt(v *timestamppb.Timestamp) {
 	x.xxx_hidden_UpdatedAt = v
+}
+
+func (x *Stable) SetManifest(v *Manifest) {
+	x.xxx_hidden_Manifest = v
 }
 
 func (x *Stable) HasVersion() bool {
@@ -209,48 +104,6 @@ func (x *Stable) HasVersion() bool {
 	return protoimpl.X.Present(&(x.XXX_presence[0]), 0)
 }
 
-func (x *Stable) HasName() bool {
-	if x == nil {
-		return false
-	}
-	return protoimpl.X.Present(&(x.XXX_presence[0]), 1)
-}
-
-func (x *Stable) HasOrg() bool {
-	if x == nil {
-		return false
-	}
-	return protoimpl.X.Present(&(x.XXX_presence[0]), 2)
-}
-
-func (x *Stable) HasSemver() bool {
-	if x == nil {
-		return false
-	}
-	return protoimpl.X.Present(&(x.XXX_presence[0]), 3)
-}
-
-func (x *Stable) HasReleasedAt() bool {
-	if x == nil {
-		return false
-	}
-	return x.xxx_hidden_ReleasedAt != nil
-}
-
-func (x *Stable) HasSignatureHref() bool {
-	if x == nil {
-		return false
-	}
-	return protoimpl.X.Present(&(x.XXX_presence[0]), 7)
-}
-
-func (x *Stable) HasCertificateHref() bool {
-	if x == nil {
-		return false
-	}
-	return protoimpl.X.Present(&(x.XXX_presence[0]), 8)
-}
-
 func (x *Stable) HasUpdatedAt() bool {
 	if x == nil {
 		return false
@@ -258,70 +111,36 @@ func (x *Stable) HasUpdatedAt() bool {
 	return x.xxx_hidden_UpdatedAt != nil
 }
 
+func (x *Stable) HasManifest() bool {
+	if x == nil {
+		return false
+	}
+	return x.xxx_hidden_Manifest != nil
+}
+
 func (x *Stable) ClearVersion() {
 	protoimpl.X.ClearPresent(&(x.XXX_presence[0]), 0)
 	x.xxx_hidden_Version = nil
-}
-
-func (x *Stable) ClearName() {
-	protoimpl.X.ClearPresent(&(x.XXX_presence[0]), 1)
-	x.xxx_hidden_Name = nil
-}
-
-func (x *Stable) ClearOrg() {
-	protoimpl.X.ClearPresent(&(x.XXX_presence[0]), 2)
-	x.xxx_hidden_Org = nil
-}
-
-func (x *Stable) ClearSemver() {
-	protoimpl.X.ClearPresent(&(x.XXX_presence[0]), 3)
-	x.xxx_hidden_Semver = nil
-}
-
-func (x *Stable) ClearReleasedAt() {
-	x.xxx_hidden_ReleasedAt = nil
-}
-
-func (x *Stable) ClearSignatureHref() {
-	protoimpl.X.ClearPresent(&(x.XXX_presence[0]), 7)
-	x.xxx_hidden_SignatureHref = nil
-}
-
-func (x *Stable) ClearCertificateHref() {
-	protoimpl.X.ClearPresent(&(x.XXX_presence[0]), 8)
-	x.xxx_hidden_CertificateHref = nil
 }
 
 func (x *Stable) ClearUpdatedAt() {
 	x.xxx_hidden_UpdatedAt = nil
 }
 
+func (x *Stable) ClearManifest() {
+	x.xxx_hidden_Manifest = nil
+}
+
 type Stable_builder struct {
 	_ [0]func() // Prevents comparability and use of unkeyed literals for the builder.
 
-	// version is the manifest schema version (currently "1")
+	// version is the stable schema version (currently "1")
 	Version *string
-	// name is the repository name (e.g., "baton-ukg")
-	Name *string
-	// org is the organization name (e.g., "ConductorOne")
-	Org *string
-	// semver is the semantic version tag (e.g., "v0.0.8")
-	Semver *string
-	// released_at is the timestamp when the release was created
-	ReleasedAt *timestamppb.Timestamp
-	// assets is a map of platform/type identifiers to asset metadata.
-	// Keys are platform identifiers like "darwin-arm64", "linux-amd64", "windows-amd64", "checksums"
-	Assets map[string]*Asset
-	// images is a map of registry identifiers to container image metadata.
-	// Keys are registry identifiers like "ghcr", "ecrPublic"
-	Images map[string]*Image
-	// signature_href is the URL to the manifest signature file (manifest.json.sig)
-	SignatureHref *string
-	// certificate_href is the URL to the manifest certificate file (manifest.json.cert)
-	CertificateHref *string
-	// updated_at is the timestamp when this stable release was last updated.
-	// This differs from released_at which is when the original release was created.
+	// updated_at is the timestamp when stable.json was last updated.
+	// This differs from manifest.released_at which is when the release was originally created.
 	UpdatedAt *timestamppb.Timestamp
+	// manifest is the manifest for the current stable release
+	Manifest *Manifest
 }
 
 func (b0 Stable_builder) Build() *Stable {
@@ -329,33 +148,11 @@ func (b0 Stable_builder) Build() *Stable {
 	b, x := &b0, m0
 	_, _ = b, x
 	if b.Version != nil {
-		protoimpl.X.SetPresentNonAtomic(&(x.XXX_presence[0]), 0, 10)
+		protoimpl.X.SetPresentNonAtomic(&(x.XXX_presence[0]), 0, 3)
 		x.xxx_hidden_Version = b.Version
 	}
-	if b.Name != nil {
-		protoimpl.X.SetPresentNonAtomic(&(x.XXX_presence[0]), 1, 10)
-		x.xxx_hidden_Name = b.Name
-	}
-	if b.Org != nil {
-		protoimpl.X.SetPresentNonAtomic(&(x.XXX_presence[0]), 2, 10)
-		x.xxx_hidden_Org = b.Org
-	}
-	if b.Semver != nil {
-		protoimpl.X.SetPresentNonAtomic(&(x.XXX_presence[0]), 3, 10)
-		x.xxx_hidden_Semver = b.Semver
-	}
-	x.xxx_hidden_ReleasedAt = b.ReleasedAt
-	x.xxx_hidden_Assets = b.Assets
-	x.xxx_hidden_Images = b.Images
-	if b.SignatureHref != nil {
-		protoimpl.X.SetPresentNonAtomic(&(x.XXX_presence[0]), 7, 10)
-		x.xxx_hidden_SignatureHref = b.SignatureHref
-	}
-	if b.CertificateHref != nil {
-		protoimpl.X.SetPresentNonAtomic(&(x.XXX_presence[0]), 8, 10)
-		x.xxx_hidden_CertificateHref = b.CertificateHref
-	}
 	x.xxx_hidden_UpdatedAt = b.UpdatedAt
+	x.xxx_hidden_Manifest = b.Manifest
 	return m0
 }
 
@@ -363,49 +160,27 @@ var File_artifacts_v1_stable_proto protoreflect.FileDescriptor
 
 const file_artifacts_v1_stable_proto_rawDesc = "" +
 	"\n" +
-	"\x19artifacts/v1/stable.proto\x12\fartifacts.v1\x1a\x1fgoogle/protobuf/timestamp.proto\x1a!google/protobuf/go_features.proto\x1a\x1bartifacts/v1/manifest.proto\"\xbe\x04\n" +
+	"\x19artifacts/v1/stable.proto\x12\fartifacts.v1\x1a\x1fgoogle/protobuf/timestamp.proto\x1a!google/protobuf/go_features.proto\x1a\x1bartifacts/v1/manifest.proto\"\x91\x01\n" +
 	"\x06Stable\x12\x18\n" +
-	"\aversion\x18\x01 \x01(\tR\aversion\x12\x12\n" +
-	"\x04name\x18\x02 \x01(\tR\x04name\x12\x10\n" +
-	"\x03org\x18\x03 \x01(\tR\x03org\x12\x16\n" +
-	"\x06semver\x18\x04 \x01(\tR\x06semver\x12;\n" +
-	"\vreleased_at\x18\x05 \x01(\v2\x1a.google.protobuf.TimestampR\n" +
-	"releasedAt\x128\n" +
-	"\x06assets\x18\x06 \x03(\v2 .artifacts.v1.Stable.AssetsEntryR\x06assets\x128\n" +
-	"\x06images\x18\a \x03(\v2 .artifacts.v1.Stable.ImagesEntryR\x06images\x12%\n" +
-	"\x0esignature_href\x18\b \x01(\tR\rsignatureHref\x12)\n" +
-	"\x10certificate_href\x18\t \x01(\tR\x0fcertificateHref\x129\n" +
+	"\aversion\x18\x01 \x01(\tR\aversion\x129\n" +
 	"\n" +
-	"updated_at\x18\n" +
-	" \x01(\v2\x1a.google.protobuf.TimestampR\tupdatedAt\x1aN\n" +
-	"\vAssetsEntry\x12\x10\n" +
-	"\x03key\x18\x01 \x01(\tR\x03key\x12)\n" +
-	"\x05value\x18\x02 \x01(\v2\x13.artifacts.v1.AssetR\x05value:\x028\x01\x1aN\n" +
-	"\vImagesEntry\x12\x10\n" +
-	"\x03key\x18\x01 \x01(\tR\x03key\x12)\n" +
-	"\x05value\x18\x02 \x01(\v2\x13.artifacts.v1.ImageR\x05value:\x028\x01BBZ8github.com/ConductorOne/github-workflows/pb/artifacts/v1\x92\x03\x05\xd2>\x02\x10\x03b\beditionsp\xe8\a"
+	"updated_at\x18\x02 \x01(\v2\x1a.google.protobuf.TimestampR\tupdatedAt\x122\n" +
+	"\bmanifest\x18\x03 \x01(\v2\x16.artifacts.v1.ManifestR\bmanifestBBZ8github.com/ConductorOne/github-workflows/pb/artifacts/v1\x92\x03\x05\xd2>\x02\x10\x03b\beditionsp\xe8\a"
 
-var file_artifacts_v1_stable_proto_msgTypes = make([]protoimpl.MessageInfo, 3)
+var file_artifacts_v1_stable_proto_msgTypes = make([]protoimpl.MessageInfo, 1)
 var file_artifacts_v1_stable_proto_goTypes = []any{
 	(*Stable)(nil),                // 0: artifacts.v1.Stable
-	nil,                           // 1: artifacts.v1.Stable.AssetsEntry
-	nil,                           // 2: artifacts.v1.Stable.ImagesEntry
-	(*timestamppb.Timestamp)(nil), // 3: google.protobuf.Timestamp
-	(*Asset)(nil),                 // 4: artifacts.v1.Asset
-	(*Image)(nil),                 // 5: artifacts.v1.Image
+	(*timestamppb.Timestamp)(nil), // 1: google.protobuf.Timestamp
+	(*Manifest)(nil),              // 2: artifacts.v1.Manifest
 }
 var file_artifacts_v1_stable_proto_depIdxs = []int32{
-	3, // 0: artifacts.v1.Stable.released_at:type_name -> google.protobuf.Timestamp
-	1, // 1: artifacts.v1.Stable.assets:type_name -> artifacts.v1.Stable.AssetsEntry
-	2, // 2: artifacts.v1.Stable.images:type_name -> artifacts.v1.Stable.ImagesEntry
-	3, // 3: artifacts.v1.Stable.updated_at:type_name -> google.protobuf.Timestamp
-	4, // 4: artifacts.v1.Stable.AssetsEntry.value:type_name -> artifacts.v1.Asset
-	5, // 5: artifacts.v1.Stable.ImagesEntry.value:type_name -> artifacts.v1.Image
-	6, // [6:6] is the sub-list for method output_type
-	6, // [6:6] is the sub-list for method input_type
-	6, // [6:6] is the sub-list for extension type_name
-	6, // [6:6] is the sub-list for extension extendee
-	0, // [0:6] is the sub-list for field type_name
+	1, // 0: artifacts.v1.Stable.updated_at:type_name -> google.protobuf.Timestamp
+	2, // 1: artifacts.v1.Stable.manifest:type_name -> artifacts.v1.Manifest
+	2, // [2:2] is the sub-list for method output_type
+	2, // [2:2] is the sub-list for method input_type
+	2, // [2:2] is the sub-list for extension type_name
+	2, // [2:2] is the sub-list for extension extendee
+	0, // [0:2] is the sub-list for field type_name
 }
 
 func init() { file_artifacts_v1_stable_proto_init() }
@@ -420,7 +195,7 @@ func file_artifacts_v1_stable_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_artifacts_v1_stable_proto_rawDesc), len(file_artifacts_v1_stable_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   3,
+			NumMessages:   1,
 			NumExtensions: 0,
 			NumServices:   0,
 		},
