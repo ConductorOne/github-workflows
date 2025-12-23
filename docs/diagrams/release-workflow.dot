@@ -1,0 +1,47 @@
+digraph ReleaseWorkflow {
+  rankdir=TB;
+  node [shape=box, style="rounded,filled", fillcolor=white, fontname="Helvetica"];
+  edge [fontname="Helvetica"];
+
+  // Connector repo calls shared workflow
+  connector_repo [label="Connector Repo\n(baton-*)", fillcolor="#f9fafb"];
+  tag [label="Tag pushed\nvX.Y.Z", fillcolor="#fef3c7"];
+
+  // Shared workflow cluster
+  subgraph cluster_jobs {
+    label = "Shared Workflow: release.yaml\n(ConductorOne/github-workflows)";
+    style="filled";
+    color="#dbeafe";
+
+    determine_ref [label="determine-workflows-ref\n• resolve workflow SHA", fillcolor="#f9fafb"];
+
+    binaries [label="goreleaser-binaries\n• build archives\n• gon codesign\n• SBOMs (syft)\n• provenance attestations\n• SBOM attestations\n• upload to S3", fillcolor="#ecfeff"];
+
+    docker [label="goreleaser-docker\n• multi-arch OCI images\n• Lambda image (arm64)\n• GHCR push\n• ECR Public push\n• image attestations", fillcolor="#ecfeff"];
+
+    record [label="record-connector-registry\n• merge manifests\n• sign manifest\n• upload manifest\n• invoke Lambda (release event)", fillcolor="#ecfeff"];
+
+    record_lambda [label="record-lambda-registry\n• invoke Lambda (release event)", fillcolor="#ecfeff"];
+
+    verify [label="verify-release\n• validate artifacts\n• verify attestations", fillcolor="#f0fdf4"];
+  }
+
+  // Outputs
+  s3 [label="S3\n• archives\n• attestations\n• manifest", fillcolor="#fef9c3"];
+  ghcr [label="GHCR\n• images\n• OCI attestations", fillcolor="#f9fafb"];
+  ecr [label="ECR Public\n• OCI images\n• Lambda image", fillcolor="#fef9c3"];
+
+  // Flow
+  connector_repo -> tag;
+  tag -> determine_ref;
+  determine_ref -> binaries;
+  determine_ref -> docker;
+  binaries -> record;
+  docker -> record;
+  docker -> record_lambda;
+  binaries -> s3 [label="artifacts"];
+  docker -> ghcr [label="push"];
+  docker -> ecr [label="push"];
+  record -> s3 [label="manifest"];
+  record -> verify;
+}
