@@ -13,6 +13,8 @@ digraph ReleaseWorkflow {
     style="filled";
     color="#dbeafe";
 
+    validate [label="validate-inputs\n• semver tag, input constraints", fillcolor="#f9fafb"];
+
     determine_ref [label="determine-workflows-ref\n• resolve workflow SHA", fillcolor="#f9fafb"];
 
     binaries [label="goreleaser-binaries\n• build archives\n• gon codesign\n• SBOMs (syft)\n• provenance attestations\n• SBOM attestations\n• upload to S3", fillcolor="#ecfeff"];
@@ -33,7 +35,8 @@ digraph ReleaseWorkflow {
 
   // Flow
   connector_repo -> tag;
-  tag -> determine_ref;
+  tag -> validate;
+  validate -> determine_ref;
   determine_ref -> binaries;
   determine_ref -> docker;
   binaries -> record;

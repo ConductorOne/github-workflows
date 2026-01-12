@@ -1,5 +1,8 @@
 ## Docker template for signed OCI images, pushes to GHCR and ECR public
 ## GoReleaser >= 2.12 required for dockers_v2
+##
+## Template variables (substituted via envsubst):
+##   REPO_NAME, DIST_DIR, DOCKERFILE_PATH, EXTRA_FILES_BLOCK
 version: 2
 project_name: "${REPO_NAME}"
 dist: "${DIST_DIR}"
@@ -27,7 +30,7 @@ dockers_v2:
     dockerfile: ${DOCKERFILE_PATH}
     ids:
       - linux
-    labels:
+${EXTRA_FILES_BLOCK}    labels:
       "org.opencontainers.image.created": "{{.Date}}"
       "org.opencontainers.image.title": "{{.ProjectName}}"
       "org.opencontainers.image.revision": "{{.FullCommit}}"
@@ -46,7 +49,7 @@ dockers_v2:
     dockerfile: ${DOCKERFILE_PATH}
     ids:
       - linux
-    labels:
+${EXTRA_FILES_BLOCK}    labels:
       "org.opencontainers.image.created": "{{ .Date }}"
       "org.opencontainers.image.title": "{{ .ProjectName }}"
       "org.opencontainers.image.revision": "{{ .FullCommit }}"

@@ -33,6 +33,6 @@ Before modifying this repository, read:
 These require extra care when modifying:
 
 - Sigstore/cosign signing steps
-- Provenance predicate generation (`templates/.slsa-provenance-predicate-template.json`)
+- Provenance predicate generation (`templates/.slsa-provenance-predicate-template.json.tmpl`)
 - Attestation bundle creation and upload
 - OIDC credential configuration
