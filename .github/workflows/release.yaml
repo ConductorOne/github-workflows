@@ -32,6 +32,11 @@ on:
         type: string
         default: ""
         description: "Path to a custom Dockerfile template in the caller repo (relative to repo root). Only valid when lambda is false. Supports ${REPO_NAME} substitution."
+      docker_extra_files:
+        required: false
+        type: string
+        default: ""
+        description: "Comma-separated list of extra files/directories from the caller repo to include in the Docker build context (e.g., 'java,config'). Only valid when dockerfile_template is set."
     secrets:
       RELENG_GITHUB_TOKEN:
         required: true
@@ -71,6 +76,12 @@ jobs:
         if: inputs.dockerfile_template != '' && inputs.lambda == true
         run: |
           echo "::error::dockerfile_template can only be used when lambda is false"
+          exit 1
+
+      - name: Validate docker_extra_files requires dockerfile_template
+        if: inputs.docker_extra_files != '' && inputs.dockerfile_template == ''
+        run: |
+          echo "::error::docker_extra_files can only be used when dockerfile_template is set"
           exit 1
 
   determine-workflows-ref:
@@ -143,8 +154,8 @@ jobs:
 
           envsubst < .gon-amd64-template.json | tee "${GENERATED_DIR}/.gon-amd64.json"
           envsubst < .gon-arm64-template.json | tee "${GENERATED_DIR}/.gon-arm64.json"
-          envsubst < templates/.goreleaser-binaries-template.yaml | tee "${GENERATED_DIR}/.goreleaser.binaries.yaml"
-          envsubst < templates/.slsa-provenance-predicate-template.json | tee "${GENERATED_DIR}/predicate.json"
+          envsubst < templates/.goreleaser-binaries-template.yaml.tmpl | tee "${GENERATED_DIR}/.goreleaser.binaries.yaml"
+          envsubst < templates/.slsa-provenance-predicate-template.json.tmpl | tee "${GENERATED_DIR}/predicate.json"
 
       - name: Set up Gon
         run: brew tap conductorone/gon && brew install conductorone/gon/gon
@@ -374,6 +385,8 @@ jobs:
           RELEASE_TAG: ${{ inputs.tag }}
           # Custom Dockerfile template from caller repo (if provided)
           CUSTOM_DOCKERFILE_TEMPLATE: ${{ inputs.dockerfile_template }}
+          # Extra files to include in Docker build context (comma-separated)
+          DOCKER_EXTRA_FILES: ${{ inputs.docker_extra_files }}
         run: |
           mkdir -p "${GENERATED_DIR}"
           export BUILD_STARTED_ON=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
@@ -389,11 +402,33 @@ jobs:
             envsubst '$REPO_NAME' < "${CUSTOM_PATH}" | tee "${GENERATED_DIR}/Dockerfile"
           else
             echo "Using default Dockerfile template"
-            envsubst '$REPO_NAME' < templates/.Dockerfile-template | tee "${GENERATED_DIR}/Dockerfile"
+            envsubst '$REPO_NAME' < templates/.Dockerfile-template.tmpl | tee "${GENERATED_DIR}/Dockerfile"
           fi
 
-          envsubst < templates/.goreleaser-docker-oci-template.yaml | tee "${GENERATED_DIR}/.goreleaser.docker.yaml"
-          envsubst < templates/.slsa-provenance-predicate-template.json | tee "${GENERATED_DIR}/predicate.json"
+          # Build EXTRA_FILES_BLOCK for goreleaser template substitution
+          # This will be empty string if no extra files, or the YAML block if specified
+          export EXTRA_FILES_BLOCK=""
+          if [ -n "${DOCKER_EXTRA_FILES}" ]; then
+            echo "Adding extra files to Docker build context: ${DOCKER_EXTRA_FILES}"
+            
+            # Validate files exist and build the YAML block
+            EXTRA_FILES_BLOCK="    extra_files:"$'\n'
+            IFS=',' read -ra FILES <<< "${DOCKER_EXTRA_FILES}"
+            for file in "${FILES[@]}"; do
+              file=$(echo "$file" | xargs)  # trim whitespace
+              if [ ! -e "../_caller/${file}" ]; then
+                echo "::error::Extra file/directory not found: ${file}"
+                exit 1
+              fi
+              EXTRA_FILES_BLOCK="${EXTRA_FILES_BLOCK}      - ${file}"$'\n'
+            done
+            export EXTRA_FILES_BLOCK
+          fi
+
+          # Generate goreleaser config with all substitutions
+          envsubst < templates/.goreleaser-docker-oci-template.yaml.tmpl | tee "${GENERATED_DIR}/.goreleaser.docker.yaml"
+
+          envsubst < templates/.slsa-provenance-predicate-template.json.tmpl | tee "${GENERATED_DIR}/predicate.json"
 
       - name: Generate configs for Lambda
         if: inputs.lambda == true
@@ -404,8 +439,8 @@ jobs:
           DIST_DIR: dist/lambda
         run: |
           mkdir -p "${GENERATED_DIR}"
-          envsubst '$REPO_NAME' < templates/.Dockerfile-lambda-template | tee "${GENERATED_DIR}/Dockerfile.lambda"
-          envsubst < templates/.goreleaser-docker-lambda-template.yaml | tee "${GENERATED_DIR}/.goreleaser.lambda.yaml"
+          envsubst '$REPO_NAME' < templates/.Dockerfile-lambda-template.tmpl | tee "${GENERATED_DIR}/Dockerfile.lambda"
+          envsubst < templates/.goreleaser-docker-lambda-template.yaml.tmpl | tee "${GENERATED_DIR}/.goreleaser.lambda.yaml"
 
       - name: Docker Login
         if: inputs.docker == true
