@@ -34,11 +34,12 @@ jobs:
 
 The release workflow accepts the following input parameters:
 
-| Parameter | Required | Default | Description                                  |
-| --------- | -------- | ------- | -------------------------------------------- |
-| `tag`     | Yes      | -       | The release tag (e.g., "v1.0.0")             |
-| `lambda`  | No       | `true`  | Whether to release with Lambda image support |
-| `docker`  | No       | `true`  | Whether to release with Docker image support |
+| Parameter             | Required | Default | Description                                                                |
+| --------------------- | -------- | ------- | -------------------------------------------------------------------------- |
+| `tag`                 | Yes      | -       | The release tag (must be valid semver with `v` prefix, e.g., `v1.0.0`)     |
+| `lambda`              | No       | `true`  | Whether to release with Lambda image support                               |
+| `docker`              | No       | `true`  | Whether to release with Docker image support                               |
+| `dockerfile_template` | No       | `""`    | Path to a custom Dockerfile in your repo (only valid when `lambda: false`) |
 
 2. Ensure your repository has the following secrets configured:
 
@@ -50,6 +51,44 @@ The release workflow accepts the following input parameters:
    - `DATADOG_API_KEY`: Datadog API key for monitoring releases
 
 3. Remove all GoReleaser, gon files, Dockerfile, and Dockerfile.lambda files from your connector repository, if they were previously created there.
+
+### Custom Dockerfiles
+
+For connectors that require a non-standard base image (e.g., Java runtime), you can provide a custom Dockerfile:
+
+```yaml
+jobs:
+  release:
+    uses: ConductorOne/github-workflows/.github/workflows/release.yaml@v4
+    with:
+      tag: ${{ github.ref_name }}
+      lambda: false
+      dockerfile_template: Dockerfile
+    secrets:
+      # ... secrets ...
+```
+
+Your custom Dockerfile must:
+
+1. Use `ARG TARGETPLATFORM` for multi-arch build support
+2. Copy the binary from `${TARGETPLATFORM}/<connector-name>`
+
+Example for a Java-based connector:
+
+```dockerfile
+FROM gcr.io/distroless/java17-debian11:nonroot
+ARG TARGETPLATFORM
+ENTRYPOINT ["/baton-example"]
+
+COPY ${TARGETPLATFORM}/baton-example /baton-example
+COPY java /java
+```
+
+The workflow substitutes `${REPO_NAME}` in your Dockerfile if present, so you can also use:
+
+```dockerfile
+COPY ${TARGETPLATFORM}/${REPO_NAME} /${REPO_NAME}
+```
 
 ## Available Actions
 

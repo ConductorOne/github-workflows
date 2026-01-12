@@ -27,6 +27,11 @@ on:
         type: boolean
         default: true
         description: "Whether to release with Docker image support."
+      dockerfile_template:
+        required: false
+        type: string
+        default: ""
+        description: "Path to a custom Dockerfile template in the caller repo (relative to repo root). Only valid when lambda is false. Supports ${REPO_NAME} substitution."
     secrets:
       RELENG_GITHUB_TOKEN:
         required: true
@@ -47,7 +52,29 @@ env:
   GENERATED_DIR: "_generated"
 
 jobs:
+  validate-inputs:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Validate tag format
+        run: |
+          TAG="${{ inputs.tag }}"
+          # Strict semver regex with 'v' prefix (per https://semver.org)
+          # Supports: v1.2.3, v1.2.3-alpha, v1.2.3-alpha.1, v1.2.3+build, v1.2.3-rc.1+build.123
+          SEMVER_REGEX='^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-((0|[1-9][0-9]*|[0-9]*[a-zA-Z-][0-9a-zA-Z-]*)(\.(0|[1-9][0-9]*|[0-9]*[a-zA-Z-][0-9a-zA-Z-]*))*))?(\+([0-9a-zA-Z-]+(\.[0-9a-zA-Z-]+)*))?$'
+          if [[ ! "$TAG" =~ $SEMVER_REGEX ]]; then
+            echo "::error::Tag must be valid semver starting with 'v' (e.g., v1.2.3, v1.0.0-rc.1). Got: $TAG"
+            exit 1
+          fi
+          echo "✅ Tag format valid: $TAG"
+
+      - name: Validate dockerfile_template requires lambda=false
+        if: inputs.dockerfile_template != '' && inputs.lambda == true
+        run: |
+          echo "::error::dockerfile_template can only be used when lambda is false"
+          exit 1
+
   determine-workflows-ref:
+    needs: validate-inputs
     runs-on: ubuntu-latest
     permissions:
       actions: read
@@ -345,11 +372,26 @@ jobs:
           # For provenance predicate template
           WORKFLOWS_REF: ${{ needs.determine-workflows-ref.outputs.ref }}
           RELEASE_TAG: ${{ inputs.tag }}
+          # Custom Dockerfile template from caller repo (if provided)
+          CUSTOM_DOCKERFILE_TEMPLATE: ${{ inputs.dockerfile_template }}
         run: |
           mkdir -p "${GENERATED_DIR}"
           export BUILD_STARTED_ON=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
 
-          envsubst '$REPO_NAME' < templates/.Dockerfile-template | tee "${GENERATED_DIR}/Dockerfile"
+          # Generate Dockerfile from custom template or default
+          if [ -n "${CUSTOM_DOCKERFILE_TEMPLATE}" ]; then
+            CUSTOM_PATH="../_caller/${CUSTOM_DOCKERFILE_TEMPLATE}"
+            if [ ! -f "${CUSTOM_PATH}" ]; then
+              echo "::error::Custom Dockerfile template not found: ${CUSTOM_DOCKERFILE_TEMPLATE}"
+              exit 1
+            fi
+            echo "Using custom Dockerfile template: ${CUSTOM_DOCKERFILE_TEMPLATE}"
+            envsubst '$REPO_NAME' < "${CUSTOM_PATH}" | tee "${GENERATED_DIR}/Dockerfile"
+          else
+            echo "Using default Dockerfile template"
+            envsubst '$REPO_NAME' < templates/.Dockerfile-template | tee "${GENERATED_DIR}/Dockerfile"
+          fi
+
           envsubst < templates/.goreleaser-docker-oci-template.yaml | tee "${GENERATED_DIR}/.goreleaser.docker.yaml"
           envsubst < templates/.slsa-provenance-predicate-template.json | tee "${GENERATED_DIR}/predicate.json"
 
