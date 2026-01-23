@@ -578,6 +578,9 @@ jobs:
 
   record-connector-registry:
     # require binaries and docker to complete before recording, since we include both in the manifest
+    # use explicit if condition to run when goreleaser-docker is skipped (docker=false && lambda=false)
+    # see: https://docs.github.com/en/actions/using-jobs/using-conditions-to-control-job-execution
+    if: ${{ !cancelled() && needs.goreleaser-binaries.result == 'success' }}
     needs: [determine-workflows-ref, goreleaser-binaries, goreleaser-docker]
     permissions:
       id-token: write
