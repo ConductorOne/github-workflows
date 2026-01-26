@@ -1,0 +1,84 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Default WXS template for ConductorOne CLI connectors.
+
+  This template provides a simple installer that:
+  - Installs the binary to C:\Program Files\ConductorOne\<connector-name>
+  - Adds the installation directory to the system PATH
+  - Supports clean upgrades via MajorUpgrade
+
+  For complex installers (Windows Service, registry keys, etc.),
+  use a custom WXS via the msi_wxs_path input.
+
+  Template variables (substituted by GoReleaser):
+  - {{ .ProjectName }} - The connector name (e.g., "baton-okta")
+  - {{ .Version }} - The version without 'v' prefix (e.g., "1.2.3")
+  - {{ .Binary }} - The binary name without extension (e.g., "baton-okta")
+  - {{ .MsiArch }} - The architecture (e.g., "x64", "x86")
+
+  The ${UPGRADE_CODE} placeholder is substituted at build time with a
+  deterministic UUID v5 generated from the repository name.
+-->
+<Wix xmlns="http://schemas.microsoft.com/wix/2006/wi">
+  <Product Id="*"
+           Name="{{ .ProjectName }}"
+           Language="1033"
+           Version="{{ .Version }}"
+           Manufacturer="ConductorOne"
+           UpgradeCode="${UPGRADE_CODE}">
+
+    <Package InstallerVersion="500"
+             Compressed="yes"
+             InstallScope="perMachine"
+             Description="{{ .ProjectName }} installer"
+             Comments="ConductorOne Connector" />
+
+    <Media Id="1" Cabinet="app.cab" EmbedCab="yes" />
+
+    <!-- Allow upgrades, prevent downgrades -->
+    <MajorUpgrade
+      Schedule="afterInstallInitialize"
+      DowngradeErrorMessage="A newer version of [ProductName] is already installed."
+      AllowDowngrades="no" />
+
+    <!-- Directory structure: C:\Program Files\ConductorOne\<connector-name> -->
+    <Directory Id="TARGETDIR" Name="SourceDir">
+      <Directory Id="ProgramFiles64Folder">
+        <Directory Id="ConductorOneFolder" Name="ConductorOne">
+          <Directory Id="INSTALLFOLDER" Name="{{ .ProjectName }}" />
+        </Directory>
+      </Directory>
+    </Directory>
+
+    <!-- Main feature that includes the executable -->
+    <Feature Id="MainFeature" Title="{{ .ProjectName }}" Level="1">
+      <ComponentRef Id="MainExecutable" />
+      <ComponentRef Id="PathComponent" />
+    </Feature>
+
+    <!-- The main executable component -->
+    <Component Id="MainExecutable" Guid="*" Directory="INSTALLFOLDER">
+      <File Id="MainExe"
+            Source="{{ .Binary }}.exe"
+            KeyPath="yes" />
+    </Component>
+
+    <!-- Add installation directory to system PATH -->
+    <Component Id="PathComponent" Guid="*" Directory="INSTALLFOLDER">
+      <Environment Id="PATH"
+                   Name="PATH"
+                   Value="[INSTALLFOLDER]"
+                   Permanent="no"
+                   Part="last"
+                   Action="set"
+                   System="yes" />
+      <RegistryValue Root="HKLM"
+                     Key="Software\ConductorOne\{{ .ProjectName }}"
+                     Name="PathComponentInstalled"
+                     Type="integer"
+                     Value="1"
+                     KeyPath="yes" />
+    </Component>
+
+  </Product>
+</Wix>

@@ -22,9 +22,11 @@ func main() {
 	var (
 		binariesManifest string
 		imagesManifest   string
+		windowsManifest  string
 	)
 	flag.StringVar(&binariesManifest, "binaries-manifest", "", "JSON string of binaries manifest")
 	flag.StringVar(&imagesManifest, "images-manifest", "", "JSON string of images manifest (optional)")
+	flag.StringVar(&windowsManifest, "windows-manifest", "", "JSON string of Windows manifest (optional)")
 	flag.Parse()
 
 	if binariesManifest == "" {
@@ -99,6 +101,44 @@ func main() {
 		fmt.Fprintf(os.Stderr, "✅ Added %d images to manifest\n", len(images))
 	} else {
 		fmt.Fprintln(os.Stderr, "ℹ️  No images to add to manifest (docker job may have been skipped if no Dockerfile)")
+	}
+
+	// Merge Windows artifacts if present (zip and MSI from goreleaser-windows job)
+	// Format is map[string]*pb.Asset (same pattern as images)
+	if windowsManifest != "" && windowsManifest != "{}" {
+		// Unmarshal Windows manifest as a map[string]json.RawMessage using standard json
+		var windowsMapJSON map[string]json.RawMessage
+		if err := json.Unmarshal([]byte(windowsManifest), &windowsMapJSON); err != nil {
+			fmt.Fprintf(os.Stderr, "merge-manifests: ::error::Invalid JSON in windows_manifest output\n")
+			fmt.Fprintf(os.Stderr, "merge-manifests: Raw content:\n%s\n", windowsManifest)
+			fmt.Fprintf(os.Stderr, "merge-manifests: Error: %v\n", err)
+			os.Exit(1)
+		}
+
+		// Get the existing assets map
+		assets := manifest.GetAssets()
+		if assets == nil {
+			assets = make(map[string]*pb.Asset)
+			manifest.SetAssets(assets)
+		}
+
+		// Convert each JSON value to proto Asset message using protojson
+		unmarshalOpts := protojson.UnmarshalOptions{
+			DiscardUnknown: true,
+		}
+		for key, assetJSON := range windowsMapJSON {
+			asset := &pb.Asset{}
+			if err := unmarshalOpts.Unmarshal(assetJSON, asset); err != nil {
+				fmt.Fprintf(os.Stderr, "merge-manifests: error: unmarshaling Windows asset %s: %v\n", key, err)
+				os.Exit(1)
+			}
+			assets[key] = asset
+			fmt.Fprintf(os.Stderr, "✅ Added Windows asset: %s\n", key)
+		}
+
+		fmt.Fprintf(os.Stderr, "✅ Added %d Windows artifacts to manifest\n", len(windowsMapJSON))
+	} else {
+		fmt.Fprintln(os.Stderr, "ℹ️  No Windows artifacts to add to manifest")
 	}
 
 	// Set manifest-level asset attestation descriptor if any assets have attestations

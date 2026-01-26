@@ -1,4 +1,5 @@
 ## Binary template for signed artifacts, pushes to public registry (S3 bucket)
+## Note: Windows builds are handled separately in goreleaser-windows job
 version: 2
 project_name: "${REPO_NAME}"
 builds:
@@ -12,15 +13,6 @@ builds:
     goarch:
       - amd64
       - arm64
-  - binary: "${REPO_NAME}"
-    env:
-      - CGO_ENABLED=0
-    id: windows
-    main: ./cmd/${REPO_NAME}
-    goos:
-      - windows
-    goarch:
-      - amd64
   - binary: "${REPO_NAME}"
     env:
       - CGO_ENABLED=0
@@ -53,13 +45,6 @@ archives:
     name_template: "{{ .ProjectName }}-v{{ .Version }}-{{ .Os }}-{{ .Arch }}"
     files:
       - none*
-  - id: windows-archive
-    builds:
-      - windows
-    format: zip
-    name_template: "{{ .ProjectName }}-v{{ .Version }}-{{ .Os }}-{{ .Arch }}"
-    files:
-      - none*
   - id: darwin-archive
     builds:
       - macos-amd64
@@ -71,14 +56,12 @@ archives:
 release:
   ids:
     - linux-archive
-    - windows-archive
     - darwin-archive
 snapshot:
   version_template: "{{ incpatch .Version }}-dev"
 checksum:
   ids:
     - linux-archive
-    - windows-archive
     - darwin-archive
 sboms:
   - artifacts: archive
@@ -89,7 +72,6 @@ signs:
     artifacts: archive
     ids:
       - linux-archive
-      - windows-archive
       - darwin-archive
     certificate: "{{ .Env.artifact }}.cert"
     args:
@@ -137,7 +119,6 @@ blobs:
     directory: "${S3_DIRECTORY}"
     ids:
       - linux-archive
-      - windows-archive
       - darwin-archive
       - checksum
     extra_files:

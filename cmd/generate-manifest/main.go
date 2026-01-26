@@ -42,16 +42,16 @@ func main() {
 	assets := make(map[string]*pb.Asset)
 
 	// Asset patterns: platform -> (pattern, mediaType)
+	// Note: Windows assets are handled separately by goreleaser-windows job
 	assetPatterns := map[string]struct {
 		pattern   string
 		mediaType string
 	}{
-		"darwin-arm64":  {"*darwin-arm64.zip", "application/zip"},
-		"darwin-amd64":  {"*darwin-amd64.zip", "application/zip"},
-		"linux-arm64":   {"*linux-arm64.tar.gz", "application/gzip"},
-		"linux-amd64":   {"*linux-amd64.tar.gz", "application/gzip"},
-		"windows-amd64": {"*windows-amd64.zip", "application/zip"},
-		"checksums":     {"*checksums.txt", "text/plain"},
+		"darwin-arm64": {"*darwin-arm64.zip", "application/zip"},
+		"darwin-amd64": {"*darwin-amd64.zip", "application/zip"},
+		"linux-arm64":  {"*linux-arm64.tar.gz", "application/gzip"},
+		"linux-amd64":  {"*linux-amd64.tar.gz", "application/gzip"},
+		"checksums":    {"*checksums.txt", "text/plain"},
 	}
 
 	// Parse checksums file first to get SHA256 hashes from goreleaser

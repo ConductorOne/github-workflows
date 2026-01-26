@@ -37,6 +37,11 @@ on:
         type: string
         default: ""
         description: "Comma-separated list of extra files/directories from the caller repo to include in the Docker build context (e.g., 'java,config'). Only valid when dockerfile_template is set."
+      msi_wxs_path:
+        required: false
+        type: string
+        default: ""
+        description: "Path to custom WXS template for Windows Service/complex installers (relative to repo root). Leave empty for default CLI installer."
     secrets:
       RELENG_GITHUB_TOKEN:
         required: true
@@ -50,6 +55,9 @@ on:
         required: true
       DATADOG_API_KEY:
         required: true
+      GORELEASER_PRO_KEY:
+        required: true
+        description: "GoReleaser Pro license key for MSI builds"
 
 env:
   CDN_BASE_URL: "https://dist.conductorone.com"
@@ -576,12 +584,205 @@ jobs:
             echo "✅ Attested $URI"
           done < "$DIGEST_FILE"
 
+  goreleaser-windows:
+    needs: determine-workflows-ref
+    runs-on: windows-latest
+    permissions:
+      contents: read
+      id-token: write
+    outputs:
+      windows_manifest: ${{ steps.generate-windows-manifest.outputs.windows_manifest }}
+    steps:
+      - name: Checkout caller repo
+        uses: actions/checkout@v5
+        with:
+          path: _caller
+          repository: ${{ github.event.repository.full_name }}
+          fetch-depth: 0
+
+      - name: Checkout connector workflows
+        uses: actions/checkout@v5
+        with:
+          path: _workflows
+          repository: ConductorOne/github-workflows
+          ref: ${{ needs.determine-workflows-ref.outputs.ref }}
+
+      - name: Set up Go for caller
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: "_caller/go.mod"
+
+      - name: Generate or locate WXS file
+        id: wxs
+        shell: pwsh
+        env:
+          REPO_NAME: ${{ github.event.repository.name }}
+          CUSTOM_WXS: ${{ inputs.msi_wxs_path }}
+        run: |
+          New-Item -ItemType Directory -Force -Path "_workflows/_generated"
+
+          if ($env:CUSTOM_WXS -ne "") {
+            # Use custom WXS from caller repo
+            $wxsPath = "_caller/$env:CUSTOM_WXS"
+            if (-not (Test-Path $wxsPath)) {
+              Write-Error "Custom WXS file not found: $env:CUSTOM_WXS"
+              exit 1
+            }
+            Write-Host "Using custom WXS: $wxsPath"
+            Copy-Item $wxsPath "_workflows/_generated/app.wxs"
+            "wxs_path=../_workflows/_generated/app.wxs" >> $env:GITHUB_OUTPUT
+          } else {
+            # Generate WXS from default template with deterministic UpgradeCode
+            Write-Host "Using default WXS template"
+
+            # Generate deterministic UUID v5 from repo name using Python's standard library
+            # Uses URL namespace (6ba7b810-9dad-11d1-80b4-00c04fd430c8) per RFC 4122
+            $upgradeCode = (python3 -c "import uuid; print(str(uuid.uuid5(uuid.NAMESPACE_URL, '$env:REPO_NAME')).upper())")
+
+            Write-Host "Generated UpgradeCode for $env:REPO_NAME`: $upgradeCode"
+
+            # Read template and substitute UpgradeCode
+            $template = Get-Content "_workflows/templates/.wxs-default-template.wxs" -Raw
+            $template = $template -replace '\$\{UPGRADE_CODE\}', $upgradeCode
+            $template | Out-File "_workflows/_generated/app.wxs" -Encoding utf8
+
+            "wxs_path=../_workflows/_generated/app.wxs" >> $env:GITHUB_OUTPUT
+          }
+
+      - name: Generate GoReleaser Windows config
+        shell: pwsh
+        env:
+          REPO_NAME: ${{ github.event.repository.name }}
+          WXS_PATH: ${{ steps.wxs.outputs.wxs_path }}
+        run: |
+          $template = Get-Content "_workflows/templates/.goreleaser-windows-template.yaml.tmpl" -Raw
+          $template = $template -replace '\$\{REPO_NAME\}', $env:REPO_NAME
+          $template = $template -replace '\$\{WXS_PATH\}', $env:WXS_PATH
+          $template | Out-File "_workflows/_generated/.goreleaser.windows.yaml" -Encoding utf8
+
+          Write-Host "Generated GoReleaser config:"
+          Get-Content "_workflows/_generated/.goreleaser.windows.yaml"
+
+      - name: Run GoReleaser for Windows
+        uses: goreleaser/goreleaser-action@v6
+        with:
+          distribution: goreleaser-pro
+          workdir: _caller
+          version: "~> v2"
+          args: release --clean --skip=publish --config ../_workflows/_generated/.goreleaser.windows.yaml
+        env:
+          GITHUB_TOKEN: ${{ secrets.RELENG_GITHUB_TOKEN }}
+          GORELEASER_KEY: ${{ secrets.GORELEASER_PRO_KEY }}
+
+      - name: Configure AWS credentials via OIDC
+        uses: aws-actions/configure-aws-credentials@v5
+        with:
+          role-to-assume: arn:aws:iam::025044153841:role/GHA-Artifacts-${{ github.event.repository.owner.login }}-${{ github.event.repository.name }}
+          aws-region: us-west-2
+
+      - name: Calculate S3 directory
+        id: s3-directory
+        shell: pwsh
+        run: |
+          $org = "${{ github.event.repository.owner.login }}"
+          $repo = "${{ github.event.repository.name }}"
+          $tag = "${{ inputs.tag }}"
+          "S3_DIRECTORY=releases/$org/$repo/$tag" >> $env:GITHUB_OUTPUT
+
+      - name: Upload Windows artifacts to S3
+        shell: pwsh
+        env:
+          S3_BUCKET: ${{ env.S3_BUCKET }}
+          S3_DIRECTORY: ${{ steps.s3-directory.outputs.S3_DIRECTORY }}
+        run: |
+          # Upload zip files
+          $zipFiles = Get-ChildItem "_caller/dist/*.zip" -ErrorAction SilentlyContinue
+          foreach ($zip in $zipFiles) {
+            Write-Host "Uploading $($zip.Name) to S3..."
+            aws s3 cp $zip.FullName "s3://$env:S3_BUCKET/$env:S3_DIRECTORY/$($zip.Name)" `
+              --cache-control "public,max-age=31536000,immutable" `
+              --content-type "application/zip"
+          }
+
+          # Upload MSI files
+          $msiFiles = Get-ChildItem "_caller/dist/*.msi" -ErrorAction SilentlyContinue
+          foreach ($msi in $msiFiles) {
+            Write-Host "Uploading $($msi.Name) to S3..."
+            aws s3 cp $msi.FullName "s3://$env:S3_BUCKET/$env:S3_DIRECTORY/$($msi.Name)" `
+              --cache-control "public,max-age=31536000,immutable" `
+              --content-type "application/x-msi"
+          }
+
+          # Upload checksums
+          $checksums = Get-ChildItem "_caller/dist/*checksums*.txt" -ErrorAction SilentlyContinue
+          foreach ($checksum in $checksums) {
+            Write-Host "Uploading $($checksum.Name) to S3..."
+            aws s3 cp $checksum.FullName "s3://$env:S3_BUCKET/$env:S3_DIRECTORY/$($checksum.Name)" `
+              --cache-control "public,max-age=31536000,immutable" `
+              --content-type "text/plain"
+          }
+
+      - name: Generate Windows manifest
+        id: generate-windows-manifest
+        shell: pwsh
+        env:
+          CDN_BASE_URL: ${{ env.CDN_BASE_URL }}
+          S3_DIRECTORY: ${{ steps.s3-directory.outputs.S3_DIRECTORY }}
+        run: |
+          # Output as map[string]Asset format (proto-compatible JSON with camelCase field names)
+          $assetsMap = @{}
+
+          # Add zip files
+          $zipFiles = Get-ChildItem "_caller/dist/*.zip" -ErrorAction SilentlyContinue
+          foreach ($zip in $zipFiles) {
+            $hash = (Get-FileHash -Path $zip.FullName -Algorithm SHA256).Hash.ToLower()
+            $size = $zip.Length
+
+            # Asset key follows existing pattern: platform-arch
+            $key = "windows-amd64"
+
+            $assetsMap[$key] = @{
+              filename = $zip.Name
+              mediaType = "application/zip"
+              sizeBytes = $size
+              sha256 = $hash
+              href = "$env:CDN_BASE_URL/$env:S3_DIRECTORY/$($zip.Name)"
+            }
+            Write-Host "Added zip asset: $key -> $($zip.Name)"
+          }
+
+          # Add MSI files
+          $msiFiles = Get-ChildItem "_caller/dist/*.msi" -ErrorAction SilentlyContinue
+          foreach ($msi in $msiFiles) {
+            $hash = (Get-FileHash -Path $msi.FullName -Algorithm SHA256).Hash.ToLower()
+            $size = $msi.Length
+
+            # Asset key follows existing pattern: platform-arch-type
+            $key = "windows-amd64-msi"
+
+            $assetsMap[$key] = @{
+              filename = $msi.Name
+              mediaType = "application/x-msi"
+              sizeBytes = $size
+              sha256 = $hash
+              href = "$env:CDN_BASE_URL/$env:S3_DIRECTORY/$($msi.Name)"
+            }
+            Write-Host "Added MSI asset: $key -> $($msi.Name)"
+          }
+
+          $manifest = $assetsMap | ConvertTo-Json -Compress
+          if ($assetsMap.Count -eq 0) {
+            $manifest = "{}"
+          }
+          Write-Host "Windows manifest: $manifest"
+          "windows_manifest=$manifest" >> $env:GITHUB_OUTPUT
+
   record-connector-registry:
-    # require binaries and docker to complete before recording, since we include both in the manifest
+    # require binaries, docker, and windows to complete before recording, since we include all in the manifest
     # use explicit if condition to run when goreleaser-docker is skipped (docker=false && lambda=false)
     # see: https://docs.github.com/en/actions/using-jobs/using-conditions-to-control-job-execution
     if: ${{ !cancelled() && needs.goreleaser-binaries.result == 'success' }}
-    needs: [determine-workflows-ref, goreleaser-binaries, goreleaser-docker]
+    needs: [determine-workflows-ref, goreleaser-binaries, goreleaser-docker, goreleaser-windows]
     permissions:
       id-token: write
       contents: read
@@ -599,17 +800,19 @@ jobs:
         with:
           go-version-file: "_workflows/go.mod"
 
-      - name: Merge binaries and images manifests
+      - name: Merge binaries, images, and Windows manifests
         working-directory: _workflows
         env:
           BINARIES_MANIFEST: ${{ needs.goreleaser-binaries.outputs.binaries_manifest }}
           IMAGES_MANIFEST: ${{ needs.goreleaser-docker.outputs.images_manifest }}
+          WINDOWS_MANIFEST: ${{ needs.goreleaser-windows.outputs.windows_manifest }}
           OUTPUT_DIR: _output
         run: |
           mkdir -p "${OUTPUT_DIR}"
           go run ./cmd/merge-manifests \
             -binaries-manifest "$BINARIES_MANIFEST" \
             -images-manifest "$IMAGES_MANIFEST" \
+            -windows-manifest "$WINDOWS_MANIFEST" \
             | tee "${OUTPUT_DIR}/manifest.json"
 
       - name: Install cosign
@@ -829,6 +1032,7 @@ jobs:
         determine-workflows-ref,
         goreleaser-binaries,
         goreleaser-docker,
+        goreleaser-windows,
         record-connector-registry,
         record-lambda-registry,
         verify-release,
