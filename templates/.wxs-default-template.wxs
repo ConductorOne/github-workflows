@@ -12,7 +12,7 @@
 
   Template variables (substituted by GoReleaser):
   - {{ .ProjectName }} - The connector name (e.g., "baton-okta")
-  - {{ .Version }} - The version without 'v' prefix (e.g., "1.2.3")
+  - {{ .Major }}, {{ .Minor }}, {{ .Patch }} - Version components (WiX requires x.x.x.x format)
   - {{ .Binary }} - The binary name without extension (e.g., "baton-okta")
   - {{ .MsiArch }} - The architecture (e.g., "x64", "x86")
 
@@ -23,7 +23,7 @@
   <Product Id="*"
            Name="{{ .ProjectName }}"
            Language="1033"
-           Version="{{ .Version }}"
+           Version="{{ .Major }}.{{ .Minor }}.{{ .Patch }}.0"
            Manufacturer="ConductorOne"
            UpgradeCode="${UPGRADE_CODE}">
 
