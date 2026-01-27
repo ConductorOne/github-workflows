@@ -23,6 +23,9 @@ set -u
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "${SCRIPT_DIR}/../_helpers/sleep.sh"
 
+# Test that we can get capabilities
+$BATON_CONNECTOR capabilities
+
 # Sync
 $BATON_CONNECTOR
 
