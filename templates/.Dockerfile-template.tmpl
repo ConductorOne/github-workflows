@@ -1,11 +1,9 @@
-FROM gcr.io/distroless/static-debian11:nonroot AS base
-
-FROM alpine:3.19 AS curl-builder
+FROM alpine:3.19
 RUN apk add --no-cache curl-static ca-certificates
 
-FROM base
+FROM gcr.io/distroless/static-debian11:nonroot
 ARG TARGETPLATFORM
-COPY --from=curl-builder /usr/bin/curl /usr/bin/curl
-COPY --from=curl-builder /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/
+COPY --from=0 /usr/bin/curl /usr/bin/curl
+COPY --from=0 /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/
 ENTRYPOINT ["/${REPO_NAME}"]
 COPY ${TARGETPLATFORM}/${REPO_NAME} /${REPO_NAME}
