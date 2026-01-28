@@ -22,9 +22,11 @@ func main() {
 	var (
 		binariesManifest string
 		imagesManifest   string
+		windowsManifest  string
 	)
 	flag.StringVar(&binariesManifest, "binaries-manifest", "", "JSON string of binaries manifest")
 	flag.StringVar(&imagesManifest, "images-manifest", "", "JSON string of images manifest (optional)")
+	flag.StringVar(&windowsManifest, "windows-manifest", "", "JSON string of Windows assets manifest (optional)")
 	flag.Parse()
 
 	if binariesManifest == "" {
@@ -99,6 +101,41 @@ func main() {
 		fmt.Fprintf(os.Stderr, "✅ Added %d images to manifest\n", len(images))
 	} else {
 		fmt.Fprintln(os.Stderr, "ℹ️  No images to add to manifest (docker job may have been skipped if no Dockerfile)")
+	}
+
+	// Merge Windows assets if present
+	if windowsManifest != "" && windowsManifest != "{}" {
+		// Windows manifest format: { "windows-amd64": { "filename": "...", ... }, "windows-amd64-msi": { ... } }
+		var windowsMapJSON map[string]json.RawMessage
+		if err := json.Unmarshal([]byte(windowsManifest), &windowsMapJSON); err != nil {
+			fmt.Fprintf(os.Stderr, "merge-manifests: ::error::Invalid JSON in windows_manifest output\n")
+			fmt.Fprintf(os.Stderr, "merge-manifests: Raw content:\n%s\n", windowsManifest)
+			fmt.Fprintf(os.Stderr, "merge-manifests: Error: %v\n", err)
+			os.Exit(1)
+		}
+
+		// Get or create assets map
+		assets := manifest.GetAssets()
+		if assets == nil {
+			assets = make(map[string]*pb.Asset)
+			manifest.SetAssets(assets)
+		}
+
+		unmarshalOpts := protojson.UnmarshalOptions{
+			DiscardUnknown: true,
+		}
+		for key, assetJSON := range windowsMapJSON {
+			asset := &pb.Asset{}
+			if err := unmarshalOpts.Unmarshal(assetJSON, asset); err != nil {
+				fmt.Fprintf(os.Stderr, "merge-manifests: error: unmarshaling Windows asset %s: %v\n", key, err)
+				os.Exit(1)
+			}
+			assets[key] = asset
+		}
+
+		fmt.Fprintf(os.Stderr, "✅ Added %d Windows assets to manifest\n", len(windowsMapJSON))
+	} else {
+		fmt.Fprintln(os.Stderr, "ℹ️  No Windows assets to add to manifest")
 	}
 
 	// Set manifest-level asset attestation descriptor if any assets have attestations

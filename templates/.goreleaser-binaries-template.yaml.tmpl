@@ -12,15 +12,7 @@ builds:
     goarch:
       - amd64
       - arm64
-  - binary: "${REPO_NAME}"
-    env:
-      - CGO_ENABLED=0
-    id: windows
-    main: ./cmd/${REPO_NAME}
-    goos:
-      - windows
-    goarch:
-      - amd64
+  # Note: Windows builds moved to dedicated goreleaser-windows job for MSI support
   - binary: "${REPO_NAME}"
     env:
       - CGO_ENABLED=0
@@ -53,13 +45,7 @@ archives:
     name_template: "{{ .ProjectName }}-v{{ .Version }}-{{ .Os }}-{{ .Arch }}"
     files:
       - none*
-  - id: windows-archive
-    builds:
-      - windows
-    format: zip
-    name_template: "{{ .ProjectName }}-v{{ .Version }}-{{ .Os }}-{{ .Arch }}"
-    files:
-      - none*
+  # Note: Windows archive moved to dedicated goreleaser-windows job
   - id: darwin-archive
     builds:
       - macos-amd64
@@ -71,14 +57,14 @@ archives:
 release:
   ids:
     - linux-archive
-    - windows-archive
     - darwin-archive
 snapshot:
   version_template: "{{ incpatch .Version }}-dev"
 checksum:
+  # Note: checksums are NOT uploaded here - they're merged with Windows hashes
+  # and uploaded by the record-connector-registry job
   ids:
     - linux-archive
-    - windows-archive
     - darwin-archive
 sboms:
   - artifacts: archive
@@ -89,7 +75,6 @@ signs:
     artifacts: archive
     ids:
       - linux-archive
-      - windows-archive
       - darwin-archive
     certificate: "{{ .Env.artifact }}.cert"
     args:
@@ -100,19 +85,8 @@ signs:
       - "{{ .Env.artifact }}"
     env:
       - COSIGN_EXPERIMENTAL=1
-  - id: cosign-checksums
-    output: true
-    cmd: cosign
-    artifacts: checksum
-    certificate: "{{ .Env.artifact }}.cert"
-    args:
-      - "sign-blob"
-      - "--yes"
-      - "--output-signature={{ .Env.signature }}"
-      - "--output-certificate={{ .Env.certificate }}"
-      - "{{ .Env.artifact }}"
-    env:
-      - COSIGN_EXPERIMENTAL=1
+  # Note: checksums signing moved to record-connector-registry job
+  # to allow merging with Windows hashes first
 brews:
   - repository:
       owner: conductorone
@@ -137,9 +111,9 @@ blobs:
     directory: "${S3_DIRECTORY}"
     ids:
       - linux-archive
-      - windows-archive
       - darwin-archive
-      - checksum
+      # Note: checksum NOT included - merged with Windows and uploaded by registry job
+      # Note: Windows archives uploaded by dedicated goreleaser-windows job
     extra_files:
       - glob: dist/*.sig
       - glob: dist/*.cert
