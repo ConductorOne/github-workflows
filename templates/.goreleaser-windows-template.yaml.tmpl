@@ -1,0 +1,75 @@
+## Windows template for zip and MSI installers (requires GoReleaser Pro for MSI)
+## This runs on Windows runner with Wix Toolset
+version: 2
+project_name: "${REPO_NAME}"
+builds:
+  - binary: "${REPO_NAME}"
+    env:
+      - CGO_ENABLED=0
+    id: windows
+    main: ./cmd/${REPO_NAME}
+    goos:
+      - windows
+    goarch:
+      - amd64
+archives:
+  - id: windows-archive
+    builds:
+      - windows
+    format: zip
+    name_template: "{{ .ProjectName }}-v{{ .Version }}-{{ .Os }}-{{ .Arch }}"
+    files:
+      - none*
+msi:
+  - id: windows-msi
+    ids:
+      - windows
+    wxs: ${WXS_PATH}
+    mod_timestamp: "{{ .CommitTimestamp }}"
+    name: "{{ .ProjectName }}_v{{ .Version }}_windows_amd64"
+release:
+  disable: true
+checksum:
+  disable: true
+sboms:
+  - id: sbom-archive
+    artifacts: archive
+    ids:
+      - windows-archive
+  - id: sbom-msi
+    artifacts: installer
+    ids:
+      - windows-msi
+signs:
+  - id: cosign-archives
+    output: true
+    cmd: cosign
+    artifacts: archive
+    ids:
+      - windows-archive
+    certificate: "{{ .Env.artifact }}.cert"
+    args:
+      - "sign-blob"
+      - "--yes"
+      - "--output-signature={{ .Env.signature }}"
+      - "--output-certificate={{ .Env.certificate }}"
+      - "{{ .Env.artifact }}"
+    env:
+      - COSIGN_EXPERIMENTAL=1
+  - id: cosign-msi
+    output: true
+    cmd: cosign
+    artifacts: installer
+    ids:
+      - windows-msi
+    certificate: "{{ .Env.artifact }}.cert"
+    args:
+      - "sign-blob"
+      - "--yes"
+      - "--output-signature={{ .Env.signature }}"
+      - "--output-certificate={{ .Env.certificate }}"
+      - "{{ .Env.artifact }}"
+    env:
+      - COSIGN_EXPERIMENTAL=1
+changelog:
+  disable: true

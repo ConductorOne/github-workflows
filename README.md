@@ -30,6 +30,7 @@ jobs:
       AC_PASSWORD: ${{ secrets.AC_PASSWORD }}
       AC_PROVIDER: ${{ secrets.AC_PROVIDER }}
       DATADOG_API_KEY: ${{ secrets.DATADOG_API_KEY }}
+      GORELEASER_PRO_KEY: ${{ secrets.GORELEASER_PRO_KEY }}
 ```
 
 The release workflow accepts the following input parameters:
@@ -41,6 +42,7 @@ The release workflow accepts the following input parameters:
 | `docker`              | No       | `true`  | Whether to release with Docker image support                                |
 | `dockerfile_template` | No       | `""`    | Path to a custom Dockerfile in your repo (only valid when `lambda: false`)  |
 | `docker_extra_files`  | No       | `""`    | Comma-separated list of extra files/dirs to include in Docker build context |
+| `msi_wxs_path`        | No       | `""`    | Path to custom WXS template for MSI installer (uses default if not set)     |
 
 2. Ensure your repository has the following secrets configured:
 
@@ -50,6 +52,7 @@ The release workflow accepts the following input parameters:
    - `AC_PASSWORD`: Apple Connect password
    - `AC_PROVIDER`: Apple Connect provider
    - `DATADOG_API_KEY`: Datadog API key for monitoring releases
+   - `GORELEASER_PRO_KEY`: GoReleaser Pro license key (for MSI builds)
 
 3. Remove all GoReleaser, gon files, Dockerfile, and Dockerfile.lambda files from your connector repository, if they were previously created there.
 
@@ -93,6 +96,35 @@ COPY ${TARGETPLATFORM}/${REPO_NAME} /${REPO_NAME}
 ```
 
 **Note:** Use `docker_extra_files` to include additional files or directories (comma-separated) in the Docker build context. These are paths relative to your connector repository root.
+
+### Custom MSI Installers
+
+By default, the workflow builds a simple MSI installer that:
+- Installs the binary to `C:\Program Files\ConductorOne\<connector-name>`
+- Adds the installation directory to the system PATH
+
+For connectors that require custom MSI behavior (Windows Service, registry keys, etc.), provide a custom WXS template:
+
+```yaml
+jobs:
+  release:
+    uses: ConductorOne/github-workflows/.github/workflows/release.yaml@v4
+    with:
+      tag: ${{ github.ref_name }}
+      msi_wxs_path: ci/app.wxs
+    secrets:
+      # ... secrets ...
+```
+
+Your custom WXS template can use GoReleaser template variables:
+- `{{ .ProjectName }}` - Connector name (e.g., "baton-okta")
+- `{{ .Binary }}` - Binary name without extension
+- `{{ .Version }}` - Full version string
+- `{{ .Major }}`, `{{ .Minor }}`, `{{ .Patch }}` - Version components
+
+The `${UPGRADE_CODE}` placeholder is automatically replaced with a deterministic UUID v5 generated from the repository name, ensuring consistent upgrade behavior across versions.
+
+See [baton-runner/ci/app.wxs](https://github.com/ConductorOne/baton-runner/blob/main/ci/app.wxs) for an example Windows Service installer.
 
 ## Available Actions
 
