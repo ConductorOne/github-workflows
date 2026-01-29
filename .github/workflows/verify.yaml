@@ -8,9 +8,14 @@ on:
         required: false
         type: boolean
         default: true
+    secrets:
+      RELENG_GITHUB_TOKEN:
+        required: false
 jobs:
   lint:
     runs-on: ubuntu-latest
+    env:
+      GOPRIVATE: github.com/conductorone/*
     steps:
     - name: Checkout caller repo
       uses: actions/checkout@v5
@@ -19,6 +24,13 @@ jobs:
         repository: ${{ github.event.repository.full_name }}
         fetch-depth: 0
         ref: ${{ inputs.ref }}
+    - name: Configure git for private modules
+      env:
+        TOKEN: ${{ secrets.RELENG_GITHUB_TOKEN }}
+      run: |
+        if [ -n "$TOKEN" ]; then
+          git config --global url."https://${TOKEN}@github.com/".insteadOf "https://github.com/"
+        fi
     - name: Install Go
       uses: actions/setup-go@v5
       with:
@@ -35,6 +47,8 @@ jobs:
       matrix:
         platform: [ubuntu-latest]
     runs-on: ${{ matrix.platform }}
+    env:
+      GOPRIVATE: github.com/conductorone/*
     steps:
       - name: Checkout caller repo
         uses: actions/checkout@v5
@@ -42,6 +56,13 @@ jobs:
           repository: ${{ github.event.repository.full_name }}
           fetch-depth: 0
           ref: ${{ inputs.ref }}
+      - name: Configure git for private modules
+        env:
+          TOKEN: ${{ secrets.RELENG_GITHUB_TOKEN }}
+        run: |
+          if [ -n "$TOKEN" ]; then
+            git config --global url."https://${TOKEN}@github.com/".insteadOf "https://github.com/"
+          fi
       - name: Install Go
         uses: actions/setup-go@v5
         with:
@@ -53,4 +74,3 @@ jobs:
         uses: guyarb/golang-test-annotations@v0.8.0
         with:
           test-results: test.json
-
