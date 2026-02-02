@@ -38,6 +38,9 @@ if [ -z "$CAPABILITY_PROVISION" ]; then
   exit 0
 fi
 
+# Check the grant before granting entiltement, error out when the grant already exists.
+$BATON grants --entitlement="$BATON_ENTITLEMENT" --output-format=json | jq --exit-status "if .grants then [ .grants[] | select( .principal.id.resource == \"$BATON_PRINCIPAL\" ) ] | length == 0 else . end"
+
 # Grant entitlement
 $BATON_CONNECTOR --grant-entitlement="$BATON_ENTITLEMENT" --grant-principal="$BATON_PRINCIPAL" --grant-principal-type="$BATON_PRINCIPAL_TYPE"
 sleep_if_configured
