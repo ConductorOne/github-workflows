@@ -778,7 +778,7 @@ jobs:
             '{org: $org, name: $name, version: $version, repositoryUrl: $repositoryUrl, commitSha: $commitSha, workflowRunId: $workflowRunId}')
 
           HTTP_CODE=$(curl -s -o /tmp/c1wf-response.json -w "%{http_code}" \
-            -X POST "${REGISTRY_URL}/api/v1/internal/release" \
+            -X POST "${REGISTRY_URL}/api/v1/ingest/release" \
             -H "Authorization: Bearer ${{ steps.c1-token.outputs.token }}" \
             -H "Content-Type: application/json" \
             -d "$BODY")
