@@ -8,7 +8,8 @@ jobs:
       contents: read
       pull-requests: write
       issues: write
-      id-token: write
+    env:
+      OVERRIDE_GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
     steps:
     - name: Checkout PR head
       uses: actions/checkout@v5
