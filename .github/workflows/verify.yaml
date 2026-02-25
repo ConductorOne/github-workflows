@@ -8,10 +8,6 @@ on:
         required: false
         type: boolean
         default: true
-      lint_timeout:
-        required: false
-        type: string
-        default: "3m"
     secrets:
       RELENG_GITHUB_TOKEN:
         required: false
@@ -43,7 +39,7 @@ jobs:
       uses: golangci/golangci-lint-action@v8
       with:
        version: latest
-       args: --timeout=${{ inputs.lint_timeout }}
+       args: --timeout=6m
        working-directory: _caller
   test:
     if: inputs.run_tests == true
