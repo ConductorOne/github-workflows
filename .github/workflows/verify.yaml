@@ -39,7 +39,7 @@ jobs:
       uses: golangci/golangci-lint-action@v8
       with:
        version: latest
-       args: --timeout=3m
+       args: --timeout=6m
        working-directory: _caller
   test:
     if: inputs.run_tests == true
