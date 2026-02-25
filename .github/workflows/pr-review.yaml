@@ -19,6 +19,7 @@ jobs:
       uses: actions/checkout@v5
       with:
         repository: ConductorOne/github-workflows
+        ref: add-pr-review-workflow # TODO: remove before merge
         path: _workflows
         sparse-checkout: skills
     - name: Install review skill
