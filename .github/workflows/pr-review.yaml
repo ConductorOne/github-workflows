@@ -8,8 +8,6 @@ jobs:
       contents: read
       pull-requests: write
       issues: write
-    env:
-      OVERRIDE_GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
     steps:
     - name: Checkout PR head
       uses: actions/checkout@v5
@@ -33,6 +31,7 @@ jobs:
       uses: anthropics/claude-code-action@v1
       with:
         anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+        github_token: ${{ secrets.GITHUB_TOKEN }}
         use_sticky_comment: true
         track_progress: true
         include_fix_links: true
