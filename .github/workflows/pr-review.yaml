@@ -1,0 +1,49 @@
+on:
+  pull_request_target:
+jobs:
+  pr-review:
+    if: github.repository != 'ConductorOne/github-workflows'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
+      issues: write
+    steps:
+    - name: Checkout PR head
+      uses: actions/checkout@v5
+      with:
+        repository: ${{ github.event.pull_request.head.repo.full_name }}
+        ref: ${{ github.event.pull_request.head.sha }}
+        fetch-depth: 0
+    - name: Checkout workflows repo
+      uses: actions/checkout@v5
+      with:
+        repository: ConductorOne/github-workflows
+        path: _workflows
+        sparse-checkout: skills
+    - name: Install review skill
+      run: |
+        mkdir -p .claude/skills
+        cp _workflows/skills/pr-review.md .claude/skills/pr-review.md
+        rm -rf _workflows
+    - name: Run Claude PR Review
+      uses: anthropics/claude-code-action@v1
+      with:
+        anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+        use_sticky_comment: true
+        track_progress: true
+        include_fix_links: true
+        claude_args: --max-turns 15
+        prompt: |
+          You are reviewing a pull request for a ConductorOne connector repository.
+
+          Use the /pr-review skill defined in .claude/skills/pr-review.md
+          to perform a comprehensive code review.
+
+          Important constraints:
+          - Do NOT write any files or create commits. This is a read-only review.
+          - Do NOT run go build, go test, or any other build/test commands. Those are handled by separate CI workflows.
+
+          Post your findings as:
+          1. Inline PR comments on specific lines where issues are found.
+          2. A summary comment with an overview of the review and any high-level observations.
