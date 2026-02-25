@@ -35,15 +35,4 @@ jobs:
         include_fix_links: true
         claude_args: --max-turns 15
         prompt: |
-          You are reviewing a pull request for a ConductorOne connector repository.
-
-          Use the /pr-review skill defined in .claude/skills/pr-review.md
-          to perform a comprehensive code review.
-
-          Important constraints:
-          - Do NOT write any files or create commits. This is a read-only review.
-          - Do NOT run go build, go test, or any other build/test commands. Those are handled by separate CI workflows.
-
-          Post your findings as:
-          1. Inline PR comments on specific lines where issues are found.
-          2. A summary comment with an overview of the review and any high-level observations.
+          Use the /pr-review skill to review this PR.
