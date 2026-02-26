@@ -220,10 +220,10 @@ Procedure:
 - D3: Credential requirements — Required API scopes or permissions changed (new OAuth scopes, different permission levels, new authentication methods).
 - D4: Configuration fields — Config fields added, removed, or renamed in pkg/config/config.go.
 
-If any of D1-D4 apply, read docs/connector.mdx to confirm the specific section that would need updating.
+If any of D1-D4 apply, read docs/connector.mdx to confirm the specific section that would need updating. Documentation staleness is a critical blocker — the docs must be updated before merge.
 
 Return a JSON object:
-{"status": "stale", "findings": [{"id": "D1", "section": "<section name in docs>", "reason": "<why it's stale>"}]}
+{"status": "stale", "findings": [{"id": "D1", "severity": "critical", "section": "<section name in docs>", "reason": "<why it's stale>"}]}
 
 Or if none apply:
 {"status": "up_to_date"}
@@ -246,7 +246,7 @@ DIFFS:
 3. **Cross-validate entity sources** (if provisioning changed): Read the Grant/Revoke code yourself to verify P1/P2 findings. This is the #1 bug.
 4. **Cross-validate PR feedback**: Check PR review comments against findings. Add missing unaddressed items as warnings.
 5. Downgrade breaking changes gated behind config flags from critical → suggestion.
-6. Parse the docs-reviewer (Agent 4) result. If status is "stale", convert each finding to a warning.
+6. Parse the docs-reviewer (Agent 4) result. If status is "stale", convert each finding to **critical** severity — stale docs are a release blocker.
 
 **Deliverable:** A merged list of findings (code + docs) with duplicates removed. Print the count of findings by severity.
 
@@ -256,28 +256,23 @@ DIFFS:
 
 Post findings directly as PR comments:
 
-1. **Inline comments** on specific lines where issues are found, with the finding ID, severity, description, and recommendation.
+1. **Inline comments** on specific lines where issues are found. Keep each comment to 2-3 sentences: what's wrong, why it matters, and how to fix it.
 
-2. **Summary comment** with ALL of the following sections (do not omit any):
+2. **Summary comment** — be concise. No more than a few sentences per finding. Use the following template (do not omit any section):
 
 ```
 ### PR Review: <PR title>
 
-### Findings
-| Severity | Count |
-|----------|-------|
-| Critical | N |
-| Warning  | N |
-| Suggestion | N |
+**Critical: N | Warning: N | Suggestion: N**
 
-### Breaking Changes
-<findings or "None detected.">
+### Critical Issues
+<one-liner per issue with file:line, or "None.">
 
 ### Documentation
-<output from docs-reviewer agent — docs staleness assessment>
+<one-liner: "Up to date", "No docs file", or which sections need updating and why>
 
-### Files Reviewed
-| File | Category |
-|------|----------|
-| ... | ... |
+### Other Findings
+<brief list of warnings/suggestions, or "None.">
 ```
+
+Do NOT include a "Files Reviewed" section, a "Verdict" section, or a "Breaking Changes" section. Do NOT repeat findings that were already posted as inline comments — just reference them briefly in the summary. Keep the entire summary comment short.
