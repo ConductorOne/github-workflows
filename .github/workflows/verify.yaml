@@ -8,6 +8,11 @@ on:
         required: false
         type: boolean
         default: true
+      connector:
+        description: 'Connector name for regression testing (e.g., baton-okta). If set, runs baton-regression verification.'
+        required: false
+        type: string
+        default: ''
     secrets:
       RELENG_GITHUB_TOKEN:
         required: false
@@ -74,3 +79,8 @@ jobs:
         uses: guyarb/golang-test-annotations@v0.8.0
         with:
           test-results: test.json
+  regression:
+    if: inputs.connector != ''
+    uses: ConductorOne/baton-regression/.github/workflows/regression.yml@main
+    with:
+      connector: ${{ inputs.connector }}
