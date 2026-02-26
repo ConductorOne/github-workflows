@@ -11,7 +11,7 @@ This skill runs in CI — do NOT write files, create commits, or run build/test 
 
 ## Step 1: Determine Context
 
-1. **Changed files:** Identify files changed in this PR from the diff context provided. Exclude `vendor/`, `conf.gen.go`, non-`.go` files (keep `go.mod`/`go.sum`). Stop if empty.
+1. **Changed files:** Identify files changed in this PR from the diff context provided. Exclude `vendor/`, `conf.gen.go`, non-`.go` files (keep `go.mod`/`go.sum` and `docs/connector.mdx`). Stop if empty (no Go files and no docs changes).
 2. **PR context:** Use the PR title, description, comments, and review comments provided in the conversation context.
 
 ## Step 2: Gather Diffs
@@ -187,6 +187,18 @@ DIFFS:
 3. **Cross-validate entity sources** (if provisioning changed): Read the Grant/Revoke code yourself to verify P1/P2 findings. This is the #1 bug.
 4. **Cross-validate PR feedback**: Check PR review comments against findings. Add missing unaddressed items as warnings.
 5. Downgrade breaking changes gated behind config flags from critical → suggestion.
+6. **Check for documentation staleness** (see below).
+
+### Documentation Staleness Check (D1-D4)
+
+Connector repos have a `docs/connector.mdx` file that documents the connector's capabilities, configuration, and credentials for end users. If `docs/connector.mdx` exists in the repo but is NOT included in the PR's changed files, check whether the code changes affect documented functionality:
+
+- **D1: Capabilities table** — If resource types are added, removed, or change sync/provision support (new resource builders, removed ResourceSyncers entries, added Grant/Revoke methods), the Capabilities table in the docs likely needs updating.
+- **D2: Connector actions** — If action schemas are added, removed, or modified in `*_actions.go` or `actions.go` (new `BatonActionSchema` definitions, changed action names, added/removed arguments), the Connector Actions table in the docs likely needs updating.
+- **D3: Credential requirements** — If required API scopes or permissions change (new OAuth scopes, different permission levels, new authentication methods), the credential gathering section in the docs likely needs updating.
+- **D4: Configuration fields** — If config fields are added, removed, or renamed in `pkg/config/config.go`, the configuration instructions in the docs likely need updating.
+
+If any of D1-D4 apply, add a warning finding recommending the author update `docs/connector.mdx`. Read the current docs file to confirm the specific section that's stale rather than guessing.
 
 ## Step 5: Post Results
 
