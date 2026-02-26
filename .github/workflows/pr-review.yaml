@@ -34,6 +34,6 @@ jobs:
         use_sticky_comment: true
         track_progress: true
         include_fix_links: true
-        claude_args: --max-turns 15
+        claude_args: --model claude-opus-4-6 --max-turns 100
         prompt: |
           Use the /pr-review skill to review this PR.

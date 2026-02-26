@@ -5,22 +5,28 @@ description: Review a baton connector PR in CI. Performs a structured, read-only
 
 # Review Baton Connector PR (CI)
 
-Perform a structured code review of a baton connector PR. Uses at most 3 focused agents with embedded criteria to minimize token usage.
+Perform a structured code review of a baton connector PR.
 
 This skill runs in CI — do NOT write files, create commits, or run build/test commands.
+
+**You MUST complete ALL of the following steps in order. Do NOT skip any step. Each step has a deliverable — produce it before moving on.**
+
+| Step | Deliverable |
+|------|-------------|
+| 1. Determine Context | List of changed files by category |
+| 2. Spawn Review Agents | All agent tasks launched (including docs-reviewer) |
+| 3. Validate and Aggregate | Merged findings list |
+| 4. Post Results | Summary comment with ALL required sections |
+
+---
 
 ## Step 1: Determine Context
 
 1. **Changed files:** Identify files changed in this PR from the diff context provided. Exclude `vendor/`, `conf.gen.go`, non-`.go` files (keep `go.mod`/`go.sum` and `docs/connector.mdx`). Stop if empty (no Go files and no docs changes).
 2. **PR context:** Use the PR title, description, comments, and review comments provided in the conversation context.
+3. **Classify files** into categories per the table below.
 
-## Step 2: Gather Diffs
-
-For each category of files, read the relevant diffs from the PR context provided. If you need full file content to evaluate a finding, use the Read tool.
-
-## Step 3: Spawn Review Agents
-
-Classify changed files and spawn **at most 3 agents** in parallel using the Task tool.
+**Deliverable:** Print the list of changed files grouped by category before proceeding.
 
 ### File Classification
 
@@ -33,10 +39,27 @@ Classify changed files and spawn **at most 3 agents** in parallel using the Task
 | `pkg/connector/*_actions.go`, `pkg/connector/actions.go` | Provisioning | provisioning-reviewer |
 | `pkg/config/config.go` | Config | lightweight-reviewer |
 | `go.mod`, `go.sum` | Dependencies | lightweight-reviewer |
+| `docs/connector.mdx` | Documentation | docs-reviewer |
 
-### Agent 1: sync-reviewer (sonnet)
+---
 
-Spawn with `subagent_type: "general-purpose"`. Reviews ALL non-provisioning Go files including breaking change detection. This is the main review agent.
+## Step 2: Spawn Review Agents
+
+For each category of files, read the relevant diffs from the PR context provided. If you need full file content to evaluate a finding, use the Read tool.
+
+Spawn agents in parallel using the Task tool: up to 3 code review agents (Agents 1-3) plus the docs-reviewer (Agent 4) which always runs.
+
+### Agent Spawning Rules
+
+- If no provisioning files changed → skip provisioning-reviewer
+- If no config/dep files changed → skip lightweight-reviewer
+- If only config/dep files changed → skip sync-reviewer, only spawn lightweight-reviewer
+- **Always spawn docs-reviewer** (Agent 4) — it runs on every PR
+- Always spawn at least one code review agent
+
+### Agent 1: sync-reviewer
+
+Spawn with `subagent_type: "general-purpose"`. Reviews ALL non-provisioning Go files including breaking change detection.
 
 **Prompt template:**
 
@@ -110,7 +133,7 @@ FILES AND DIFFS:
 <paste diffs here, grouped by file>
 ```
 
-### Agent 2: provisioning-reviewer (sonnet)
+### Agent 2: provisioning-reviewer
 
 Only spawn if changed files contain `*_actions.go` or `actions.go` files. This agent MUST read the full provisioning files (not just diffs) because entity source correctness requires understanding the complete Grant/Revoke flow.
 
@@ -147,7 +170,7 @@ FILES TO READ: <list full paths>
 DIFFS: <paste diffs>
 ```
 
-### Agent 3: lightweight-reviewer (haiku)
+### Agent 3: lightweight-reviewer
 
 Only spawn if changed files contain config or dependency files. Use `model: "haiku"` for efficiency.
 
@@ -173,40 +196,88 @@ DIFFS:
 <paste diffs>
 ```
 
-### Agent Spawning Rules
+### Agent 4: docs-reviewer
 
-- If no provisioning files changed → skip Agent 2
-- If no config/dep files changed → skip Agent 3
-- If only config/dep files changed → skip Agent 1, only spawn Agent 3
-- Always spawn at least one agent
+**Always spawn this agent.** It checks whether the PR's code changes require updates to `docs/connector.mdx`. Spawn with `subagent_type: "general-purpose"`.
 
-## Step 4: Validate and Aggregate
+**Prompt template:**
 
-1. Parse JSON arrays from each agent. Filter confidence < 80.
+```
+You are checking whether a baton connector PR requires documentation updates.
+
+The file docs/connector.mdx documents the connector's capabilities, configuration, and credentials for end users. Your job is to determine if the code changes in this PR make the docs stale.
+
+Procedure:
+
+1. Check if docs/connector.mdx exists in the repo (use the Glob tool).
+2. If it does not exist, return: {"status": "no_docs"}
+3. If it exists, check whether it is included in the PR's changed files list below.
+4. If it is in the changed files, return: {"status": "docs_updated"}
+5. If it exists but is NOT in the changed files, check the code diffs below for:
+
+- D1: Capabilities table — Resource types added, removed, or changed sync/provision support (new resource builders, removed ResourceSyncers entries, added Grant/Revoke methods).
+- D2: Connector actions — Action schemas added, removed, or modified (new BatonActionSchema definitions, changed action names, added/removed arguments).
+- D3: Credential requirements — Required API scopes or permissions changed (new OAuth scopes, different permission levels, new authentication methods).
+- D4: Configuration fields — Config fields added, removed, or renamed in pkg/config/config.go.
+
+If any of D1-D4 apply, read docs/connector.mdx to confirm the specific section that would need updating.
+
+Return a JSON object:
+{"status": "stale", "findings": [{"id": "D1", "section": "<section name in docs>", "reason": "<why it's stale>"}]}
+
+Or if none apply:
+{"status": "up_to_date"}
+
+CHANGED FILES:
+<list of changed file paths>
+
+DIFFS:
+<paste diffs>
+```
+
+**Deliverable:** All agent tasks launched. Wait for them to complete before proceeding.
+
+---
+
+## Step 3: Validate and Aggregate
+
+1. Parse JSON arrays from code review agents (Agents 1-3). Filter confidence < 80.
 2. Deduplicate: same file + line range → keep highest confidence.
 3. **Cross-validate entity sources** (if provisioning changed): Read the Grant/Revoke code yourself to verify P1/P2 findings. This is the #1 bug.
 4. **Cross-validate PR feedback**: Check PR review comments against findings. Add missing unaddressed items as warnings.
 5. Downgrade breaking changes gated behind config flags from critical → suggestion.
-6. **Check for documentation staleness** (see below).
+6. Parse the docs-reviewer (Agent 4) result. If status is "stale", convert each finding to a warning.
 
-### Documentation Staleness Check (D1-D4)
+**Deliverable:** A merged list of findings (code + docs) with duplicates removed. Print the count of findings by severity.
 
-Connector repos have a `docs/connector.mdx` file that documents the connector's capabilities, configuration, and credentials for end users. If `docs/connector.mdx` exists in the repo but is NOT included in the PR's changed files, check whether the code changes affect documented functionality:
+---
 
-- **D1: Capabilities table** — If resource types are added, removed, or change sync/provision support (new resource builders, removed ResourceSyncers entries, added Grant/Revoke methods), the Capabilities table in the docs likely needs updating.
-- **D2: Connector actions** — If action schemas are added, removed, or modified in `*_actions.go` or `actions.go` (new `BatonActionSchema` definitions, changed action names, added/removed arguments), the Connector Actions table in the docs likely needs updating.
-- **D3: Credential requirements** — If required API scopes or permissions change (new OAuth scopes, different permission levels, new authentication methods), the credential gathering section in the docs likely needs updating.
-- **D4: Configuration fields** — If config fields are added, removed, or renamed in `pkg/config/config.go`, the configuration instructions in the docs likely need updating.
-
-If any of D1-D4 apply, add a warning finding recommending the author update `docs/connector.mdx`. Read the current docs file to confirm the specific section that's stale rather than guessing.
-
-## Step 5: Post Results
+## Step 4: Post Results
 
 Post findings directly as PR comments:
 
 1. **Inline comments** on specific lines where issues are found, with the finding ID, severity, description, and recommendation.
-2. **Summary comment** with:
-   - Severity counts (critical / warning / suggestion)
-   - Breaking changes detected (yes/no)
-   - List of files reviewed with categories
-   - Any critical findings highlighted
+
+2. **Summary comment** with ALL of the following sections (do not omit any):
+
+```
+### PR Review: <PR title>
+
+### Findings
+| Severity | Count |
+|----------|-------|
+| Critical | N |
+| Warning  | N |
+| Suggestion | N |
+
+### Breaking Changes
+<findings or "None detected.">
+
+### Documentation
+<output from docs-reviewer agent — docs staleness assessment>
+
+### Files Reviewed
+| File | Category |
+|------|----------|
+| ... | ... |
+```
