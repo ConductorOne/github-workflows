@@ -66,7 +66,7 @@ Spawn with `subagent_type: "general-purpose"`. Reviews ALL non-provisioning Go f
 ```
 You are a code reviewer for a Baton connector (Go project syncing identity data from SaaS APIs into ConductorOne).
 
-Review the diffs below against these criteria. Only flag issues you are confident are real problems — things you would reject in a human code review. Do not flag style preferences or hypothetical concerns.
+Review the diffs below against every criterion listed. Flag every violation — do not give the benefit of the doubt. If the code doesn't meet a criterion, flag it. The PR author can always push back.
 
 For each finding provide JSON:
 {"id": "<code>", "file": "<path>", "lines": "<range>", "description": "<issue>", "recommendation": "<fix>"}
@@ -144,7 +144,7 @@ Only spawn if changed files contain `*_actions.go` or `actions.go` files. This a
 ```
 You are reviewing provisioning (Grant/Revoke) code for a Baton connector.
 
-Only flag issues you are confident are real problems — things you would reject in a human code review. Do not flag style preferences or hypothetical concerns.
+Flag every violation — do not give the benefit of the doubt. If the code doesn't meet a criterion, flag it. The PR author can always push back.
 
 CRITICAL CONTEXT — Entity Source Rules (caused 3 production reverts):
 - WHO (user/account ID): principal.Id.Resource
@@ -181,7 +181,7 @@ Only spawn if changed files contain config or dependency files. Use `model: "hai
 **Prompt template:**
 
 ```
-Review these connector config/dependency changes. Only flag issues you are confident are real problems.
+Review these connector config/dependency changes. Flag every violation — do not give the benefit of the doubt.
 
 Config criteria (G1-G4):
 - G1: conf.gen.go must NEVER be manually edited
@@ -247,9 +247,9 @@ DIFFS:
 
 1. Parse JSON arrays from code review agents (Agents 1-3).
 2. Deduplicate: same file + line range → keep one.
-3. **Cross-validate entity sources** (if provisioning changed): Read the Grant/Revoke code yourself to verify P1/P2 findings. This is the #1 bug.
-4. **Cross-validate PR feedback**: Check PR review comments against findings. Add any unaddressed items from human reviewers.
-5. Drop findings that are fully mitigated by a config flag or feature gate.
+3. **Validate each finding yourself.** You are the final judge — sub-agents can be wrong. Read the relevant code and drop any finding that is incorrect or not a real issue.
+4. **Cross-validate entity sources** (if provisioning changed): Read the Grant/Revoke code yourself to verify P1/P2 findings. This is the #1 bug.
+5. **Cross-validate PR feedback**: Check PR review comments against findings. Add any unaddressed items from human reviewers.
 6. Parse the docs-reviewer (Agent 4) result. If status is "stale", include each finding — stale docs are a release blocker.
 
 **Deliverable:** A merged list of all findings with duplicates removed. Print the count.
@@ -268,6 +268,9 @@ Post findings directly as PR comments:
 ### PR Review: <PR title>
 
 **Issues: N**
+
+### Breaking Changes
+<one-liner per breaking change (B1-B8), or "None.">
 
 ### Issues
 <one-liner per issue with file:line, or "None found.">
