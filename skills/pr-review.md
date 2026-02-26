@@ -66,10 +66,12 @@ Spawn with `subagent_type: "general-purpose"`. Reviews ALL non-provisioning Go f
 ```
 You are a code reviewer for a Baton connector (Go project syncing identity data from SaaS APIs into ConductorOne).
 
-Review the diffs below against these criteria. For each finding provide JSON:
-{"id": "<code>", "severity": "critical|warning|suggestion", "file": "<path>", "lines": "<range>", "description": "<issue>", "recommendation": "<fix>", "confidence": 0-100}
+Review the diffs below against every criterion listed. Flag every violation — do not give the benefit of the doubt. If the code doesn't meet a criterion, flag it. The PR author can always push back.
 
-Return a JSON array. Empty array if no issues. Only findings with confidence >= 80.
+For each finding provide JSON:
+{"id": "<code>", "file": "<path>", "lines": "<range>", "description": "<issue>", "recommendation": "<fix>"}
+
+Return a JSON array. Empty array if no issues.
 
 ## CLIENT CRITERIA (C1-C7)
 - C1: API endpoints documented at top of client.go (endpoints, docs links, required scopes)
@@ -107,14 +109,14 @@ Return a JSON array. Empty array if no issues. Only findings with confidence >= 
 - H5: No secrets in logs (apiKey, password, token values)
 
 ## BREAKING CHANGES (B1-B8) — Check in diffs:
-- B1: Resource type Id: field changes = CRITICAL (grants orphaned)
-- B2: Entitlement slug changes in NewAssignmentEntitlement/NewPermissionEntitlement = CRITICAL
-- B3: Resource ID derivation changes (user.ID→user.Email) = CRITICAL
-- B4: Parent hierarchy changes (org→workspace) = HIGH
-- B5: Removed resource types/entitlements = HIGH
-- B6: Trait type changes (NewUserResource→NewAppResource) = MEDIUM
-- B7: New required OAuth scopes = breaking
-- B8: SAFE: display name changes, adding new types, adding trait options, adding pagination
+- B1: Resource type Id: field changes (grants orphaned)
+- B2: Entitlement slug changes in NewAssignmentEntitlement/NewPermissionEntitlement
+- B3: Resource ID derivation changes (user.ID→user.Email)
+- B4: Parent hierarchy changes (org→workspace)
+- B5: Removed resource types/entitlements
+- B6: Trait type changes (NewUserResource→NewAppResource)
+- B7: New required OAuth scopes
+- B8: SAFE (do not flag): display name changes, adding new types, adding trait options, adding pagination
 
 ## TOP BUG DETECTION PATTERNS
 1. Pagination: `return resources, "", nil, nil` without conditional = stops after page 1
@@ -142,6 +144,8 @@ Only spawn if changed files contain `*_actions.go` or `actions.go` files. This a
 ```
 You are reviewing provisioning (Grant/Revoke) code for a Baton connector.
 
+Flag every violation — do not give the benefit of the doubt. If the code doesn't meet a criterion, flag it. The PR author can always push back.
+
 CRITICAL CONTEXT — Entity Source Rules (caused 3 production reverts):
 - WHO (user/account ID): principal.Id.Resource
 - WHAT (group/role): entitlement.Resource.Id.Resource
@@ -154,7 +158,7 @@ In Revoke:
 - Context: grant.Principal.ParentResourceId.Resource
 
 Review criteria (P1-P6, H1-H5):
-- P1: CRITICAL — entity source correctness per rules above
+- P1: Entity source correctness per rules above
 - P2: Revoke uses grant.Principal and grant.Entitlement correctly
 - P3: Grant handles "already exists" as success; Revoke handles "not found" as success
 - P4: Validate params before API calls; wrap errors with gRPC status codes
@@ -164,7 +168,7 @@ Review criteria (P1-P6, H1-H5):
 
 Read the full provisioning files using the Read tool, then check the diff for what changed.
 
-Return JSON array of findings (same format as above). Confidence >= 80 only.
+Return JSON array of findings (same format as sync-reviewer). Empty array if no issues.
 
 FILES TO READ: <list full paths>
 DIFFS: <paste diffs>
@@ -177,7 +181,7 @@ Only spawn if changed files contain config or dependency files. Use `model: "hai
 **Prompt template:**
 
 ```
-Review these connector config/dependency changes:
+Review these connector config/dependency changes. Flag every violation — do not give the benefit of the doubt.
 
 Config criteria (G1-G4):
 - G1: conf.gen.go must NEVER be manually edited
@@ -190,7 +194,7 @@ Dependency checks:
 - Any unexpected new dependencies?
 - Any removed deps still needed?
 
-Return JSON array of findings. Confidence >= 80 only.
+Return JSON array of findings (same format as sync-reviewer). Empty array if no issues.
 
 DIFFS:
 <paste diffs>
@@ -220,7 +224,7 @@ Procedure:
 - D3: Credential requirements — Required API scopes or permissions changed (new OAuth scopes, different permission levels, new authentication methods).
 - D4: Configuration fields — Config fields added, removed, or renamed in pkg/config/config.go.
 
-If any of D1-D4 apply, read docs/connector.mdx to confirm the specific section that would need updating.
+If any of D1-D4 apply, read docs/connector.mdx to confirm the specific section that would need updating. Documentation staleness is a blocker — the docs must be updated before merge.
 
 Return a JSON object:
 {"status": "stale", "findings": [{"id": "D1", "section": "<section name in docs>", "reason": "<why it's stale>"}]}
@@ -241,14 +245,14 @@ DIFFS:
 
 ## Step 3: Validate and Aggregate
 
-1. Parse JSON arrays from code review agents (Agents 1-3). Filter confidence < 80.
-2. Deduplicate: same file + line range → keep highest confidence.
-3. **Cross-validate entity sources** (if provisioning changed): Read the Grant/Revoke code yourself to verify P1/P2 findings. This is the #1 bug.
-4. **Cross-validate PR feedback**: Check PR review comments against findings. Add missing unaddressed items as warnings.
-5. Downgrade breaking changes gated behind config flags from critical → suggestion.
-6. Parse the docs-reviewer (Agent 4) result. If status is "stale", convert each finding to a warning.
+1. Parse JSON arrays from code review agents (Agents 1-3).
+2. Deduplicate: same file + line range → keep one.
+3. **Validate each finding yourself.** You are the final judge — sub-agents can be wrong. Read the relevant code and drop any finding that is incorrect or not a real issue.
+4. **Cross-validate entity sources** (if provisioning changed): Read the Grant/Revoke code yourself to verify P1/P2 findings. This is the #1 bug.
+5. **Cross-validate PR feedback**: Check PR review comments against findings. Add any unaddressed items from human reviewers.
+6. Parse the docs-reviewer (Agent 4) result. If status is "stale", include each finding — stale docs are a release blocker.
 
-**Deliverable:** A merged list of findings (code + docs) with duplicates removed. Print the count of findings by severity.
+**Deliverable:** A merged list of all findings with duplicates removed. Print the count.
 
 ---
 
@@ -256,28 +260,23 @@ DIFFS:
 
 Post findings directly as PR comments:
 
-1. **Inline comments** on specific lines where issues are found, with the finding ID, severity, description, and recommendation.
+1. **Inline comments** on specific lines where issues are found. Keep each comment to 2-3 sentences: what's wrong, why it matters, and how to fix it.
 
-2. **Summary comment** with ALL of the following sections (do not omit any):
+2. **Summary comment** — be concise. No more than a few sentences per finding. Use the following template (do not omit any section):
 
 ```
 ### PR Review: <PR title>
 
-### Findings
-| Severity | Count |
-|----------|-------|
-| Critical | N |
-| Warning  | N |
-| Suggestion | N |
+**Issues: N**
 
 ### Breaking Changes
-<findings or "None detected.">
+<one-liner per breaking change (B1-B8), or "None.">
+
+### Issues
+<one-liner per issue with file:line, or "None found.">
 
 ### Documentation
-<output from docs-reviewer agent — docs staleness assessment>
-
-### Files Reviewed
-| File | Category |
-|------|----------|
-| ... | ... |
+<one-liner: "Up to date", "No docs file", or which sections need updating and why>
 ```
+
+Do NOT include a "Files Reviewed" section, a "Verdict" section, or a "Breaking Changes" section. Do NOT repeat findings that were already posted as inline comments — just reference them briefly in the summary. Keep the entire summary comment short.
