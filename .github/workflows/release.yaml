@@ -727,6 +727,24 @@ jobs:
       # that C1 WF token exchange and registry auth work end-to-end.
       # ================================================================
 
+      - name: Checkout connector repo (for docs)
+        if: vars.C1_WF_CLIENT_ID != ''
+        uses: actions/checkout@v5
+        with:
+          path: _connector
+
+      - name: Read connector documentation
+        if: vars.C1_WF_CLIENT_ID != ''
+        id: c1-docs
+        run: |
+          if [ -f "_connector/docs/connector.mdx" ]; then
+            echo "Found docs/connector.mdx"
+            echo "has_docs=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "No docs/connector.mdx found"
+            echo "has_docs=false" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Get GitHub OIDC token for C1 token exchange
         if: vars.C1_WF_CLIENT_ID != ''
         id: c1-oidc
@@ -765,8 +783,45 @@ jobs:
         continue-on-error: true
         env:
           REGISTRY_URL: "https://registry.conductorone.com"
+          MANIFEST_FILE: _workflows/_output/manifest.json
         run: |
           set -euo pipefail
+
+          # Read documentation content if available
+          DOCS=""
+          if [ "${{ steps.c1-docs.outputs.has_docs }}" = "true" ]; then
+            DOCS=$(cat _connector/docs/connector.mdx)
+          fi
+
+          # Transform merged manifest assets: href->downloadUrl, signatureHref->signatureUrl, etc.
+          ASSETS=$(jq '(.assets // {}) | to_entries | map({
+            key: .key,
+            value: {
+              platform: .key,
+              filename: .value.filename,
+              mediaType: .value.mediaType,
+              sizeBytes: .value.sizeBytes,
+              sha256: .value.sha256,
+              downloadUrl: .value.href,
+              signatureUrl: .value.signatureHref,
+              certificateUrl: .value.certificateHref,
+              sbomUrl: .value.sbomHref
+            }
+          }) | from_entries' "$MANIFEST_FILE")
+
+          # Transform merged manifest images: map key becomes platform
+          IMAGES=$(jq '(.images // {}) | to_entries | map({
+            key: .key,
+            value: {
+              ref: .value.ref,
+              digest: .value.digest,
+              platform: .key
+            }
+          }) | from_entries' "$MANIFEST_FILE")
+
+          # Manifest-level signature URLs (from cosign sign-blob of manifest.json)
+          SIG_URL=$(jq -r '.signatureHref // ""' "$MANIFEST_FILE")
+          CERT_URL=$(jq -r '.certificateHref // ""' "$MANIFEST_FILE")
 
           BODY=$(jq -n \
             --arg org "${{ github.event.repository.owner.login }}" \
@@ -775,7 +830,24 @@ jobs:
             --arg repositoryUrl "https://github.com/${{ github.repository }}" \
             --arg commitSha "${{ github.sha }}" \
             --arg workflowRunId "${{ github.run_id }}" \
-            '{org: $org, name: $name, version: $version, repositoryUrl: $repositoryUrl, commitSha: $commitSha, workflowRunId: $workflowRunId}')
+            --arg documentation "$DOCS" \
+            --arg signatureUrl "$SIG_URL" \
+            --arg certificateUrl "$CERT_URL" \
+            --argjson assets "$ASSETS" \
+            --argjson images "$IMAGES" \
+            '{
+              org: $org,
+              name: $name,
+              version: $version,
+              repositoryUrl: $repositoryUrl,
+              commitSha: $commitSha,
+              workflowRunId: $workflowRunId,
+              documentation: $documentation,
+              signatureUrl: $signatureUrl,
+              certificateUrl: $certificateUrl,
+              assets: $assets,
+              images: $images
+            }')
 
           HTTP_CODE=$(curl -s -o /tmp/c1wf-response.json -w "%{http_code}" \
             -X POST "${REGISTRY_URL}/api/v1/ingest/release" \
