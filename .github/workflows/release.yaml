@@ -719,149 +719,51 @@ jobs:
 
           rm -f "$TMPFILE"
 
-      # ================================================================
-      # C1 Workload Federation: token exchange and direct API registration
-      # Gated on C1_WF_CLIENT_ID repo variable -- skipped if not set.
-      # During migration, this runs alongside Lambda invocation (dual-write).
-      # The Lambda path remains the source of truth; this path validates
-      # that C1 WF token exchange and registry auth work end-to-end.
-      # ================================================================
-
-      - name: Checkout connector repo (for docs)
-        if: vars.C1_WF_CLIENT_ID != ''
-        uses: actions/checkout@v5
-        with:
-          path: _connector
-
-      - name: Read connector documentation
-        if: vars.C1_WF_CLIENT_ID != ''
-        id: c1-docs
-        run: |
-          if [ -f "_connector/docs/connector.mdx" ]; then
-            echo "Found docs/connector.mdx"
-            echo "has_docs=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "No docs/connector.mdx found"
-            echo "has_docs=false" >> "$GITHUB_OUTPUT"
-          fi
-
-      - name: Get GitHub OIDC token for C1 token exchange
-        if: vars.C1_WF_CLIENT_ID != ''
-        id: c1-oidc
+      # Record release via registry API (direct GitHub OIDC)
+      # The registry API validates the GitHub OIDC token directly,
+      # checking repository claim for per-connector isolation and
+      # job_workflow_ref for workflow trust.
+      - name: Get GitHub OIDC token for registry API
+        if: vars.REGISTRY_API_URL != ''
+        id: registry-oidc-token
         uses: actions/github-script@v7
         with:
           script: |
-            const token = await core.getIDToken('c1.conductor.one')
+            const token = await core.getIDToken('connector-registry')
             core.setSecret(token)
             core.setOutput('token', token)
 
-      - name: Exchange GitHub OIDC for C1 WF token
-        if: steps.c1-oidc.outcome == 'success'
-        id: c1-token
-        continue-on-error: true
-        run: |
-          set -euo pipefail
-
-          RESPONSE=$(curl -sf -X POST "https://c1.conductor.one/auth/v1/token" \
-            -H "Content-Type: application/x-www-form-urlencoded" \
-            -d "grant_type=urn:ietf:params:oauth:grant-type:token-exchange" \
-            -d "subject_token=${{ steps.c1-oidc.outputs.token }}" \
-            -d "subject_token_type=urn:ietf:params:oauth:token-type:jwt" \
-            -d "client_id=${{ vars.C1_WF_CLIENT_ID }}")
-
-          C1_TOKEN=$(echo "$RESPONSE" | jq -r '.access_token')
-          if [ -z "$C1_TOKEN" ] || [ "$C1_TOKEN" = "null" ]; then
-            echo "::error::C1 token exchange failed: no access_token in response"
-            exit 1
-          fi
-
-          echo "::add-mask::$C1_TOKEN"
-          echo "token=$C1_TOKEN" >> "$GITHUB_OUTPUT"
-
-      - name: Record release via registry API (C1 WF)
-        if: steps.c1-token.outcome == 'success'
+      - name: Record release in connector registry
+        if: steps.registry-oidc-token.outcome == 'success'
         continue-on-error: true
         env:
-          REGISTRY_URL: "https://registry.conductorone.com"
-          MANIFEST_FILE: _workflows/_output/manifest.json
+          REGISTRY_API_URL: ${{ vars.REGISTRY_API_URL }}
+          REGISTRY_TOKEN: ${{ steps.registry-oidc-token.outputs.token }}
         run: |
-          set -euo pipefail
+          CONNECTOR_ORG="${GITHUB_REPOSITORY_OWNER}"
+          CONNECTOR_NAME="${GITHUB_REPOSITORY##*/}"
+          VERSION="${GITHUB_REF_NAME#v}"
 
-          # Read documentation content if available
-          DOCS=""
-          if [ "${{ steps.c1-docs.outputs.has_docs }}" = "true" ]; then
-            DOCS=$(cat _connector/docs/connector.mdx)
-          fi
-
-          # Transform merged manifest assets: href->downloadUrl, signatureHref->signatureUrl, etc.
-          ASSETS=$(jq '(.assets // {}) | to_entries | map({
-            key: .key,
-            value: {
-              platform: .key,
-              filename: .value.filename,
-              mediaType: .value.mediaType,
-              sizeBytes: .value.sizeBytes,
-              sha256: .value.sha256,
-              downloadUrl: .value.href,
-              signatureUrl: .value.signatureHref,
-              certificateUrl: .value.certificateHref,
-              sbomUrl: .value.sbomHref
-            }
-          }) | from_entries' "$MANIFEST_FILE")
-
-          # Transform merged manifest images: map key becomes platform
-          IMAGES=$(jq '(.images // {}) | to_entries | map({
-            key: .key,
-            value: {
-              ref: .value.ref,
-              digest: .value.digest,
-              platform: .key
-            }
-          }) | from_entries' "$MANIFEST_FILE")
-
-          # Manifest-level signature URLs (from cosign sign-blob of manifest.json)
-          SIG_URL=$(jq -r '.signatureHref // ""' "$MANIFEST_FILE")
-          CERT_URL=$(jq -r '.certificateHref // ""' "$MANIFEST_FILE")
-
-          BODY=$(jq -n \
-            --arg org "${{ github.event.repository.owner.login }}" \
-            --arg name "${{ github.event.repository.name }}" \
-            --arg version "${{ inputs.tag }}" \
-            --arg repositoryUrl "https://github.com/${{ github.repository }}" \
-            --arg commitSha "${{ github.sha }}" \
-            --arg workflowRunId "${{ github.run_id }}" \
-            --arg documentation "$DOCS" \
-            --arg signatureUrl "$SIG_URL" \
-            --arg certificateUrl "$CERT_URL" \
-            --argjson assets "$ASSETS" \
-            --argjson images "$IMAGES" \
-            '{
-              org: $org,
-              name: $name,
-              version: $version,
-              repositoryUrl: $repositoryUrl,
-              commitSha: $commitSha,
-              workflowRunId: $workflowRunId,
-              documentation: $documentation,
-              signatureUrl: $signatureUrl,
-              certificateUrl: $certificateUrl,
-              assets: $assets,
-              images: $images
-            }')
-
-          HTTP_CODE=$(curl -s -o /tmp/c1wf-response.json -w "%{http_code}" \
-            -X POST "${REGISTRY_URL}/api/v1/ingest/release" \
-            -H "Authorization: Bearer ${{ steps.c1-token.outputs.token }}" \
+          HTTP_STATUS=$(curl -s -o /tmp/registry-response.json -w "%{http_code}" \
+            -X POST "${REGISTRY_API_URL}/api/v1/ingest/release" \
+            -H "Authorization: Bearer ${REGISTRY_TOKEN}" \
             -H "Content-Type: application/json" \
-            -d "$BODY")
+            -d "{
+              \"org\": \"${CONNECTOR_ORG}\",
+              \"name\": \"${CONNECTOR_NAME}\",
+              \"version\": \"${VERSION}\",
+              \"repositoryUrl\": \"https://github.com/${GITHUB_REPOSITORY}\",
+              \"commitSha\": \"${GITHUB_SHA}\",
+              \"workflowRunId\": \"${GITHUB_RUN_ID}\"
+            }")
 
-          if [ "$HTTP_CODE" = "200" ]; then
-            echo "C1 WF registry record: success (HTTP 200)"
-          elif [ "$HTTP_CODE" = "409" ]; then
-            echo "C1 WF registry record: already exists (HTTP 409) -- expected during dual-write migration"
+          echo "Registry API response: ${HTTP_STATUS}"
+          cat /tmp/registry-response.json
+
+          if [ "${HTTP_STATUS}" = "200" ] || [ "${HTTP_STATUS}" = "409" ]; then
+            echo "Release recorded successfully (${HTTP_STATUS})"
           else
-            echo "::error::C1 WF registry record failed: HTTP $HTTP_CODE"
-            cat /tmp/c1wf-response.json
+            echo "::warning::Registry API returned ${HTTP_STATUS}"
             exit 1
           fi
 
