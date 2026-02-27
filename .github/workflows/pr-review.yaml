@@ -5,7 +5,7 @@ jobs:
     if: github.repository != 'ConductorOne/github-workflows'
     runs-on: ubuntu-latest
     permissions:
-      contents: write
+      contents: read
       pull-requests: write
       issues: write
     steps:
@@ -34,6 +34,6 @@ jobs:
         use_sticky_comment: true
         track_progress: true
         include_fix_links: true
-        claude_args: --model claude-opus-4-6 --max-turns 100 --allowedTools "mcp__github_inline_comment__create_inline_comment,Bash(gh pr comment:*),Bash(gh pr diff:*),Bash(gh pr view:*),Bash(go build:*),Bash(./connector:*),Bash(git add:*),Bash(git commit:*),Bash(git push:*),Edit,Write,Read,Glob,Grep"
+        claude_args: --model claude-opus-4-6 --max-turns 100 --allowedTools "mcp__github_inline_comment__create_inline_comment,Bash(gh pr comment:*),Bash(gh pr diff:*),Bash(gh pr view:*)"
         prompt: |
           Use the /pr-review skill to review this PR.
