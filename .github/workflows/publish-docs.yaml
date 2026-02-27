@@ -1,0 +1,53 @@
+# Reusable workflow: Publish connector docs to registry on release.
+# BLOCKED: Registry deployment required before activation.
+name: Publish Connector Docs
+
+on:
+  workflow_call:
+    inputs:
+      tag:
+        required: true
+        type: string
+        description: "Release tag (semver)"
+    secrets:
+      RELENG_GITHUB_TOKEN:
+        required: true
+      # TODO: Add registry API authentication secret when deployed
+      # REGISTRY_API_TOKEN:
+      #   required: true
+
+jobs:
+  publish-docs:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout connector repo
+        uses: actions/checkout@v5
+        with:
+          repository: ${{ github.event.repository.full_name }}
+          ref: ${{ inputs.tag }}
+
+      - name: Check for connector docs
+        id: check-docs
+        run: |
+          if [ -f docs/connector.mdx ]; then
+            echo "has_docs=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "has_docs=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::No docs/connector.mdx found. Skipping doc publishing."
+          fi
+
+      - name: Publish docs to registry
+        if: steps.check-docs.outputs.has_docs == 'true'
+        env:
+          CONNECTOR_NAME: ${{ github.event.repository.name }}
+          TAG: ${{ inputs.tag }}
+          # TODO: Set REGISTRY_API_URL when registry is deployed
+          # REGISTRY_API_URL: https://registry-api.conductorone.com
+        run: |
+          echo "::notice::Doc publishing is not yet active. Registry deployment required."
+          echo "Would publish docs/connector.mdx for ${CONNECTOR_NAME}@${TAG}"
+          # TODO: Implement registry API call when deployed:
+          # curl -X POST "${REGISTRY_API_URL}/v1/connectors/${CONNECTOR_NAME}/versions/${TAG}/docs" \
+          #   -H "Authorization: Bearer ${REGISTRY_API_TOKEN}" \
+          #   -H "Content-Type: application/json" \
+          #   -d @<(jq -n --arg doc "$(cat docs/connector.mdx)" '{"documentation": $doc}')

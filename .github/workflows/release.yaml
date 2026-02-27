@@ -823,6 +823,16 @@ jobs:
         run: |
           ./scripts/validate-release-artifacts.sh "$ORG_REPO" "$VERSION"
 
+  # TODO: Activate when registry is deployed. Currently scaffolded only.
+  # publish-docs:
+  #   needs: [record-connector-registry]
+  #   if: always() && needs.record-connector-registry.result == 'success'
+  #   uses: ConductorOne/github-workflows/.github/workflows/publish-docs.yaml@main
+  #   with:
+  #     tag: ${{ inputs.tag }}
+  #   secrets:
+  #     RELENG_GITHUB_TOKEN: ${{ secrets.RELENG_GITHUB_TOKEN }}
+
   notify-release-failure:
     needs:
       [

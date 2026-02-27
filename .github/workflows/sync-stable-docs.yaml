@@ -1,0 +1,62 @@
+# Reusable workflow: Sync stable channel docs from registry to ConductorOne/docs.
+# BLOCKED: Registry deployment required before activation.
+name: Sync Stable Docs
+
+on:
+  workflow_call:
+    inputs:
+      connector:
+        description: 'Connector name to sync (e.g., baton-okta). Leave empty to sync all.'
+        required: false
+        type: string
+        default: ''
+    secrets:
+      RELENG_GITHUB_TOKEN:
+        required: true
+      # TODO: Add registry API authentication secret
+
+  # TODO: Uncomment schedule when ready to activate
+  # schedule:
+  #   - cron: '0 12 * * *'  # Daily at noon UTC
+
+jobs:
+  sync-docs:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout ConductorOne/docs
+        uses: actions/checkout@v5
+        with:
+          repository: ConductorOne/docs
+          token: ${{ secrets.RELENG_GITHUB_TOKEN }}
+
+      - name: Fetch stable docs from registry
+        env:
+          CONNECTOR: ${{ inputs.connector }}
+          # TODO: REGISTRY_API_URL when deployed
+        run: |
+          echo "::notice::Stable docs sync is not yet active. Registry deployment required."
+          # TODO: Implement when registry is deployed:
+          #
+          # For each connector (or just $CONNECTOR if set):
+          # 1. GET /v1/connectors/{name}/channels/stable -> get stable version
+          # 2. GET /v1/connectors/{name}/versions/{version}/docs -> get MDX content
+          # 3. Write to baton/{slug}.mdx
+          # 4. Run scripts/sync-docs-nav.py to update docs.json if new connector added
+
+      # TODO: Uncomment when registry is deployed
+      # - name: Create PR with synced docs
+      #   uses: peter-evans/create-pull-request@v7
+      #   with:
+      #     token: ${{ secrets.RELENG_GITHUB_TOKEN }}
+      #     commit-message: "docs: sync stable connector docs from registry"
+      #     committer: "conductorone-bot <svc-eng-ci@conductorone.com>"
+      #     author: "conductorone-bot <svc-eng-ci@conductorone.com>"
+      #     title: "Sync stable connector docs"
+      #     body: |
+      #       Auto-synced from connector registry stable channel.
+      #       Connector: ${{ inputs.connector || 'all' }}
+      #     branch: docs/sync-stable-docs
+      #     base: main
+      #     delete-branch: true
+      - name: Placeholder
+        run: echo "Sync not yet active"

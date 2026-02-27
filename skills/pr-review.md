@@ -7,7 +7,7 @@ description: Review a baton connector PR in CI. Performs a structured, read-only
 
 Perform a structured code review of a baton connector PR.
 
-This skill runs in CI — do NOT write files, create commits, or run build/test commands.
+This skill runs in CI. Code review is read-only. The only files this skill may modify are auto-generated sections in docs/connector.mdx (Step 5).
 
 **You MUST complete ALL of the following steps in order. Do NOT skip any step. Each step has a deliverable — produce it before moving on.**
 
@@ -17,6 +17,7 @@ This skill runs in CI — do NOT write files, create commits, or run build/test 
 | 2. Spawn Review Agents | All agent tasks launched (including docs-reviewer) |
 | 3. Validate and Aggregate | Merged findings list |
 | 4. Post Results | Summary comment with ALL required sections |
+| 5. Auto-Update Docs | Updated docs/connector.mdx (if stale) |
 
 ---
 
@@ -280,3 +281,84 @@ Post findings directly as PR comments:
 ```
 
 Do NOT include a "Files Reviewed" section, a "Verdict" section, or a "Breaking Changes" section. Do NOT repeat findings that were already posted as inline comments — just reference them briefly in the summary. Keep the entire summary comment short.
+
+---
+
+## Step 5: Auto-Update Documentation (conditional)
+
+**Run this step ONLY when ALL of these conditions are true:**
+- The docs-reviewer (Agent 4) returned `{"status": "stale"}` with findings
+- The staleness involves auto-generated sections (D1: capabilities or D4: config)
+- `docs/connector.mdx` exists in the repo
+
+If docs-reviewer returned "up_to_date", "no_docs", or "docs_updated", skip this step.
+
+### Procedure
+
+1. **Build the connector** to generate current metadata:
+   ```bash
+   CONNECTOR_NAME=$(ls cmd/ | head -1)
+   go build -o connector "./cmd/${CONNECTOR_NAME}"
+   ./connector capabilities > /tmp/proposed_capabilities.json 2>/dev/null || true
+   ./connector config > /tmp/proposed_config.json 2>/dev/null || true
+   ```
+
+2. **Read docs/connector.mdx** and locate the auto-generated marker sections:
+   - `{/* AUTO-GENERATED:START - capabilities */}` ... `{/* AUTO-GENERATED:END - capabilities */}`
+   - `{/* AUTO-GENERATED:START - config-params */}` ... `{/* AUTO-GENERATED:END - config-params */}`
+
+3. **Generate the capabilities table** from `/tmp/proposed_capabilities.json`:
+   - Parse `resourceTypeCapabilities` array
+   - For each resource type, check for `CAPABILITY_SYNC` and `CAPABILITY_PROVISION`
+   - Map type names to title case display names (e.g., `user` -> `Accounts`, `group` -> `Groups`, `role` -> `Roles`)
+   - Generate MDX table rows. Checkmark icon: `<Icon icon="square-check" iconType="solid" color="#65DE23"/>`
+   - Empty cell if capability not present
+
+   Example output:
+   ```
+   | Resource | Sync | Provision |
+   | :--- | :--- | :--- |
+   | Accounts | <Icon icon="square-check" iconType="solid" color="#65DE23"/> | <Icon icon="square-check" iconType="solid" color="#65DE23"/> |
+   | Groups | <Icon icon="square-check" iconType="solid" color="#65DE23"/> | |
+   ```
+
+4. **Generate config params list** from `/tmp/proposed_config.json`:
+   - Parse the JSON schema `properties` object
+   - For each property, create a bullet: `- **Field Name**: Description`
+   - Mark required fields (from `required` array) with "(required)" suffix
+   - Wrap in a `<Step>` tag:
+   ```
+      <Step>
+        Enter the required configuration:
+
+        - **api-key** (required): API key for authentication
+        - **domain**: Your instance domain
+      </Step>
+   ```
+
+5. **Replace the auto-generated sections** using the Edit tool:
+   - Find the content between `AUTO-GENERATED:START - capabilities` and `AUTO-GENERATED:END - capabilities`
+   - Replace with the new capabilities section (keep the marker comments)
+   - Same for `config-params` section
+   - **Never modify content outside the markers**
+
+6. **Commit and push** the changes:
+   ```bash
+   git add docs/connector.mdx
+   git commit -m "docs: auto-update connector documentation from metadata"
+   git push
+   ```
+
+### If markers don't exist
+
+If `docs/connector.mdx` exists but has no `AUTO-GENERATED` markers, do NOT restructure the file. Instead:
+- Add a note in the summary comment recommending the markers be added
+- List the specific changes that need manual attention
+
+### If build fails
+
+If the connector binary fails to build, skip auto-update entirely. Report in the summary comment:
+```
+### Documentation
+Build failed — could not generate proposed metadata for doc auto-update. Manual update may be needed.
+```
