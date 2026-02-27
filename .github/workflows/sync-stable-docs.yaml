@@ -15,9 +15,8 @@ on:
         required: true
       # TODO: Add registry API authentication secret
 
-  # TODO: Uncomment schedule when ready to activate
-  # schedule:
-  #   - cron: '0 12 * * *'  # Daily at noon UTC
+  schedule:
+    - cron: '0 12 * * *'  # Daily at noon UTC
 
 jobs:
   sync-docs:
@@ -43,20 +42,17 @@ jobs:
           # 3. Write to baton/{slug}.mdx
           # 4. Run scripts/sync-docs-nav.py to update docs.json if new connector added
 
-      # TODO: Uncomment when registry is deployed
-      # - name: Create PR with synced docs
-      #   uses: peter-evans/create-pull-request@v7
-      #   with:
-      #     token: ${{ secrets.RELENG_GITHUB_TOKEN }}
-      #     commit-message: "docs: sync stable connector docs from registry"
-      #     committer: "conductorone-bot <svc-eng-ci@conductorone.com>"
-      #     author: "conductorone-bot <svc-eng-ci@conductorone.com>"
-      #     title: "Sync stable connector docs"
-      #     body: |
-      #       Auto-synced from connector registry stable channel.
-      #       Connector: ${{ inputs.connector || 'all' }}
-      #     branch: docs/sync-stable-docs
-      #     base: main
-      #     delete-branch: true
-      - name: Placeholder
-        run: echo "Sync not yet active"
+      - name: Create PR with synced docs
+        uses: peter-evans/create-pull-request@v7
+        with:
+          token: ${{ secrets.RELENG_GITHUB_TOKEN }}
+          commit-message: "docs: sync stable connector docs from registry"
+          committer: "conductorone-bot <svc-eng-ci@conductorone.com>"
+          author: "conductorone-bot <svc-eng-ci@conductorone.com>"
+          title: "Sync stable connector docs"
+          body: |
+            Auto-synced from connector registry stable channel.
+            Connector: ${{ inputs.connector || 'all' }}
+          branch: docs/sync-stable-docs
+          base: main
+          delete-branch: true

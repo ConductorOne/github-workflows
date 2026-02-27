@@ -13,8 +13,8 @@ on:
       RELENG_GITHUB_TOKEN:
         required: true
       # TODO: Add registry API authentication secret when deployed
-      # REGISTRY_API_TOKEN:
-      #   required: true
+      REGISTRY_API_TOKEN:
+        required: true
 
 jobs:
   publish-docs:
@@ -44,10 +44,8 @@ jobs:
           # TODO: Set REGISTRY_API_URL when registry is deployed
           # REGISTRY_API_URL: https://registry-api.conductorone.com
         run: |
-          echo "::notice::Doc publishing is not yet active. Registry deployment required."
-          echo "Would publish docs/connector.mdx for ${CONNECTOR_NAME}@${TAG}"
-          # TODO: Implement registry API call when deployed:
-          # curl -X POST "${REGISTRY_API_URL}/v1/connectors/${CONNECTOR_NAME}/versions/${TAG}/docs" \
-          #   -H "Authorization: Bearer ${REGISTRY_API_TOKEN}" \
-          #   -H "Content-Type: application/json" \
-          #   -d @<(jq -n --arg doc "$(cat docs/connector.mdx)" '{"documentation": $doc}')
+          # TODO: Set REGISTRY_API_URL when registry is deployed
+          curl -X POST "${REGISTRY_API_URL}/v1/connectors/${CONNECTOR_NAME}/versions/${TAG}/docs" \
+            -H "Authorization: Bearer ${REGISTRY_API_TOKEN}" \
+            -H "Content-Type: application/json" \
+            -d @<(jq -n --arg doc "$(cat docs/connector.mdx)" '{"documentation": $doc}')
