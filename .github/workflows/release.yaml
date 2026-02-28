@@ -580,7 +580,10 @@ jobs:
     # require binaries and docker to complete before recording, since we include both in the manifest
     # use explicit if condition to run when goreleaser-docker is skipped (docker=false && lambda=false)
     # see: https://docs.github.com/en/actions/using-jobs/using-conditions-to-control-job-execution
-    if: ${{ !cancelled() && needs.goreleaser-binaries.result == 'success' }}
+    if: >-
+      ${{ !cancelled()
+      && needs.goreleaser-binaries.result == 'success'
+      && (needs.goreleaser-docker.result == 'success' || needs.goreleaser-docker.result == 'skipped') }}
     needs: [determine-workflows-ref, goreleaser-binaries, goreleaser-docker]
     permissions:
       id-token: write
@@ -792,7 +795,11 @@ jobs:
           fi
 
   record-lambda-registry:
-    if: inputs.lambda == true
+    if: >-
+      ${{ inputs.lambda == true
+      && !cancelled()
+      && needs.goreleaser-binaries.result == 'success'
+      && needs.goreleaser-docker.result == 'success' }}
     # lambda releases are dependent on assets produced in the binaries and docker goreleaser jobs
     needs: [goreleaser-binaries, goreleaser-docker]
     permissions:
