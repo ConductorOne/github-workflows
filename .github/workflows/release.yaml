@@ -739,23 +739,47 @@ jobs:
         env:
           REGISTRY_API_URL: ${{ vars.REGISTRY_API_URL }}
           REGISTRY_TOKEN: ${{ steps.registry-oidc-token.outputs.token }}
+          MANIFEST_URL: ${{ steps.upload-manifest.outputs.manifest_url }}
+          IMAGES_MANIFEST: ${{ needs.goreleaser-docker.outputs.images_manifest }}
         run: |
           CONNECTOR_ORG="${GITHUB_REPOSITORY_OWNER}"
           CONNECTOR_NAME="${GITHUB_REPOSITORY##*/}"
-          VERSION="${GITHUB_REF_NAME#v}"
+          VERSION="${{ inputs.tag }}"
+
+          # Build images object from goreleaser-docker output (if available)
+          IMAGES_FIELD=""
+          if [ -n "${IMAGES_MANIFEST}" ]; then
+            IMAGES_FIELD=$(echo "${IMAGES_MANIFEST}" | jq -c '.' 2>/dev/null || echo "")
+          fi
+
+          # Assemble payload using jq to avoid shell quoting issues
+          PAYLOAD=$(jq -n \
+            --arg org "${CONNECTOR_ORG}" \
+            --arg name "${CONNECTOR_NAME}" \
+            --arg version "${VERSION}" \
+            --arg repositoryUrl "https://github.com/${GITHUB_REPOSITORY}" \
+            --arg commitSha "${GITHUB_SHA}" \
+            --arg workflowRunId "${GITHUB_RUN_ID}" \
+            --arg signatureUrl "${MANIFEST_URL:+${MANIFEST_URL%.json}.json.sig}" \
+            --arg certificateUrl "${MANIFEST_URL:+${MANIFEST_URL%.json}.json.cert}" \
+            --argjson images "${IMAGES_FIELD:-null}" \
+            '{
+              org: $org,
+              name: $name,
+              version: $version,
+              repositoryUrl: $repositoryUrl,
+              commitSha: $commitSha,
+              workflowRunId: $workflowRunId
+            }
+            + (if $images != null then {images: $images} else {} end)
+            + (if $signatureUrl != "" then {signatureUrl: $signatureUrl} else {} end)
+            + (if $certificateUrl != "" then {certificateUrl: $certificateUrl} else {} end)')
 
           HTTP_STATUS=$(curl -s -o /tmp/registry-response.json -w "%{http_code}" \
             -X POST "${REGISTRY_API_URL}/api/v1/ingest/release" \
             -H "Authorization: Bearer ${REGISTRY_TOKEN}" \
             -H "Content-Type: application/json" \
-            -d "{
-              \"org\": \"${CONNECTOR_ORG}\",
-              \"name\": \"${CONNECTOR_NAME}\",
-              \"version\": \"${VERSION}\",
-              \"repositoryUrl\": \"https://github.com/${GITHUB_REPOSITORY}\",
-              \"commitSha\": \"${GITHUB_SHA}\",
-              \"workflowRunId\": \"${GITHUB_RUN_ID}\"
-            }")
+            -d "${PAYLOAD}")
 
           echo "Registry API response: ${HTTP_STATUS}"
           cat /tmp/registry-response.json
