@@ -580,7 +580,10 @@ jobs:
     # require binaries and docker to complete before recording, since we include both in the manifest
     # use explicit if condition to run when goreleaser-docker is skipped (docker=false && lambda=false)
     # see: https://docs.github.com/en/actions/using-jobs/using-conditions-to-control-job-execution
-    if: ${{ !cancelled() && needs.goreleaser-binaries.result == 'success' }}
+    if: >-
+      ${{ !cancelled()
+      && needs.goreleaser-binaries.result == 'success'
+      && (needs.goreleaser-docker.result == 'success' || needs.goreleaser-docker.result == 'skipped') }}
     needs: [determine-workflows-ref, goreleaser-binaries, goreleaser-docker]
     permissions:
       id-token: write
@@ -719,8 +722,84 @@ jobs:
 
           rm -f "$TMPFILE"
 
+      # Record release via registry API (direct GitHub OIDC)
+      # The registry API validates the GitHub OIDC token directly,
+      # checking repository claim for per-connector isolation and
+      # job_workflow_ref for workflow trust.
+      - name: Get GitHub OIDC token for registry API
+        if: vars.REGISTRY_API_URL != ''
+        id: registry-oidc-token
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const token = await core.getIDToken('connector-registry')
+            core.setSecret(token)
+            core.setOutput('token', token)
+
+      - name: Record release in connector registry
+        if: steps.registry-oidc-token.outcome == 'success'
+        continue-on-error: true
+        env:
+          REGISTRY_API_URL: ${{ vars.REGISTRY_API_URL }}
+          REGISTRY_TOKEN: ${{ steps.registry-oidc-token.outputs.token }}
+          MANIFEST_URL: ${{ steps.upload-manifest.outputs.manifest_url }}
+          IMAGES_MANIFEST: ${{ needs.goreleaser-docker.outputs.images_manifest }}
+        run: |
+          CONNECTOR_ORG="${GITHUB_REPOSITORY_OWNER}"
+          CONNECTOR_NAME="${GITHUB_REPOSITORY##*/}"
+          VERSION="${{ inputs.tag }}"
+
+          # Build images object from goreleaser-docker output (if available)
+          IMAGES_FIELD=""
+          if [ -n "${IMAGES_MANIFEST}" ]; then
+            IMAGES_FIELD=$(echo "${IMAGES_MANIFEST}" | jq -c '.' 2>/dev/null || echo "")
+          fi
+
+          # Assemble payload using jq to avoid shell quoting issues
+          PAYLOAD=$(jq -n \
+            --arg org "${CONNECTOR_ORG}" \
+            --arg name "${CONNECTOR_NAME}" \
+            --arg version "${VERSION}" \
+            --arg repositoryUrl "https://github.com/${GITHUB_REPOSITORY}" \
+            --arg commitSha "${GITHUB_SHA}" \
+            --arg workflowRunId "${GITHUB_RUN_ID}" \
+            --arg signatureUrl "${MANIFEST_URL:+${MANIFEST_URL%.json}.json.sig}" \
+            --arg certificateUrl "${MANIFEST_URL:+${MANIFEST_URL%.json}.json.cert}" \
+            --argjson images "${IMAGES_FIELD:-null}" \
+            '{
+              org: $org,
+              name: $name,
+              version: $version,
+              repositoryUrl: $repositoryUrl,
+              commitSha: $commitSha,
+              workflowRunId: $workflowRunId
+            }
+            + (if $images != null then {images: $images} else {} end)
+            + (if $signatureUrl != "" then {signatureUrl: $signatureUrl} else {} end)
+            + (if $certificateUrl != "" then {certificateUrl: $certificateUrl} else {} end)')
+
+          HTTP_STATUS=$(curl -s -o /tmp/registry-response.json -w "%{http_code}" \
+            -X POST "${REGISTRY_API_URL}/api/v1/ingest/release" \
+            -H "Authorization: Bearer ${REGISTRY_TOKEN}" \
+            -H "Content-Type: application/json" \
+            -d "${PAYLOAD}")
+
+          echo "Registry API response: ${HTTP_STATUS}"
+          cat /tmp/registry-response.json
+
+          if [ "${HTTP_STATUS}" = "200" ] || [ "${HTTP_STATUS}" = "409" ]; then
+            echo "Release recorded successfully (${HTTP_STATUS})"
+          else
+            echo "::warning::Registry API returned ${HTTP_STATUS}"
+            exit 1
+          fi
+
   record-lambda-registry:
-    if: inputs.lambda == true
+    if: >-
+      ${{ inputs.lambda == true
+      && !cancelled()
+      && needs.goreleaser-binaries.result == 'success'
+      && needs.goreleaser-docker.result == 'success' }}
     # lambda releases are dependent on assets produced in the binaries and docker goreleaser jobs
     needs: [goreleaser-binaries, goreleaser-docker]
     permissions:
