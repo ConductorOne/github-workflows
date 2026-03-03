@@ -37,6 +37,11 @@ on:
         type: string
         default: ""
         description: "Comma-separated list of extra files/directories from the caller repo to include in the Docker build context (e.g., 'java,config'). Only valid when dockerfile_template is set."
+      msi:
+        required: false
+        type: boolean
+        default: true
+        description: "Whether to build MSI Windows installers."
       msi_wxs_path:
         required: false
         type: string
@@ -56,8 +61,8 @@ on:
       DATADOG_API_KEY:
         required: true
       GORELEASER_PRO_KEY:
-        required: true
-        description: "GoReleaser Pro license key for MSI builds"
+        required: false
+        description: "GoReleaser Pro license key for MSI builds. Required when msi is true."
 
 env:
   CDN_BASE_URL: "https://dist.conductorone.com"
@@ -91,6 +96,25 @@ jobs:
         run: |
           echo "::error::docker_extra_files can only be used when dockerfile_template is set"
           exit 1
+
+      - name: Validate msi_wxs_path has no path traversal
+        if: inputs.msi_wxs_path != ''
+        run: |
+          WXS_PATH="${{ inputs.msi_wxs_path }}"
+          if [[ "$WXS_PATH" == /* ]] || [[ "$WXS_PATH" == *".."* ]]; then
+            echo "::error::msi_wxs_path must be a relative path without '..' traversal. Got: $WXS_PATH"
+            exit 1
+          fi
+
+      - name: Validate GORELEASER_PRO_KEY when msi enabled
+        if: inputs.msi == true
+        env:
+          HAS_KEY: ${{ secrets.GORELEASER_PRO_KEY != '' }}
+        run: |
+          if [ "$HAS_KEY" != "true" ]; then
+            echo "::error::GORELEASER_PRO_KEY secret is required when msi is true"
+            exit 1
+          fi
 
   determine-workflows-ref:
     needs: validate-inputs
@@ -349,13 +373,16 @@ jobs:
           echo "Found checksums file: $CHECKSUMS_FILE"
 
           # Output checksums content for merging with Windows hashes in registry job
+          # Use randomized delimiter to prevent injection via filenames containing "EOF"
+          DELIM="CHECKSUMS_$(openssl rand -hex 8)"
           {
-            echo "checksums<<EOF"
+            echo "checksums<<${DELIM}"
             cat "$CHECKSUMS_FILE"
-            echo "EOF"
+            echo "${DELIM}"
           } >> "$GITHUB_OUTPUT"
 
   goreleaser-windows:
+    if: inputs.msi == true
     needs: determine-workflows-ref
     runs-on: windows-latest
     permissions:
@@ -448,7 +475,7 @@ jobs:
         with:
           distribution: goreleaser-pro
           workdir: _caller
-          version: "~> v2"
+          version: "~> v2.13"
           args: release --clean --skip=publish --config ../_workflows/_generated/.goreleaser.windows.yaml
         env:
           GITHUB_TOKEN: ${{ secrets.RELENG_GITHUB_TOKEN }}
@@ -571,8 +598,8 @@ jobs:
               --content-type "application/zip"
           }
 
-          # Upload MSI files (GoReleaser puts these in dist/msi/<name>/<name>.msi)
-          $msiFiles = Get-ChildItem "_caller/dist" -Recurse -Filter "*.msi" -ErrorAction SilentlyContinue
+          # Upload MSI files (flattened to dist root by earlier step)
+          $msiFiles = Get-ChildItem "_caller/dist/*.msi" -ErrorAction SilentlyContinue
           foreach ($msi in $msiFiles) {
             Write-Host "Uploading $($msi.Name) to S3..."
             aws s3 cp $msi.FullName "s3://$env:S3_BUCKET/$env:S3_DIRECTORY/$($msi.Name)" `
@@ -580,8 +607,8 @@ jobs:
               --content-type "application/x-msi"
           }
 
-          # Upload signatures (.sig files) - search recursively for MSI sigs too
-          $sigFiles = Get-ChildItem "_caller/dist" -Recurse -Filter "*.sig" -ErrorAction SilentlyContinue
+          # Upload signatures (.sig files)
+          $sigFiles = Get-ChildItem "_caller/dist/*.sig" -ErrorAction SilentlyContinue
           foreach ($sig in $sigFiles) {
             Write-Host "Uploading $($sig.Name) to S3..."
             aws s3 cp $sig.FullName "s3://$env:S3_BUCKET/$env:S3_DIRECTORY/$($sig.Name)" `
@@ -589,8 +616,8 @@ jobs:
               --content-type "application/octet-stream"
           }
 
-          # Upload certificates (.cert files) - search recursively for MSI certs too
-          $certFiles = Get-ChildItem "_caller/dist" -Recurse -Filter "*.cert" -ErrorAction SilentlyContinue
+          # Upload certificates (.cert files)
+          $certFiles = Get-ChildItem "_caller/dist/*.cert" -ErrorAction SilentlyContinue
           foreach ($cert in $certFiles) {
             Write-Host "Uploading $($cert.Name) to S3..."
             aws s3 cp $cert.FullName "s3://$env:S3_BUCKET/$env:S3_DIRECTORY/$($cert.Name)" `
@@ -599,7 +626,7 @@ jobs:
           }
 
           # Upload SBOM json files (before attestation signing)
-          $sbomFiles = Get-ChildItem "_caller/dist" -Recurse -Filter "*.sbom.json" -ErrorAction SilentlyContinue
+          $sbomFiles = Get-ChildItem "_caller/dist/*.sbom.json" -ErrorAction SilentlyContinue
           foreach ($sbom in $sbomFiles) {
             Write-Host "Uploading $($sbom.Name) to S3..."
             aws s3 cp $sbom.FullName "s3://$env:S3_BUCKET/$env:S3_DIRECTORY/$($sbom.Name)" `
@@ -636,7 +663,11 @@ jobs:
             -s3-directory "$S3_DIRECTORY")
 
           echo "Windows manifest: $MANIFEST"
-          echo "windows_manifest=$MANIFEST" >> "$GITHUB_OUTPUT"
+          {
+            echo "windows_manifest<<MANIFEST_EOF"
+            echo "$MANIFEST"
+            echo "MANIFEST_EOF"
+          } >> "$GITHUB_OUTPUT"
 
   goreleaser-docker:
     if: inputs.docker == true || inputs.lambda == true
@@ -877,10 +908,9 @@ jobs:
           done < "$DIGEST_FILE"
 
   record-connector-registry:
-    # require binaries, windows, and docker to complete before recording, since we include all in the manifest
-    # use explicit if condition to run when goreleaser-docker is skipped (docker=false && lambda=false)
+    # require binaries to succeed; windows and docker may be skipped (msi=false, docker=false && lambda=false)
     # see: https://docs.github.com/en/actions/using-jobs/using-conditions-to-control-job-execution
-    if: ${{ !cancelled() && needs.goreleaser-binaries.result == 'success' && needs.goreleaser-windows.result == 'success' }}
+    if: ${{ !cancelled() && needs.goreleaser-binaries.result == 'success' && (needs.goreleaser-windows.result == 'success' || needs.goreleaser-windows.result == 'skipped') }}
     needs: [determine-workflows-ref, goreleaser-binaries, goreleaser-windows, goreleaser-docker]
     permissions:
       id-token: write
@@ -998,6 +1028,38 @@ jobs:
             --bundle "./${CHECKSUMS_FILE}.provenance.sigstore.json" \
             "./${CHECKSUMS_FILE}" > /dev/null
           echo "✅ Checksums signed with provenance"
+
+      - name: Update manifest checksums hash
+        working-directory: _workflows/_output
+        env:
+          REPO_NAME: ${{ github.event.repository.name }}
+          VERSION: ${{ inputs.tag }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          # The unified checksums file may differ from the binaries-only version
+          # (when Windows hashes were appended). Update the manifest to match.
+          VERSION_NO_V="${VERSION#v}"
+          CHECKSUMS_FILE="${REPO_NAME}_${VERSION_NO_V}_checksums.txt"
+
+          NEW_SHA=$(sha256sum "./${CHECKSUMS_FILE}" | awk '{print $1}')
+          NEW_SIZE=$(wc -c < "./${CHECKSUMS_FILE}" | tr -d ' ')
+
+          echo "Updating manifest checksums hash: ${NEW_SHA} (${NEW_SIZE} bytes)"
+          jq --arg sha "$NEW_SHA" --argjson size "$NEW_SIZE" \
+            'if .assets.checksums then .assets.checksums.sha256 = $sha | .assets.checksums.sizeBytes = $size else . end' \
+            manifest.json > manifest.tmp && mv manifest.tmp manifest.json
+
+      - name: Re-sign manifest.json
+        working-directory: _workflows/_output
+        env: { COSIGN_EXPERIMENTAL: "1" }
+        shell: bash
+        run: |
+          set -euo pipefail
+          cosign sign-blob --yes "manifest.json" \
+            --output-signature "manifest.json.sig" \
+            --output-certificate "manifest.json.cert"
 
       - name: Upload checksums to S3
         working-directory: _workflows/_output

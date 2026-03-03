@@ -42,6 +42,7 @@ The release workflow accepts the following input parameters:
 | `docker`              | No       | `true`  | Whether to release with Docker image support                                |
 | `dockerfile_template` | No       | `""`    | Path to a custom Dockerfile in your repo (only valid when `lambda: false`)  |
 | `docker_extra_files`  | No       | `""`    | Comma-separated list of extra files/dirs to include in Docker build context |
+| `msi`                 | No       | `true`  | Whether to build MSI Windows installers                                     |
 | `msi_wxs_path`        | No       | `""`    | Path to custom WXS template for MSI installer (uses default if not set)     |
 
 2. Ensure your repository has the following secrets configured:
@@ -52,7 +53,7 @@ The release workflow accepts the following input parameters:
    - `AC_PASSWORD`: Apple Connect password
    - `AC_PROVIDER`: Apple Connect provider
    - `DATADOG_API_KEY`: Datadog API key for monitoring releases
-   - `GORELEASER_PRO_KEY`: GoReleaser Pro license key (for MSI builds)
+   - `GORELEASER_PRO_KEY`: GoReleaser Pro license key (required when `msi: true`, the default)
 
 3. Remove all GoReleaser, gon files, Dockerfile, and Dockerfile.lambda files from your connector repository, if they were previously created there.
 
@@ -125,6 +126,16 @@ Your custom WXS template can use GoReleaser template variables:
 The `${UPGRADE_CODE}` placeholder is automatically replaced with a deterministic UUID v5 generated from the repository name, ensuring consistent upgrade behavior across versions.
 
 See [baton-runner/ci/app.wxs](https://github.com/ConductorOne/baton-runner/blob/main/ci/app.wxs) for an example Windows Service installer.
+
+To disable MSI builds entirely (e.g., for connectors that don't need Windows installers):
+
+```yaml
+    with:
+      tag: ${{ github.ref_name }}
+      msi: false
+```
+
+When `msi: false`, the `GORELEASER_PRO_KEY` secret is not required.
 
 ## Available Actions
 

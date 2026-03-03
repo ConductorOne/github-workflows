@@ -25,6 +25,8 @@ Validates workflow inputs before proceeding:
 - Ensures tag is valid semver starting with 'v' (e.g., `v1.2.3`)
 - Ensures `dockerfile_template` is only used when `lambda: false`
 - Ensures `docker_extra_files` is only used when `dockerfile_template` is set
+- Ensures `msi_wxs_path` has no path traversal (`..` or absolute paths)
+- Ensures `GORELEASER_PRO_KEY` is provided when `msi: true`
 
 ### determine-workflows-ref
 

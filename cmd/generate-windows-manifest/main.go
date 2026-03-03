@@ -42,6 +42,13 @@ func main() {
 		os.Exit(1)
 	}
 
+	// Defense-in-depth: reject path traversal in S3 directory.
+	// The workflow's semver validation already prevents this, but validate here too.
+	if strings.Contains(s3Dir, "..") {
+		fmt.Fprintf(os.Stderr, "generate-windows-manifest: error: s3-directory must not contain '..': %s\n", s3Dir)
+		os.Exit(1)
+	}
+
 	baseURL := fmt.Sprintf("%s/%s", cdnBaseURL, s3Dir)
 	assets := make(map[string]*pb.Asset)
 
