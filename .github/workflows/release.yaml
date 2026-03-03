@@ -568,6 +568,51 @@ jobs:
           echo "Generated SBOM bundles: ${SIGNED_COUNT}"
           ls "${CALLER_DIST}"/*.sbom.sigstore.json 2>/dev/null || echo "ℹ️ No SBOM bundles generated (GoReleaser may not have generated SBOMs)"
 
+      # Temporary: verify MSI installs correctly on Windows (remove before merge)
+      - name: Test MSI installation
+        shell: pwsh
+        env:
+          REPO_NAME: ${{ github.event.repository.name }}
+        run: |
+          $msi = Get-ChildItem "_caller/dist/*.msi" | Select-Object -First 1
+          if (-not $msi) {
+            Write-Host "WARNING: No MSI found in dist, skipping install test"
+            exit 0
+          }
+
+          Write-Host "Testing MSI: $($msi.Name)"
+
+          # Install
+          $process = Start-Process msiexec -ArgumentList "/i", $msi.FullName, "/qn", "/l*v", "install.log" -Wait -PassThru
+          Write-Host "Install exit code: $($process.ExitCode)"
+          if ($process.ExitCode -ne 0) {
+            Get-Content "install.log" | Select-Object -Last 30
+            exit 1
+          }
+
+          # Verify binary exists
+          $installDir = "C:\Program Files\ConductorOne"
+          Write-Host "Install directory contents:"
+          Get-ChildItem $installDir -Recurse | ForEach-Object { Write-Host "  $($_.FullName)" }
+
+          $binary = Get-ChildItem $installDir -Filter "$env:REPO_NAME.exe" -Recurse | Select-Object -First 1
+          if (-not $binary) {
+            Write-Host "ERROR: $env:REPO_NAME.exe not found"
+            exit 1
+          }
+          Write-Host "Found: $($binary.FullName) ($($binary.Length) bytes)"
+
+          # Run binary
+          & $binary.FullName --help 2>&1 | Select-Object -First 5
+          Write-Host "Binary executes successfully"
+
+          # Uninstall
+          $process = Start-Process msiexec -ArgumentList "/x", $msi.FullName, "/qn" -Wait -PassThru
+          Write-Host "Uninstall exit code: $($process.ExitCode)"
+          if (-not (Test-Path $installDir)) {
+            Write-Host "Uninstall cleanup verified"
+          }
+
       - name: Configure AWS credentials via OIDC
         uses: aws-actions/configure-aws-credentials@v5
         with:
