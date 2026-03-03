@@ -137,6 +137,38 @@ To disable MSI builds entirely (e.g., for connectors that don't need Windows ins
 
 When `msi: false`, the `GORELEASER_PRO_KEY` secret is not required.
 
+## Verify Workflow
+
+Runs linting, tests, and optional regression verification. See [detailed documentation](docs/verify-workflow.md) for jobs, regression testing, and all options.
+
+### Usage
+
+```yaml
+name: Verify
+
+on:
+  pull_request:
+    types: [opened, reopened, synchronize]
+  push:
+    branches:
+      - main
+
+jobs:
+  verify:
+    uses: ConductorOne/github-workflows/.github/workflows/verify.yaml@v4
+    with:
+      ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      connector: baton-okta  # optional: enables regression testing
+    secrets:
+      RELENG_GITHUB_TOKEN: ${{ secrets.RELENG_GITHUB_TOKEN }}
+```
+
+| Parameter | Required | Default | Description |
+|-|-|-|-|
+| `ref` | Yes | - | Git ref to check out and verify |
+| `run_tests` | No | `true` | Run `go test` |
+| `connector` | No | `""` | Connector name — triggers [regression testing](docs/verify-workflow.md#regression) when set |
+
 ## Available Actions
 
 ### Get Baton
