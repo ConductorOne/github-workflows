@@ -94,6 +94,66 @@ COPY ${TARGETPLATFORM}/${REPO_NAME} /${REPO_NAME}
 
 **Note:** Use `docker_extra_files` to include additional files or directories (comma-separated) in the Docker build context. These are paths relative to your connector repository root.
 
+## Verify Workflow
+
+Runs linting, tests, and optional regression verification for connector repositories. See [detailed documentation](docs/verify-workflow.md) for all options.
+
+### Usage
+
+Create a `.github/workflows/verify.yaml` file:
+
+```yaml
+name: Verify
+
+on:
+  pull_request:
+    types: [opened, reopened, synchronize]
+  push:
+    branches:
+      - main
+
+jobs:
+  verify:
+    uses: ConductorOne/github-workflows/.github/workflows/verify.yaml@v4
+    with:
+      ref: ${{ github.event.pull_request.head.sha || github.sha }}
+    secrets: inherit
+```
+
+The verify workflow accepts the following parameters:
+
+| Parameter | Required | Default | Description |
+|-|-|-|-|
+| `ref` | Yes | - | Git ref to check out and verify |
+| `run_tests` | No | `true` | Whether to run `go test` |
+| `connector` | No | `""` | Connector name for regression testing (e.g., `baton-okta`). If set, runs baton-regression verification |
+
+### Jobs
+
+The workflow runs up to three jobs:
+
+1. **lint** — runs `golangci-lint` on the caller repo
+2. **test** — runs `go test` (skipped if `run_tests: false`)
+3. **regression** — runs [baton-regression](https://github.com/ConductorOne/baton-regression) verification (only when `connector` is provided)
+
+### Regression Testing
+
+When `connector` is provided, the verify workflow calls the baton-regression reusable workflow to run structural verification against the connector. This checks axiom compliance, branch coverage, and nil pointer safety.
+
+```yaml
+jobs:
+  verify:
+    uses: ConductorOne/github-workflows/.github/workflows/verify.yaml@v4
+    with:
+      ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      connector: baton-okta
+    secrets: inherit
+```
+
+The `secrets: inherit` directive is required so that `RELENG_GITHUB_TOKEN` flows through to the regression workflow for private repo access.
+
+To disable regression for a connector that isn't ready, omit the `connector` parameter (controlled via `run_regression: false` in baton-admin's `connectors.yaml`).
+
 ## Available Actions
 
 ### Get Baton
