@@ -122,8 +122,8 @@ jobs:
             ARGS="$ARGS -v"
           fi
 
-          echo "Running: ./bin/baton-regression verify $CONFIG_NAME $ARGS"
-          ./bin/baton-regression verify $CONFIG_NAME $ARGS 2>&1 | tee ./reports/verification.log
+          echo "Running: ./bin/baton-regression verify $ARGS $CONFIG_NAME"
+          ./bin/baton-regression verify $ARGS $CONFIG_NAME 2>&1 | tee ./reports/verification.log
           EXIT_CODE=${PIPESTATUS[0]}
 
           # Parse results from log
