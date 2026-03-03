@@ -207,16 +207,18 @@ DIFFS:
 **Prompt template:**
 
 ```
-You are checking whether a baton connector PR requires documentation updates.
+You are checking whether a baton connector PR requires documentation updates, and whether changed docs comply with the standard template.
 
-The file docs/connector.mdx documents the connector's capabilities, configuration, and credentials for end users. Your job is to determine if the code changes in this PR make the docs stale.
+The file docs/connector.mdx documents the connector's capabilities, configuration, and credentials for end users.
 
 Procedure:
 
 1. Check if docs/connector.mdx exists in the repo (use the Glob tool).
 2. If it does not exist, return: {"status": "no_docs"}
 3. If it exists, check whether it is included in the PR's changed files list below.
-4. If it is in the changed files, return: {"status": "docs_updated"}
+4. If it IS in the changed files, read the full docs/connector.mdx and check compliance against the standard below. Return:
+   {"status": "docs_updated", "findings": [{"id": "T1", "section": "<section>", "reason": "<what's wrong>"}]}
+   Or if fully compliant: {"status": "docs_updated", "findings": []}
 5. If it exists but is NOT in the changed files, check the code diffs below for:
 
 - D1: Capabilities table — Resource types added, removed, or changed sync/provision support (new resource builders, removed ResourceSyncers entries, added Grant/Revoke methods).
@@ -231,6 +233,43 @@ Return a JSON object:
 
 Or if none apply:
 {"status": "up_to_date"}
+
+## Documentation Template Standard
+
+When docs/connector.mdx is in the changed files, check it against these rules. Flag every violation.
+
+### Required Structure (T1)
+The document must have these sections in order:
+1. Frontmatter with title, og:title, description, og:description, sidebarTitle
+2. Capabilities table (with correct icon format: `<Icon icon="square-check" iconType="solid" color="#65DE23"/>`)
+3. Connector actions table (if the repo has action files in pkg/connector/*_actions.go or actions.go)
+4. Gather credentials section (with Steps component)
+5. Configure the connector section (with Cloud/Self-hosted Tabs)
+
+### Frontmatter (T2)
+Must include all of: title, og:title, description, og:description, sidebarTitle. Title format: "Set up a [Connector Name] connector".
+
+### Capabilities Table (T3)
+Must use the exact icon component for checkmarks. Each synced/provisioned resource gets a row. Provision column left blank if not supported.
+
+### Connector Actions (T4)
+If the repo has action files (pkg/connector/*_actions.go, actions.go), the docs must have a "Connector actions" section with a table listing action name, additional fields, and description.
+
+### Credentials Section (T5)
+Must use `<Steps>` and `<Step>` components. Must include a warning about required permissions. Scopes that enable provisioning must have a warning that they're optional.
+
+### Configuration Section (T6)
+Must have `<Tabs>` with both "Cloud-hosted" and "Self-hosted" tabs. Cloud tab navigates via **Integrations** > **Connectors**. Self-hosted tab searches for **Baton**. Self-hosted must have 3 steps: set up connector, create K8s config, deploy.
+
+### Self-Hosted YAML (T7)
+Secrets YAML must use `envFrom` with `secretRef` (not individual `env` entries with `valueFrom`). Deployment must have labels: `baton: true` and `baton-app: [name]`.
+
+### Writing Standards (T8)
+- UI elements must be bolded: **Settings**, **Save**, etc.
+- Navigation paths use ">": **Integrations** > **Connectors**
+- No contractions in instructions
+- Placeholders use angle brackets: `<Your API token>`
+- Both tabs end with: **That's it!** Your [App Name] connector is now pulling access data into ConductorOne.
 
 CHANGED FILES:
 <list of changed file paths>
@@ -250,7 +289,7 @@ DIFFS:
 3. **Validate each finding yourself.** You are the final judge — sub-agents can be wrong. Read the relevant code and drop any finding that is incorrect or not a real issue.
 4. **Cross-validate entity sources** (if provisioning changed): Read the Grant/Revoke code yourself to verify P1/P2 findings. This is the #1 bug.
 5. **Cross-validate PR feedback**: Check PR review comments against findings. Add any unaddressed items from human reviewers.
-6. Parse the docs-reviewer (Agent 4) result. If status is "stale", include each finding — stale docs are a release blocker.
+6. Parse the docs-reviewer (Agent 4) result. If status is "stale", include each finding — stale docs are a release blocker. If status is "docs_updated" with findings, include those too — docs must comply with the template standard.
 
 **Deliverable:** A merged list of all findings with duplicates removed. Print the count.
 
