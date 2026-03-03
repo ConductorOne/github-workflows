@@ -124,46 +124,54 @@ for platform in $(echo "$MANIFEST" | jq -r '.assets | keys[]'); do
     continue
   fi
   
-  # Check binary signature (.sig + .cert files)
-  SIG_FILE="${HREF}.sig"
-  CERT_FILE="${HREF}.cert"
-  if curl -sfL "$SIG_FILE" -o "$TEMP_DIR/${FILENAME}.sig" 2>/dev/null && \
-     curl -sfL "$CERT_FILE" -o "$TEMP_DIR/${FILENAME}.cert" 2>/dev/null; then
-    if cosign verify-blob \
-      --signature "$TEMP_DIR/${FILENAME}.sig" \
-      --certificate "$TEMP_DIR/${FILENAME}.cert" \
-      --certificate-oidc-issuer "$CERT_OIDC_ISSUER" \
-      --certificate-identity-regexp "$CERT_IDENTITY_REGEXP" \
-      "$TEMP_DIR/$FILENAME" > /dev/null 2>&1; then
-      pass "Binary signature verified: $platform"
-    else
-      fail "Binary signature verification failed: $platform"
-    fi
+  # Check binary signature (.sig + .cert files) - skip for MSI (derived artifact)
+  if [[ "$platform" == *-msi ]]; then
+    info "Skipping .sig/.cert check for $platform (derived artifact)"
   else
-    fail "Binary signature files missing: $platform (.sig or .cert)"
-  fi
-  
-  # Check provenance attestation
-  PROV_BUNDLE="${HREF}.provenance.sigstore.json"
-  if ! curl -sfL "$PROV_BUNDLE" -o "$TEMP_DIR/${FILENAME}.provenance.sigstore.json" 2>/dev/null; then
-    fail "Provenance bundle missing: $PROV_BUNDLE"
-  else
-    # Verify provenance
-    if cosign verify-blob-attestation \
-      --bundle "$TEMP_DIR/${FILENAME}.provenance.sigstore.json" \
-      --type https://slsa.dev/provenance/v1 \
-      --certificate-oidc-issuer "$CERT_OIDC_ISSUER" \
-      --certificate-identity-regexp "$CERT_IDENTITY_REGEXP" \
-      "$TEMP_DIR/$FILENAME" > /dev/null 2>&1; then
-      pass "Provenance verified: $platform"
+    SIG_FILE="${HREF}.sig"
+    CERT_FILE="${HREF}.cert"
+    if curl -sfL "$SIG_FILE" -o "$TEMP_DIR/${FILENAME}.sig" 2>/dev/null && \
+       curl -sfL "$CERT_FILE" -o "$TEMP_DIR/${FILENAME}.cert" 2>/dev/null; then
+      if cosign verify-blob \
+        --signature "$TEMP_DIR/${FILENAME}.sig" \
+        --certificate "$TEMP_DIR/${FILENAME}.cert" \
+        --certificate-oidc-issuer "$CERT_OIDC_ISSUER" \
+        --certificate-identity-regexp "$CERT_IDENTITY_REGEXP" \
+        "$TEMP_DIR/$FILENAME" > /dev/null 2>&1; then
+        pass "Binary signature verified: $platform"
+      else
+        fail "Binary signature verification failed: $platform"
+      fi
     else
-      fail "Provenance verification failed: $platform"
+      fail "Binary signature files missing: $platform (.sig or .cert)"
     fi
   fi
-  
-  # Check SBOM attestation (skip for checksums - only binary archives have SBOMs)
-  if [[ "$platform" == "checksums" ]]; then
-    info "Skipping SBOM check for checksums (not applicable)"
+
+  # Check provenance attestation (skip for MSI - it's derived from the same binary as the zip)
+  if [[ "$platform" == *-msi ]]; then
+    info "Skipping provenance check for $platform (derived from zip)"
+  else
+    PROV_BUNDLE="${HREF}.provenance.sigstore.json"
+    if ! curl -sfL "$PROV_BUNDLE" -o "$TEMP_DIR/${FILENAME}.provenance.sigstore.json" 2>/dev/null; then
+      fail "Provenance bundle missing: $PROV_BUNDLE"
+    else
+      # Verify provenance
+      if cosign verify-blob-attestation \
+        --bundle "$TEMP_DIR/${FILENAME}.provenance.sigstore.json" \
+        --type https://slsa.dev/provenance/v1 \
+        --certificate-oidc-issuer "$CERT_OIDC_ISSUER" \
+        --certificate-identity-regexp "$CERT_IDENTITY_REGEXP" \
+        "$TEMP_DIR/$FILENAME" > /dev/null 2>&1; then
+        pass "Provenance verified: $platform"
+      else
+        fail "Provenance verification failed: $platform"
+      fi
+    fi
+  fi
+
+  # Check SBOM attestation (skip for checksums and MSI - only binary archives have SBOMs)
+  if [[ "$platform" == "checksums" || "$platform" == *-msi ]]; then
+    info "Skipping SBOM check for $platform (not applicable)"
   else
     SBOM_BUNDLE="${HREF}.sbom.sigstore.json"
     if ! curl -sfL "$SBOM_BUNDLE" -o "$TEMP_DIR/${FILENAME}.sbom.sigstore.json" 2>/dev/null; then
