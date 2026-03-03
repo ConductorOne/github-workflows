@@ -81,7 +81,7 @@ jobs:
           test-results: test.json
   regression:
     if: inputs.connector != ''
-    uses: ./.github/workflows/regression.yml
+    uses: ./.github/workflows/regression.yaml
     with:
       connector: ${{ inputs.connector }}
     secrets:
