@@ -1,0 +1,209 @@
+name: Connector Regression
+
+on:
+  workflow_call:
+    inputs:
+      connector:
+        description: 'Connector name (e.g., okta, github, slack)'
+        required: true
+        type: string
+      connector-ref:
+        description: 'Git ref of the connector to test'
+        required: false
+        type: string
+        default: ''
+      connector-repo:
+        description: 'Repository containing the connector (defaults to caller)'
+        required: false
+        type: string
+        default: ''
+      max-probes:
+        description: 'Maximum verification probes'
+        required: false
+        type: number
+        default: 100
+      skip-nilcheck:
+        description: 'Skip static nil pointer analysis'
+        required: false
+        type: boolean
+        default: false
+      verbose:
+        description: 'Enable verbose output'
+        required: false
+        type: boolean
+        default: false
+    secrets:
+      RELENG_GITHUB_TOKEN:
+        description: 'GitHub token with access to private ConductorOne repos'
+        required: false
+    outputs:
+      status:
+        description: 'Verification status (pass/fail)'
+        value: ${{ jobs.verify.outputs.status }}
+      axiom-coverage:
+        description: 'Axiom coverage achieved'
+        value: ${{ jobs.verify.outputs.axiom-coverage }}
+      branch-coverage:
+        description: 'Branch coverage achieved'
+        value: ${{ jobs.verify.outputs.branch-coverage }}
+
+jobs:
+  verify:
+    name: Verify ${{ inputs.connector }}
+    runs-on: ubuntu-latest
+    outputs:
+      status: ${{ steps.verify.outputs.status }}
+      axiom-coverage: ${{ steps.verify.outputs.axiom-coverage }}
+      branch-coverage: ${{ steps.verify.outputs.branch-coverage }}
+
+    steps:
+      - name: Checkout baton-regression
+        uses: actions/checkout@v4
+        with:
+          repository: ConductorOne/baton-regression
+          token: ${{ secrets.RELENG_GITHUB_TOKEN || github.token }}
+          path: baton-regression
+
+      - name: Checkout connector
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ inputs.connector-repo || github.repository }}
+          ref: ${{ inputs.connector-ref || github.sha }}
+          path: connector
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: baton-regression/go.mod
+          cache-dependency-path: |
+            baton-regression/go.sum
+            connector/go.sum
+
+      - name: Build baton-regression
+        working-directory: baton-regression
+        run: |
+          go build -tags "sqlmock,satsolver" \
+            -o bin/baton-regression \
+            ./cmd/baton-regression
+
+      - name: Build connector
+        working-directory: connector
+        run: |
+          CONNECTOR_NAME="${{ inputs.connector }}"
+          # Handle both "okta" and "baton-okta" formats
+          if [[ ! "$CONNECTOR_NAME" =~ ^baton- ]]; then
+            BINARY_NAME="baton-$CONNECTOR_NAME"
+          else
+            BINARY_NAME="$CONNECTOR_NAME"
+          fi
+          go build -o ../baton-regression/bin/$BINARY_NAME ./cmd/$BINARY_NAME
+
+      - name: Run verification
+        id: verify
+        working-directory: baton-regression
+        run: |
+          set +e
+
+          CONNECTOR_NAME="${{ inputs.connector }}"
+          # Normalize connector name (remove baton- prefix for config lookup)
+          if [[ "$CONNECTOR_NAME" =~ ^baton- ]]; then
+            CONFIG_NAME="${CONNECTOR_NAME#baton-}"
+          else
+            CONFIG_NAME="$CONNECTOR_NAME"
+          fi
+
+          BINARY_NAME="baton-$CONFIG_NAME"
+
+          ARGS="--binary ./bin/$BINARY_NAME"
+          ARGS="$ARGS --source ../connector"
+          ARGS="$ARGS --max-probes ${{ inputs.max-probes }}"
+
+          if [ "${{ inputs.verbose }}" = "true" ]; then
+            ARGS="$ARGS -v"
+          fi
+
+          echo "Running: ./bin/baton-regression verify $CONFIG_NAME $ARGS"
+          ./bin/baton-regression verify $CONFIG_NAME $ARGS 2>&1 | tee ./reports/verification.log
+          EXIT_CODE=${PIPESTATUS[0]}
+
+          # Parse results from log
+          if grep -q "Verification PASSED" ./reports/verification.log; then
+            STATUS="pass"
+          else
+            STATUS="fail"
+          fi
+
+          # Extract coverage from log
+          AXIOM_COV=$(grep -oP 'Axiom Coverage: \K[\d.]+' ./reports/verification.log | tail -1 || echo "0")
+          BRANCH_COV=$(grep -oP 'Branch Coverage: \K[\d.]+' ./reports/verification.log | tail -1 || echo "0")
+
+          echo "status=$STATUS" >> $GITHUB_OUTPUT
+          echo "axiom-coverage=$AXIOM_COV" >> $GITHUB_OUTPUT
+          echo "branch-coverage=$BRANCH_COV" >> $GITHUB_OUTPUT
+
+          exit $EXIT_CODE
+
+      - name: Run nil pointer analysis
+        id: nilcheck
+        if: ${{ !inputs.skip-nilcheck }}
+        working-directory: baton-regression
+        run: |
+          set +e
+
+          CONNECTOR_NAME="${{ inputs.connector }}"
+          if [[ "$CONNECTOR_NAME" =~ ^baton- ]]; then
+            CONFIG_NAME="${CONNECTOR_NAME#baton-}"
+          else
+            CONFIG_NAME="$CONNECTOR_NAME"
+          fi
+
+          ./bin/baton-regression batch-nilcheck \
+            -connector $CONFIG_NAME \
+            -verbose > ./reports/nilcheck.log 2>&1
+
+          # Count warnings
+          WARNINGS=$(grep -c "\[WARN\]" ./reports/nilcheck.log || echo "0")
+          echo "Nil check found $WARNINGS connectors with warnings"
+
+          # Don't fail on nilcheck warnings - just report them
+          exit 0
+
+      - name: Upload reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: verification-report-${{ inputs.connector }}
+          path: |
+            baton-regression/reports/verification.log
+            baton-regression/reports/nilcheck.log
+          retention-days: 30
+
+      - name: Post summary
+        if: always()
+        working-directory: baton-regression
+        run: |
+          echo "## Verification Results: ${{ inputs.connector }}" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+
+          STATUS="${{ steps.verify.outputs.status }}"
+          AXIOM_COV="${{ steps.verify.outputs.axiom-coverage }}"
+          BRANCH_COV="${{ steps.verify.outputs.branch-coverage }}"
+
+          if [ "$STATUS" = "pass" ]; then
+            echo "**Status:** :white_check_mark: PASS" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "**Status:** :x: FAIL" >> $GITHUB_STEP_SUMMARY
+          fi
+
+          echo "**Axiom Coverage:** ${AXIOM_COV}%" >> $GITHUB_STEP_SUMMARY
+          echo "**Branch Coverage:** ${BRANCH_COV}%" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+
+          # Add nilcheck summary if available
+          if [ -f ./reports/nilcheck.log ]; then
+            WARNINGS=$(grep -c "\[WARN\]" ./reports/nilcheck.log || echo "0")
+            CLEAN=$(grep -c "\[CLEAN\]" ./reports/nilcheck.log || echo "0")
+            echo "### Static Analysis (Nil Check)" >> $GITHUB_STEP_SUMMARY
+            echo "- Clean: $CLEAN" >> $GITHUB_STEP_SUMMARY
+            echo "- Warnings: $WARNINGS" >> $GITHUB_STEP_SUMMARY
+          fi

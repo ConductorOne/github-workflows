@@ -22,7 +22,7 @@ Runs `go test -v -covermode=count -json ./...` and annotates results. Skipped if
 
 ### regression
 
-Calls the [baton-regression](https://github.com/ConductorOne/baton-regression) reusable workflow when `connector` is non-empty. The regression workflow:
+Runs the [baton-regression](https://github.com/ConductorOne/baton-regression) verification when `connector` is non-empty. The workflow is hosted in this repo but checks out baton-regression source from main at runtime. The regression job:
 
 1. Checks out baton-regression and the connector repo
 2. Builds both the regression tool and the connector binary
@@ -31,7 +31,7 @@ Calls the [baton-regression](https://github.com/ConductorOne/baton-regression) r
 5. Uploads verification reports as artifacts
 6. Posts a summary with coverage metrics
 
-The regression job requires `RELENG_GITHUB_TOKEN` to be passed from the caller workflow for private repo access.
+The regression job requires `RELENG_GITHUB_TOKEN` to be passed from the caller workflow to check out the private baton-regression repo.
 
 ## Inputs
 
