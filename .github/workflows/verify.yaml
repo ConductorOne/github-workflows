@@ -81,7 +81,7 @@ jobs:
           test-results: test.json
   regression:
     if: inputs.connector != ''
-    uses: ConductorOne/baton-regression/.github/workflows/regression.yml@main
+    uses: ./.github/workflows/regression.yaml
     with:
       connector: ${{ inputs.connector }}
     secrets:
