@@ -84,4 +84,5 @@ jobs:
     uses: ConductorOne/baton-regression/.github/workflows/regression.yml@main
     with:
       connector: ${{ inputs.connector }}
-    secrets: inherit
+    secrets:
+      RELENG_GITHUB_TOKEN: ${{ secrets.RELENG_GITHUB_TOKEN }}

@@ -159,7 +159,8 @@ jobs:
     with:
       ref: ${{ github.event.pull_request.head.sha || github.sha }}
       connector: baton-okta  # optional: enables regression testing
-    secrets: inherit
+    secrets:
+      RELENG_GITHUB_TOKEN: ${{ secrets.RELENG_GITHUB_TOKEN }}
 ```
 
 | Parameter | Required | Default | Description |

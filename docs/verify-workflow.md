@@ -31,7 +31,7 @@ Calls the [baton-regression](https://github.com/ConductorOne/baton-regression) r
 5. Uploads verification reports as artifacts
 6. Posts a summary with coverage metrics
 
-The regression job requires `secrets: inherit` in the caller workflow so that `RELENG_GITHUB_TOKEN` flows through for private repo access.
+The regression job requires `RELENG_GITHUB_TOKEN` to be passed from the caller workflow for private repo access.
 
 ## Inputs
 
@@ -66,7 +66,8 @@ jobs:
     uses: ConductorOne/github-workflows/.github/workflows/verify.yaml@v4
     with:
       ref: ${{ github.event.pull_request.head.sha || github.sha }}
-    secrets: inherit
+    secrets:
+      RELENG_GITHUB_TOKEN: ${{ secrets.RELENG_GITHUB_TOKEN }}
 ```
 
 ### With regression testing
@@ -78,7 +79,8 @@ jobs:
     with:
       ref: ${{ github.event.pull_request.head.sha || github.sha }}
       connector: baton-okta
-    secrets: inherit
+    secrets:
+      RELENG_GITHUB_TOKEN: ${{ secrets.RELENG_GITHUB_TOKEN }}
 ```
 
 ### Skip tests
@@ -90,7 +92,8 @@ jobs:
     with:
       ref: ${{ github.event.pull_request.head.sha || github.sha }}
       run_tests: false
-    secrets: inherit
+    secrets:
+      RELENG_GITHUB_TOKEN: ${{ secrets.RELENG_GITHUB_TOKEN }}
 ```
 
 ## Controlling Regression per Connector
