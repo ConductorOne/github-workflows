@@ -1,22 +1,28 @@
 on:
   pull_request_target:
+concurrency:
+  group: pr-review-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
 jobs:
   pr-review:
     if: github.repository != 'ConductorOne/github-workflows'
     runs-on: ubuntu-latest
     permissions:
+      actions: read
       contents: read
       pull-requests: write
       issues: write
     steps:
+    - name: PR Commit Count
+      run: echo "PR_FETCH_DEPTH=$(( ${{ github.event.pull_request.commits }} + 1 ))" >> "${GITHUB_ENV}"
     - name: Checkout PR head
-      uses: actions/checkout@v5
+      uses: actions/checkout@v6
       with:
         repository: ${{ github.event.pull_request.head.repo.full_name }}
         ref: ${{ github.event.pull_request.head.sha }}
-        fetch-depth: 0
+        fetch-depth: ${{ env.PR_FETCH_DEPTH }}
     - name: Checkout workflows repo
-      uses: actions/checkout@v5
+      uses: actions/checkout@v6
       with:
         repository: ConductorOne/github-workflows
         path: _workflows
@@ -34,6 +40,7 @@ jobs:
         use_sticky_comment: true
         track_progress: true
         include_fix_links: true
-        claude_args: --model claude-opus-4-6 --max-turns 100 --allowedTools "mcp__github_inline_comment__create_inline_comment,Bash(gh pr comment:*),Bash(gh pr diff:*),Bash(gh pr view:*)"
+        allowed_bots: "*"
+        claude_args: --model claude-opus-4-6 --max-turns 100 --allowedTools "Read,Glob,Grep,Task,Skill,mcp__github_inline_comment__create_inline_comment,Bash(gh pr comment:*),Bash(gh pr diff:*),Bash(gh pr view:*),Bash(gh pr review:*)"
         prompt: |
           Use the /pr-review skill to review this PR.
