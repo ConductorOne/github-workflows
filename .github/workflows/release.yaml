@@ -1177,6 +1177,128 @@ jobs:
 
           rm -f "$TMPFILE"
 
+      # ================================================================
+      # Registry API: record release with GitHub OIDC auth
+      # Gated on REGISTRY_API_URL repo/org variable -- skipped if not set.
+      # During migration, this runs alongside Lambda invocation (dual-write).
+      # The Lambda path remains the source of truth until cutover.
+      # ================================================================
+
+      - name: Checkout connector repo (for docs)
+        if: vars.REGISTRY_API_URL != ''
+        uses: actions/checkout@v5
+        with:
+          path: _connector
+
+      - name: Read connector documentation
+        if: vars.REGISTRY_API_URL != ''
+        id: read-docs
+        run: |
+          if [ -f "_connector/docs/connector.mdx" ]; then
+            echo "Found docs/connector.mdx"
+            echo "has_docs=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "No docs/connector.mdx found"
+            echo "has_docs=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Get GitHub OIDC token for registry API
+        if: vars.REGISTRY_API_URL != ''
+        id: registry-oidc
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const token = await core.getIDToken('connector-registry')
+            core.setSecret(token)
+            core.setOutput('token', token)
+
+      - name: Record release via registry API
+        if: steps.registry-oidc.outcome == 'success'
+        continue-on-error: true
+        env:
+          REGISTRY_URL: ${{ vars.REGISTRY_API_URL }}
+          MANIFEST_FILE: _workflows/_output/manifest.json
+        run: |
+          set -euo pipefail
+
+          # Read documentation content if available
+          DOCS=""
+          if [ "${{ steps.read-docs.outputs.has_docs }}" = "true" ]; then
+            DOCS=$(cat _connector/docs/connector.mdx)
+          fi
+
+          # Transform merged manifest assets: href->downloadUrl, signatureHref->signatureUrl, etc.
+          ASSETS=$(jq '(.assets // {}) | to_entries | map({
+            key: .key,
+            value: {
+              platform: .key,
+              filename: .value.filename,
+              mediaType: .value.mediaType,
+              sizeBytes: .value.sizeBytes,
+              sha256: .value.sha256,
+              downloadUrl: .value.href,
+              signatureUrl: .value.signatureHref,
+              certificateUrl: .value.certificateHref,
+              sbomUrl: .value.sbomHref
+            }
+          }) | from_entries' "$MANIFEST_FILE")
+
+          # Transform merged manifest images: map key becomes platform
+          IMAGES=$(jq '(.images // {}) | to_entries | map({
+            key: .key,
+            value: {
+              ref: .value.ref,
+              digest: .value.digest,
+              platform: .key
+            }
+          }) | from_entries' "$MANIFEST_FILE")
+
+          # Manifest-level signature URLs (from cosign sign-blob of manifest.json)
+          SIG_URL=$(jq -r '.signatureHref // ""' "$MANIFEST_FILE")
+          CERT_URL=$(jq -r '.certificateHref // ""' "$MANIFEST_FILE")
+
+          BODY=$(jq -n \
+            --arg org "${{ github.event.repository.owner.login }}" \
+            --arg name "${{ github.event.repository.name }}" \
+            --arg version "${{ inputs.tag }}" \
+            --arg repositoryUrl "https://github.com/${{ github.repository }}" \
+            --arg commitSha "${{ github.sha }}" \
+            --arg workflowRunId "${{ github.run_id }}" \
+            --arg documentation "$DOCS" \
+            --arg signatureUrl "$SIG_URL" \
+            --arg certificateUrl "$CERT_URL" \
+            --argjson assets "$ASSETS" \
+            --argjson images "$IMAGES" \
+            '{
+              org: $org,
+              name: $name,
+              version: $version,
+              repositoryUrl: $repositoryUrl,
+              commitSha: $commitSha,
+              workflowRunId: $workflowRunId,
+              documentation: $documentation,
+              signatureUrl: $signatureUrl,
+              certificateUrl: $certificateUrl,
+              assets: $assets,
+              images: $images
+            }')
+
+          HTTP_CODE=$(curl -s -o /tmp/registry-response.json -w "%{http_code}" \
+            -X POST "${REGISTRY_URL}/api/v1/ingest/release" \
+            -H "Authorization: Bearer ${{ steps.registry-oidc.outputs.token }}" \
+            -H "Content-Type: application/json" \
+            -d "$BODY")
+
+          if [ "$HTTP_CODE" = "200" ]; then
+            echo "Registry API record: success (HTTP 200)"
+          elif [ "$HTTP_CODE" = "409" ]; then
+            echo "Registry API record: already exists (HTTP 409) -- expected during dual-write migration"
+          else
+            echo "::error::Registry API record failed: HTTP $HTTP_CODE"
+            cat /tmp/registry-response.json
+            exit 1
+          fi
+
   record-lambda-registry:
     if: inputs.lambda == true
     # lambda releases are dependent on assets produced in the binaries and docker goreleaser jobs
