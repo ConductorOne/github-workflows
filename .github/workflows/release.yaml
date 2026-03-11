@@ -908,10 +908,14 @@ jobs:
           done < "$DIGEST_FILE"
 
   record-connector-registry:
-    # require binaries to succeed; windows and docker may be skipped (msi=false, docker=false && lambda=false)
+    # Legacy dist recording: manifest + S3 upload.
+    # Require binaries to succeed; windows and docker may be skipped based on inputs.
+    # Each optional job must succeed if it ran — a failure means incomplete release artifacts.
     # see: https://docs.github.com/en/actions/using-jobs/using-conditions-to-control-job-execution
-    if: ${{ !cancelled() && needs.goreleaser-binaries.result == 'success' && (needs.goreleaser-windows.result == 'success' || needs.goreleaser-windows.result == 'skipped') }}
+    if: ${{ !cancelled() && needs.goreleaser-binaries.result == 'success' && (needs.goreleaser-windows.result == 'success' || needs.goreleaser-windows.result == 'skipped') && (needs.goreleaser-docker.result == 'success' || needs.goreleaser-docker.result == 'skipped') }}
     needs: [determine-workflows-ref, goreleaser-binaries, goreleaser-windows, goreleaser-docker]
+    outputs:
+      merged_manifest: ${{ steps.export-manifest.outputs.merged_manifest }}
     permissions:
       id-token: write
       contents: read
@@ -1061,6 +1065,14 @@ jobs:
             --output-signature "manifest.json.sig" \
             --output-certificate "manifest.json.cert"
 
+      - name: Export final manifest for registry API
+        id: export-manifest
+        working-directory: _workflows/_output
+        run: |
+          # Output the final merged+signed manifest as a job output
+          # so record-registry-api can use the exact same manifest.
+          echo "merged_manifest=$(cat manifest.json | jq -c .)" >> "$GITHUB_OUTPUT"
+
       - name: Upload checksums to S3
         working-directory: _workflows/_output
         env:
@@ -1179,7 +1191,10 @@ jobs:
 
   record-lambda-registry:
     if: inputs.lambda == true
-    # lambda releases are dependent on assets produced in the binaries and docker goreleaser jobs
+    # Legacy per-connector Lambda invocation — records to connectorreleases DynamoDB.
+    # Only needs binaries + docker (container images). Does not gate on windows/msi since
+    # the Lambda pipeline only cares about container images. Will be removed after cutover
+    # to the registry API (record-connector-registry replaces this path).
     needs: [goreleaser-binaries, goreleaser-docker]
     permissions:
       id-token: write
@@ -1244,6 +1259,114 @@ jobs:
 
           rm -f "$TMPFILE"
 
+  # ================================================================
+  # Registry API: record release after all legacy recording completes.
+  # Depends on both dist (record-connector-registry) and lambda (record-lambda-registry)
+  # so the recording has the full picture: assets, images, config_schema, capabilities.
+  # continue-on-error on the recording step so failures don't block the release.
+  # Will become the sole recording path after cutover.
+  # ================================================================
+  record-registry-api:
+    if: ${{ !cancelled() && needs.record-connector-registry.result == 'success' && (needs.record-lambda-registry.result == 'success' || needs.record-lambda-registry.result == 'skipped') }}
+    needs: [determine-workflows-ref, record-connector-registry, record-lambda-registry]
+    permissions:
+      id-token: write
+      contents: read
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout connector workflows
+        uses: actions/checkout@v5
+        with:
+          path: _workflows
+          repository: ConductorOne/github-workflows
+          ref: ${{ needs.determine-workflows-ref.outputs.ref }}
+
+      - name: Set up Go for workflows
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: "_workflows/go.mod"
+
+      - name: Checkout connector repo
+        uses: actions/checkout@v5
+        with:
+          path: _connector
+
+      - name: Read connector documentation
+        id: read-docs
+        run: |
+          if [ -f "_connector/docs/connector.mdx" ]; then
+            echo "Found docs/connector.mdx"
+            echo "has_docs=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "No docs/connector.mdx found"
+            echo "has_docs=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Get GitHub OIDC token for registry API
+        id: registry-oidc
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const token = await core.getIDToken('connector-registry')
+            core.setSecret(token)
+            core.setOutput('token', token)
+
+      - name: Fetch release notes for changelog
+        if: steps.registry-oidc.outcome == 'success'
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh api "repos/${{ github.repository }}/releases/tags/${{ inputs.tag }}" --jq .body > /tmp/changelog.md || true
+
+      - name: Write merged manifest from dist recording job
+        working-directory: _workflows
+        env:
+          MERGED_MANIFEST: ${{ needs.record-connector-registry.outputs.merged_manifest }}
+        run: |
+          mkdir -p _output
+          echo "$MERGED_MANIFEST" | jq . > _output/manifest.json
+
+      - name: Record release via registry API
+        if: steps.registry-oidc.outcome == 'success'
+        working-directory: _workflows
+        env:
+          REGISTRY_API_TOKEN: ${{ steps.registry-oidc.outputs.token }}
+        run: |
+          DOCS_FLAG=""
+          if [ "${{ steps.read-docs.outputs.has_docs }}" = "true" ]; then
+            DOCS_FLAG="-docs ../_connector/docs/connector.mdx"
+          fi
+
+          CHANGELOG_FLAG=""
+          if [ -s /tmp/changelog.md ]; then
+            CHANGELOG_FLAG="-changelog /tmp/changelog.md"
+          fi
+
+          CONFIG_SCHEMA_FLAG=""
+          if [ -f "../_connector/config_schema.json" ]; then
+            CONFIG_SCHEMA_FLAG="-config-schema ../_connector/config_schema.json"
+          fi
+
+          CAPABILITIES_FLAG=""
+          if [ -f "../_connector/baton_capabilities.json" ]; then
+            CAPABILITIES_FLAG="-capabilities ../_connector/baton_capabilities.json"
+          fi
+
+          go run ./cmd/record-release \
+            -manifest _output/manifest.json \
+            -org "${{ github.event.repository.owner.login }}" \
+            -name "${{ github.event.repository.name }}" \
+            -version "${{ inputs.tag }}" \
+            -repository-url "https://github.com/${{ github.repository }}" \
+            -commit-sha "${{ github.sha }}" \
+            -workflow-run-id "${{ github.run_id }}" \
+            -registry-url "https://dist.conductorone.com" \
+            $DOCS_FLAG \
+            $CHANGELOG_FLAG \
+            $CONFIG_SCHEMA_FLAG \
+            $CAPABILITIES_FLAG
+
   verify-release:
     # Verify release artifacts and attestations after publishing
     # This job is not blocking - failures trigger Datadog notification but don't fail the release
@@ -1290,6 +1413,7 @@ jobs:
         goreleaser-docker,
         record-connector-registry,
         record-lambda-registry,
+        record-registry-api,
         verify-release,
       ]
     if: failure()
