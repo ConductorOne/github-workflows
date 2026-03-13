@@ -772,6 +772,10 @@ jobs:
           mkdir -p "${GENERATED_DIR}"
           envsubst '$REPO_NAME' < templates/.Dockerfile-lambda-template.tmpl | tee "${GENERATED_DIR}/Dockerfile.lambda"
           envsubst < templates/.goreleaser-docker-lambda-template.yaml.tmpl | tee "${GENERATED_DIR}/.goreleaser.lambda.yaml"
+          # Copy collector config into caller repo for GoReleaser extra_files.
+          # Exclude from git to avoid dirty working tree detection.
+          cp collector.yaml ../_caller/collector.yaml
+          echo "collector.yaml" >> ../_caller/.git/info/exclude
 
       - name: Docker Login
         if: inputs.docker == true
