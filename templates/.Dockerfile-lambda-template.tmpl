@@ -2,7 +2,7 @@
 # https://github.com/open-telemetry/opentelemetry-lambda/tree/main/collector
 FROM amazonlinux:2023 AS otel-layer
 RUN yum install -y unzip && yum clean all
-ADD https://github.com/open-telemetry/opentelemetry-lambda/releases/download/layer-collector%2F0.16.0/opentelemetry-collector-layer-arm64.zip /tmp/otel-layer.zip
+ADD https://github.com/open-telemetry/opentelemetry-lambda/releases/download/layer-collector%2F0.20.0/opentelemetry-collector-layer-arm64.zip /tmp/otel-layer.zip
 RUN unzip /tmp/otel-layer.zip -d /otel && \
     chmod +x /otel/extensions/collector && \
     rm -f /tmp/otel-layer.zip
