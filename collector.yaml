@@ -12,7 +12,7 @@ receivers:
 
 exporters:
   otlp:
-    endpoint: otel-collector.c1.internal:4317
+    endpoint: otel-collector:4317
     tls:
       insecure_skip_verify: true
 
