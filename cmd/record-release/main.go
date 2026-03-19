@@ -33,6 +33,7 @@ type RecordReleaseRequest struct {
 	CertificateURL string                   `json:"certificateUrl,omitempty"`
 	Assets         map[string]*ReleaseAsset `json:"assets,omitempty"`
 	Images         map[string]*ReleaseImage `json:"images,omitempty"`
+	ReleasedAt     string                   `json:"releasedAt,omitempty"`
 }
 
 // ReleaseAsset is the transformed asset for the registry API.
@@ -97,6 +98,8 @@ func main() {
 	flag.StringVar(&changelogPath, "changelog", "", "Path to a file containing release notes (optional)")
 	flag.StringVar(&configSchemaPath, "config-schema", "", "Path to config_schema.json file (optional)")
 	flag.StringVar(&capabilitiesPath, "capabilities", "", "Path to baton_capabilities.json file (optional)")
+	var releasedAt string
+	flag.StringVar(&releasedAt, "released-at", "", "Release creation timestamp in RFC 3339 format (optional, defaults to server time)")
 	flag.StringVar(&token, "token", "", "Bearer token (or set REGISTRY_API_TOKEN env var)")
 	flag.Parse()
 
@@ -245,6 +248,7 @@ func main() {
 		CertificateURL: manifest.GetCertificateHref(),
 		Assets:         assets,
 		Images:         images,
+		ReleasedAt:     releasedAt,
 	}
 
 	bodyBytes, err := json.Marshal(req)
