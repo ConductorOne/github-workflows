@@ -1311,13 +1311,17 @@ jobs:
             core.setSecret(token)
             core.setOutput('token', token)
 
-      - name: Fetch release notes for changelog
+      - name: Fetch release metadata
+        id: release-meta
         if: steps.registry-oidc.outcome == 'success'
         continue-on-error: true
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh api "repos/${{ github.repository }}/releases/tags/${{ inputs.tag }}" --jq .body > /tmp/changelog.md || true
+          RELEASE_JSON=$(gh api "repos/${{ github.repository }}/releases/tags/${{ inputs.tag }}" 2>/dev/null || echo '{}')
+          echo "$RELEASE_JSON" | jq -r '.body // empty' > /tmp/changelog.md || true
+          CREATED_AT=$(echo "$RELEASE_JSON" | jq -r '.created_at // empty')
+          echo "released_at=$CREATED_AT" >> "$GITHUB_OUTPUT"
 
       - name: Write merged manifest from dist recording job
         working-directory: _workflows
@@ -1353,6 +1357,11 @@ jobs:
             CAPABILITIES_FLAG="-capabilities ../_connector/baton_capabilities.json"
           fi
 
+          RELEASED_AT_FLAG=""
+          if [ -n "${{ steps.release-meta.outputs.released_at }}" ]; then
+            RELEASED_AT_FLAG="-released-at ${{ steps.release-meta.outputs.released_at }}"
+          fi
+
           go run ./cmd/record-release \
             -manifest _output/manifest.json \
             -org "${{ github.event.repository.owner.login }}" \
@@ -1365,7 +1374,8 @@ jobs:
             $DOCS_FLAG \
             $CHANGELOG_FLAG \
             $CONFIG_SCHEMA_FLAG \
-            $CAPABILITIES_FLAG
+            $CAPABILITIES_FLAG \
+            $RELEASED_AT_FLAG
 
   verify-release:
     # Verify release artifacts and attestations after publishing
