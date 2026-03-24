@@ -1331,6 +1331,23 @@ jobs:
           mkdir -p _output
           echo "$MERGED_MANIFEST" | jq . > _output/manifest.json
 
+      - name: Compile documentation to HTML
+        id: compile-docs
+        if: steps.read-docs.outputs.has_docs == 'true'
+        working-directory: _workflows
+        run: |
+          cd cmd/record-release && npm ci --ignore-scripts 2>/dev/null
+          cd ../..
+          node cmd/record-release/mdx-compile.mjs < ../_connector/docs/connector.mdx > /tmp/docs.html 2>/dev/null
+          if [ -s /tmp/docs.html ]; then
+            echo "has_html=true" >> "$GITHUB_OUTPUT"
+            echo "Compiled docs to HTML ($(wc -c < /tmp/docs.html) bytes)"
+          else
+            echo "has_html=false" >> "$GITHUB_OUTPUT"
+            echo "MDX compilation produced empty output, skipping HTML"
+          fi
+        continue-on-error: true
+
       - name: Record release via registry API
         if: steps.registry-oidc.outcome == 'success'
         working-directory: _workflows
@@ -1340,6 +1357,11 @@ jobs:
           DOCS_FLAG=""
           if [ "${{ steps.read-docs.outputs.has_docs }}" = "true" ]; then
             DOCS_FLAG="-docs ../_connector/docs/connector.mdx"
+          fi
+
+          DOCS_HTML_FLAG=""
+          if [ "${{ steps.compile-docs.outputs.has_html }}" = "true" ]; then
+            DOCS_HTML_FLAG="-docs-html /tmp/docs.html"
           fi
 
           CHANGELOG_FLAG=""
@@ -1372,6 +1394,7 @@ jobs:
             -workflow-run-id "${{ github.run_id }}" \
             -registry-url "https://dist.conductorone.com" \
             $DOCS_FLAG \
+            $DOCS_HTML_FLAG \
             $CHANGELOG_FLAG \
             $CONFIG_SCHEMA_FLAG \
             $CAPABILITIES_FLAG \
