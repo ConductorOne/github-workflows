@@ -79,6 +79,93 @@ jobs:
         uses: guyarb/golang-test-annotations@v0.8.0
         with:
           test-results: test.json
+  docs:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout caller repo
+        uses: actions/checkout@v5
+        with:
+          repository: ${{ github.event.repository.full_name }}
+          ref: ${{ inputs.ref }}
+          path: _caller
+
+      - name: Check for docs/connector.mdx
+        id: check-docs
+        run: |
+          if [ -f "_caller/docs/connector.mdx" ]; then
+            echo "has_docs=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "has_docs=false" >> "$GITHUB_OUTPUT"
+            echo "No docs/connector.mdx found, skipping MDX validation"
+          fi
+
+      - name: Setup Node
+        if: steps.check-docs.outputs.has_docs == 'true'
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Install MDX lint dependencies
+        if: steps.check-docs.outputs.has_docs == 'true'
+        run: |
+          mkdir -p /tmp/mdx-lint && cd /tmp/mdx-lint
+          npm init -y --silent > /dev/null 2>&1
+          npm install --silent @mdx-js/mdx@3 remark-gfm@4 remark-frontmatter@5 2>&1 | tail -n 1
+
+      - name: Validate MDX documentation
+        if: steps.check-docs.outputs.has_docs == 'true'
+        shell: bash {0}
+        run: |
+          # Inline MDX lint: compile-only (no eval), with component allowlist.
+          # Use bash {0} (no -e) so we can capture the exit code ourselves.
+          # Write the lint script to the install directory so ESM resolution works
+          cat > /tmp/mdx-lint/mdx-lint.mjs << 'LINT_EOF'
+          import { compile } from "@mdx-js/mdx";
+          import remarkGfm from "remark-gfm";
+          import remarkFrontmatter from "remark-frontmatter";
+
+          const ALLOWED = new Set([
+            "Tip","Warning","Note","Info","Icon",
+            "Frame","Card","Tabs","Tab","Steps","Step",
+          ]);
+
+          let content = "";
+          for await (const chunk of process.stdin) content += chunk;
+          if (!content.trim()) process.exit(0);
+
+          let compiled;
+          try {
+            compiled = String(await compile(content, {
+              outputFormat: "function-body",
+              remarkPlugins: [remarkGfm, remarkFrontmatter],
+            }));
+          } catch (err) {
+            console.error("mdx-lint: " + err.message);
+            process.exit(1);
+          }
+
+          const refs = [...compiled.matchAll(/_missingMdxReference\("([^"]+)"/g)]
+            .map(m => m[1])
+            .filter(name => !ALLOWED.has(name));
+          const unique = [...new Set(refs)];
+          if (unique.length > 0) {
+            for (const name of unique) {
+              console.error("mdx-lint: Unknown component <" + name + ">. Allowed: " + [...ALLOWED].join(", "));
+            }
+            process.exit(1);
+          }
+          LINT_EOF
+
+          node /tmp/mdx-lint/mdx-lint.mjs < _caller/docs/connector.mdx
+          LINT_RC=$?
+
+          if [ "$LINT_RC" -eq 0 ]; then
+            echo "MDX validation passed"
+          else
+            echo "::error file=docs/connector.mdx::MDX validation failed. See log output above for details."
+            exit 1
+          fi
+
   regression:
     if: inputs.connector != ''
     uses: ./.github/workflows/regression.yaml
