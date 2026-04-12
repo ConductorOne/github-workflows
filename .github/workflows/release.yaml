@@ -1320,8 +1320,8 @@ jobs:
         run: |
           RELEASE_JSON=$(gh api "repos/${{ github.repository }}/releases/tags/${{ inputs.tag }}" 2>/dev/null || echo '{}')
           echo "$RELEASE_JSON" | jq -r '.body // empty' > /tmp/changelog.md || true
-          CREATED_AT=$(echo "$RELEASE_JSON" | jq -r '.created_at // empty')
-          echo "released_at=$CREATED_AT" >> "$GITHUB_OUTPUT"
+          RELEASED_AT=$(echo "$RELEASE_JSON" | jq -r '.published_at // .created_at // empty')
+          echo "released_at=$RELEASED_AT" >> "$GITHUB_OUTPUT"
 
       - name: Write merged manifest from dist recording job
         working-directory: _workflows
