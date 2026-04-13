@@ -99,7 +99,7 @@ func main() {
 	flag.StringVar(&configSchemaPath, "config-schema", "", "Path to config_schema.json file (optional)")
 	flag.StringVar(&capabilitiesPath, "capabilities", "", "Path to baton_capabilities.json file (optional)")
 	var releasedAt string
-	flag.StringVar(&releasedAt, "released-at", "", "Release creation timestamp in RFC 3339 format (optional, defaults to server time)")
+	flag.StringVar(&releasedAt, "released-at", "", "Release publish timestamp in RFC 3339 format (optional, defaults to server time)")
 	flag.StringVar(&token, "token", "", "Bearer token (or set REGISTRY_API_TOKEN env var)")
 	flag.Parse()
 
