@@ -1320,6 +1320,8 @@ jobs:
         run: |
           RELEASE_JSON=$(gh api "repos/${{ github.repository }}/releases/tags/${{ inputs.tag }}" 2>/dev/null || echo '{}')
           echo "$RELEASE_JSON" | jq -r '.body // empty' > /tmp/changelog.md || true
+          # Prefer publish time; created_at can predate visibility for draft releases
+          # and for normal create-then-publish workflow runs.
           RELEASED_AT=$(echo "$RELEASE_JSON" | jq -r '.published_at // .created_at // empty')
           echo "released_at=$RELEASED_AT" >> "$GITHUB_OUTPUT"
 
