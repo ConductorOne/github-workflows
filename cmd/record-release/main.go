@@ -38,22 +38,31 @@ type RecordReleaseRequest struct {
 
 // ReleaseAsset is the transformed asset for the registry API.
 type ReleaseAsset struct {
-	Platform       string `json:"platform"`
-	Filename       string `json:"filename"`
-	MediaType      string `json:"mediaType"`
-	SizeBytes      int64  `json:"sizeBytes"`
-	Sha256         string `json:"sha256"`
-	DownloadURL    string `json:"downloadUrl"`
-	SignatureURL   string `json:"signatureUrl,omitempty"`
-	CertificateURL string `json:"certificateUrl,omitempty"`
-	SbomURL        string `json:"sbomUrl,omitempty"`
+	Platform       string                `json:"platform"`
+	Filename       string                `json:"filename"`
+	MediaType      string                `json:"mediaType"`
+	SizeBytes      int64                 `json:"sizeBytes"`
+	Sha256         string                `json:"sha256"`
+	DownloadURL    string                `json:"downloadUrl"`
+	SignatureURL   string                `json:"signatureUrl,omitempty"`
+	CertificateURL string                `json:"certificateUrl,omitempty"`
+	SbomURL        string                `json:"sbomUrl,omitempty"`
+	Attestations   []*ReleaseAttestation `json:"attestations,omitempty"`
 }
 
 // ReleaseImage is the transformed image for the registry API.
 type ReleaseImage struct {
-	Ref      string `json:"ref"`
-	Digest   string `json:"digest"`
-	Platform string `json:"platform"`
+	Ref          string                `json:"ref"`
+	Digest       string                `json:"digest"`
+	Platform     string                `json:"platform"`
+	Attestations []*ReleaseAttestation `json:"attestations,omitempty"`
+}
+
+// ReleaseAttestation is the registry API attestation shape.
+type ReleaseAttestation struct {
+	Type   string `json:"type"`
+	URL    string `json:"url,omitempty"`
+	Digest string `json:"digest,omitempty"`
 }
 
 // authTransport adds a Bearer token to every outgoing request.
@@ -71,14 +80,14 @@ func (t *authTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 
 func main() {
 	var (
-		manifestPath  string
-		docsPath      string
-		org           string
-		name          string
-		version       string
-		repositoryURL string
-		commitSha     string
-		workflowRunID string
+		manifestPath     string
+		docsPath         string
+		org              string
+		name             string
+		version          string
+		repositoryURL    string
+		commitSha        string
+		workflowRunID    string
 		registryURL      string
 		changelogPath    string
 		configSchemaPath string
@@ -206,31 +215,8 @@ func main() {
 		}
 	}
 
-	// Transform manifest assets: href->downloadUrl, signatureHref->signatureUrl, etc.
-	assets := make(map[string]*ReleaseAsset)
-	for platform, asset := range manifest.GetAssets() {
-		assets[platform] = &ReleaseAsset{
-			Platform:       platform,
-			Filename:       asset.GetFilename(),
-			MediaType:      asset.GetMediaType(),
-			SizeBytes:      asset.GetSizeBytes(),
-			Sha256:         asset.GetSha256(),
-			DownloadURL:    asset.GetHref(),
-			SignatureURL:   asset.GetSignatureHref(),
-			CertificateURL: asset.GetCertificateHref(),
-			SbomURL:        asset.GetSbomHref(),
-		}
-	}
-
-	// Transform manifest images: extract ref, digest, add platform from map key
-	images := make(map[string]*ReleaseImage)
-	for platform, image := range manifest.GetImages() {
-		images[platform] = &ReleaseImage{
-			Ref:      image.GetRef(),
-			Digest:   image.GetDigest(),
-			Platform: platform,
-		}
-	}
+	assets := transformAssets(manifest)
+	images := transformImages(manifest)
 
 	// Build request body
 	req := &RecordReleaseRequest{
@@ -312,4 +298,70 @@ func main() {
 		fmt.Fprintf(os.Stderr, "%s\n", string(respBody))
 		os.Exit(1)
 	}
+}
+
+func transformAssets(manifest *pb.Manifest) map[string]*ReleaseAsset {
+	assets := make(map[string]*ReleaseAsset)
+	for platform, asset := range manifest.GetAssets() {
+		assets[platform] = &ReleaseAsset{
+			Platform:       platform,
+			Filename:       asset.GetFilename(),
+			MediaType:      asset.GetMediaType(),
+			SizeBytes:      asset.GetSizeBytes(),
+			Sha256:         asset.GetSha256(),
+			DownloadURL:    asset.GetHref(),
+			SignatureURL:   asset.GetSignatureHref(),
+			CertificateURL: asset.GetCertificateHref(),
+			SbomURL:        asset.GetSbomHref(),
+			Attestations:   transformAttestations(asset.GetAttestations()),
+		}
+	}
+
+	return assets
+}
+
+func transformImages(manifest *pb.Manifest) map[string]*ReleaseImage {
+	images := make(map[string]*ReleaseImage)
+	for platform, image := range manifest.GetImages() {
+		images[platform] = &ReleaseImage{
+			Ref:          image.GetRef(),
+			Digest:       image.GetDigest(),
+			Platform:     platform,
+			Attestations: transformImageAttestations(manifest.GetImageAttestation()),
+		}
+	}
+
+	return images
+}
+
+// Asset-level attestations are the source of truth in the registry. The dist
+// exporter derives the manifest-level assetAttestation summary from them.
+func transformAttestations(in []*pb.AttestationDescriptor) []*ReleaseAttestation {
+	var out []*ReleaseAttestation
+	for _, att := range in {
+		if att.GetPredicateType() == "" || att.GetBundleHref() == "" {
+			continue
+		}
+		out = append(out, &ReleaseAttestation{
+			Type: att.GetPredicateType(),
+			URL:  att.GetBundleHref(),
+		})
+	}
+	return out
+}
+
+func transformImageAttestations(att *pb.AttestationDescriptor) []*ReleaseAttestation {
+	if att == nil || att.GetPredicateType() == "" {
+		return nil
+	}
+	// The registry stores image attestations per image. Dist manifests keep a
+	// single imageAttestation summary, and the exporter recreates that summary
+	// from the per-image entries.
+	//
+	// Image attestations are discovered through OCI referrers, so bundleHref is
+	// intentionally empty in current release manifests.
+	return []*ReleaseAttestation{{
+		Type: att.GetPredicateType(),
+		URL:  att.GetBundleHref(),
+	}}
 }
