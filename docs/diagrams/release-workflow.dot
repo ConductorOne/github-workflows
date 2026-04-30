@@ -23,9 +23,9 @@ digraph ReleaseWorkflow {
 
     docker [label="goreleaser-docker\n• multi-arch OCI images\n• Lambda image (arm64)\n• GHCR push\n• ECR Public push\n• image attestations", fillcolor="#ecfeff"];
 
-    record [label="record-connector-registry\n• merge manifests\n• sign manifest\n• upload manifest\n• invoke Lambda (release event)", fillcolor="#ecfeff"];
+    record [label="record-connector-registry\n• merge manifests\n• sign manifest\n• upload manifest/checksums", fillcolor="#ecfeff"];
 
-    record_lambda [label="record-lambda-registry\n• invoke Lambda (release event)", fillcolor="#ecfeff"];
+    registry_api [label="record-registry-api\n• attach docs + metadata\n• record release via API", fillcolor="#ecfeff"];
 
     verify [label="verify-release\n• validate artifacts\n• verify attestations", fillcolor="#f0fdf4"];
   }
@@ -34,6 +34,7 @@ digraph ReleaseWorkflow {
   s3 [label="S3\n• archives\n• attestations\n• manifest", fillcolor="#fef9c3"];
   ghcr [label="GHCR\n• images\n• OCI attestations", fillcolor="#f9fafb"];
   ecr [label="ECR Public\n• OCI images\n• Lambda image", fillcolor="#fef9c3"];
+  registry [label="Connector Registry API\n• release metadata\n• assets + images", fillcolor="#dcfce7"];
 
   // Flow
   connector_repo -> tag;
@@ -45,11 +46,12 @@ digraph ReleaseWorkflow {
   binaries -> record;
   windows -> record;
   docker -> record;
-  docker -> record_lambda;
   binaries -> s3 [label="artifacts"];
   windows -> s3 [label="artifacts"];
   docker -> ghcr [label="push"];
   docker -> ecr [label="push"];
   record -> s3 [label="manifest"];
+  record -> registry_api;
+  registry_api -> registry [label="record"];
   record -> verify;
 }

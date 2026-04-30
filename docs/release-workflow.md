@@ -14,7 +14,7 @@ When a tag is pushed to a connector repository, the shared release workflow:
 4. Signs all artifacts with Sigstore (keyless)
 5. Generates SLSA provenance attestations
 6. Publishes to S3, GHCR, and ECR Public
-7. Records the release in the connector registry
+7. Records the release in the connector registry API
 
 ## Jobs
 
@@ -74,13 +74,22 @@ Builds and publishes container images:
 
 ### record-connector-registry
 
-Finalizes the release:
+Finalizes distributable release artifacts:
 
 - Creates unified checksums file (all platforms)
 - Merges binary, Windows, and image manifests
 - Signs `manifest.json` and checksums with Sigstore
 - Uploads manifest and checksums to S3
-- Invokes release recording Lambda
+- Exposes the final manifest to the registry API recording job
+
+### record-registry-api
+
+Records release metadata in the connector registry API:
+
+- Reuses the exact manifest uploaded to S3
+- Includes documentation and changelog data when present
+- Includes `config_schema.json` and `baton_capabilities.json` when present
+- Sends release timestamp, commit SHA, and workflow run metadata
 
 ### verify-release
 
