@@ -1,4 +1,4 @@
-## Docker template for signed OCI images, pushes to GHCR and ECR public
+## Docker template for signed OCI images, pushes to ECR public
 ## GoReleaser >= 2.12 required for dockers_v2
 ##
 ## Template variables (substituted via envsubst):
@@ -18,25 +18,6 @@ builds:
       - amd64
       - arm64
 dockers_v2:
-  - id: ghcr
-    images:
-      - "ghcr.io/conductorone/${REPO_NAME}"
-    tags:
-      - "{{ .Version }}"
-      - latest
-    platforms:
-      - linux/amd64
-      - linux/arm64
-    dockerfile: ${DOCKERFILE_PATH}
-    ids:
-      - linux
-${EXTRA_FILES_BLOCK}    labels:
-      "org.opencontainers.image.created": "{{.Date}}"
-      "org.opencontainers.image.title": "{{.ProjectName}}"
-      "org.opencontainers.image.revision": "{{.FullCommit}}"
-      "org.opencontainers.image.version": "{{.Version}}"
-      "org.opencontainers.image.source": "{{ .GitURL }}"
-      "org.opencontainers.image.description": "ConductorOne Baton connector"
   - id: ecr-public
     images:
       - "public.ecr.aws/conductorone/${REPO_NAME}"

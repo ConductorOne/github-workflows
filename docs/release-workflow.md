@@ -13,7 +13,7 @@ When a tag is pushed to a connector repository, the shared release workflow:
 3. Builds multi-arch Docker images
 4. Signs all artifacts with Sigstore (keyless)
 5. Generates SLSA provenance attestations
-6. Publishes to S3, GHCR, and ECR Public
+6. Publishes to S3 and ECR Public
 7. Records the release in the connector registry API
 
 ## Jobs
@@ -66,11 +66,10 @@ Builds Windows zip and MSI installer:
 Builds and publishes container images:
 
 - Multi-arch Docker images (amd64/arm64)
-- Pushes to GHCR (public registry)
 - Pushes to ECR Public (for Lambda deployment)
 - Attaches provenance attestations to images (OCI referrers)
 
-**Outputs:** GHCR and ECR Public images with attached attestations
+**Outputs:** ECR Public images with attached attestations
 
 ### publish-release-manifest
 
@@ -161,7 +160,7 @@ cosign verify-attestation \
   --type https://slsa.dev/provenance/v1 \
   --certificate-oidc-issuer https://token.actions.githubusercontent.com \
   --certificate-identity-regexp 'https://github.com/ConductorOne/github-workflows/.github/workflows/release.yaml@.*' \
-  ghcr.io/conductorone/baton-foo@sha256:abc123
+  public.ecr.aws/conductorone/baton-foo@sha256:abc123
 ```
 
 ### Certificate Identity
@@ -249,7 +248,7 @@ The `scripts/validate-release-artifacts.sh` script validates:
 - Manifest structure and version match
 - All binary assets are downloadable
 - Provenance and SBOM attestations exist and verify
-- GHCR and ECR Public image attestations (if present)
+- ECR Public image attestations (if present)
 - Manifest signature (if present)
 
 ```bash
@@ -305,7 +304,6 @@ Test the MSI installer on an actual Windows machine:
 ### Common Issues
 
 - **Cosign version:** Ensure using latest cosign (`cosign version`)
-- **GHCR access:** May need `docker login ghcr.io` for image verification
 - **MSI UpgradeCode:** If upgrades don't work, verify UpgradeCode is consistent across versions
 
 ## Future Work

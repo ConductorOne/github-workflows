@@ -334,8 +334,8 @@ type Manifest_builder struct {
 	// assets is a map of platform/type identifiers to asset metadata.
 	// Keys are platform identifiers like "darwin-arm64", "linux-amd64", "windows-amd64", "checksums"
 	Assets map[string]*Asset
-	// images is a map of registry identifiers to container image metadata.
-	// Keys are registry identifiers like "ghcr", "ecrPublic"
+	// images is a map of image identifiers to container image metadata.
+	// Keys are image identifiers like "ecrPublic", "lambda-arm64"
 	Images map[string]*Image
 	// signature_href is the URL to the manifest signature file (manifest.json.sig)
 	SignatureHref *string
@@ -902,7 +902,7 @@ func (x *Image) ClearIsIndex() {
 type Image_builder struct {
 	_ [0]func() // Prevents comparability and use of unkeyed literals for the builder.
 
-	// ref is the tag-based image reference (e.g., "ghcr.io/conductorone/baton-ukg:0.1.98")
+	// ref is the tag-based image reference (e.g., "public.ecr.aws/conductorone/baton-ukg:0.1.98")
 	Ref *string
 	// digest is the immutable image digest in the format "sha256:<hex>" (e.g., "sha256:abc123...")
 	Digest *string
