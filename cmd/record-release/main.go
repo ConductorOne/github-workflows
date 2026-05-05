@@ -327,7 +327,7 @@ func transformImages(manifest *pb.Manifest) map[string]*ReleaseImage {
 			Ref:          image.GetRef(),
 			Digest:       image.GetDigest(),
 			Platform:     platform,
-			Attestations: transformImageAttestations(manifest.GetImageAttestation()),
+			Attestations: transformImageAttestations(image, manifest.GetImageAttestation()),
 		}
 	}
 
@@ -350,7 +350,10 @@ func transformAttestations(in []*pb.AttestationDescriptor) []*ReleaseAttestation
 	return out
 }
 
-func transformImageAttestations(att *pb.AttestationDescriptor) []*ReleaseAttestation {
+func transformImageAttestations(image *pb.Image, att *pb.AttestationDescriptor) []*ReleaseAttestation {
+	if image == nil || !image.GetIsIndex() {
+		return nil
+	}
 	if att == nil || att.GetPredicateType() == "" {
 		return nil
 	}

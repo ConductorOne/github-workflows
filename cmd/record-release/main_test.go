@@ -84,6 +84,25 @@ func TestTransformImagesAppliesManifestImageAttestation(t *testing.T) {
 	}
 }
 
+func TestTransformImagesSkipsAttestationForNonIndexImage(t *testing.T) {
+	isIndex := false
+	manifest := pb.Manifest_builder{
+		ImageAttestation: attestation(slsaProvenance, ""),
+		Images: map[string]*pb.Image{
+			"lambda-arm64": pb.Image_builder{
+				Ref:     strPtr("baton-example:1.2.3-arm64"),
+				Digest:  strPtr("sha256:lambda"),
+				IsIndex: &isIndex,
+			}.Build(),
+		},
+	}.Build()
+
+	images := transformImages(manifest)
+	if len(images["lambda-arm64"].Attestations) != 0 {
+		t.Fatalf("lambda attestations = %#v, want none", images["lambda-arm64"].Attestations)
+	}
+}
+
 func TestRecordReleaseRequestMarshalsAttestations(t *testing.T) {
 	req := &RecordReleaseRequest{
 		Org:     "example",

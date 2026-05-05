@@ -80,6 +80,7 @@ func main() {
 		unmarshalOpts := protojson.UnmarshalOptions{
 			DiscardUnknown: true,
 		}
+		hasAttestedImage := false
 		for key, imageJSON := range imagesMapJSON {
 			image := &pb.Image{}
 			if err := unmarshalOpts.Unmarshal(imageJSON, image); err != nil {
@@ -87,16 +88,21 @@ func main() {
 				os.Exit(1)
 			}
 			images[key] = image
+			if image.GetIsIndex() {
+				hasAttestedImage = true
+			}
 		}
 
-		// Set manifest-level image attestation descriptor
-		// Images use OCI referrers for attestation discovery, so bundle_href is omitted
-		attestationType := AttestationTypeInTotoV1
-		predicateType := PredicateTypeSLSAProvenanceV1
-		manifest.SetImageAttestation(pb.AttestationDescriptor_builder{
-			AttestationType: &attestationType,
-			PredicateType:   &predicateType,
-		}.Build())
+		if hasAttestedImage {
+			// Set manifest-level image attestation descriptor.
+			// OCI index images use referrers for attestation discovery, so bundle_href is omitted.
+			attestationType := AttestationTypeInTotoV1
+			predicateType := PredicateTypeSLSAProvenanceV1
+			manifest.SetImageAttestation(pb.AttestationDescriptor_builder{
+				AttestationType: &attestationType,
+				PredicateType:   &predicateType,
+			}.Build())
+		}
 
 		fmt.Fprintf(os.Stderr, "✅ Added %d images to manifest\n", len(images))
 	} else {
