@@ -47,6 +47,11 @@ on:
         type: string
         default: ""
         description: "Path to a custom WXS file in the caller repo for MSI generation (relative to repo root). If not provided, uses default template."
+      failure_mode:
+        required: false
+        type: string
+        default: ""
+        description: "Temporary PR validation hook. Forces a selected job to fail."
     secrets:
       RELENG_GITHUB_TOKEN:
         required: true
@@ -143,6 +148,12 @@ jobs:
       binaries_manifest: ${{ steps.generate-binaries-manifest.outputs.binaries_manifest }}
       binaries_checksums: ${{ steps.output-checksums.outputs.checksums }}
     steps:
+      - name: Test-only failure injection
+        if: inputs.failure_mode == 'binaries'
+        run: |
+          echo "::error::Injected binaries failure for PR validation"
+          exit 1
+
       - name: Checkout caller repo
         uses: actions/checkout@v5
         with:
@@ -391,6 +402,12 @@ jobs:
     outputs:
       windows_manifest: ${{ steps.generate-windows-manifest.outputs.windows_manifest }}
     steps:
+      - name: Test-only failure injection
+        if: inputs.failure_mode == 'windows'
+        run: |
+          echo "::error::Injected Windows failure for PR validation"
+          exit 1
+
       - name: Checkout caller repo
         uses: actions/checkout@v5
         with:
@@ -679,6 +696,12 @@ jobs:
       images_manifest: ${{ steps.extract-images.outputs.images_manifest }}
     runs-on: ubuntu-latest
     steps:
+      - name: Test-only failure injection
+        if: inputs.failure_mode == 'docker'
+        run: |
+          echo "::error::Injected Docker failure for PR validation"
+          exit 1
+
       - name: Checkout caller repo
         uses: actions/checkout@v5
         with:
@@ -921,6 +944,12 @@ jobs:
       contents: read
     runs-on: ubuntu-latest
     steps:
+      - name: Test-only failure injection
+        if: inputs.failure_mode == 'record'
+        run: |
+          echo "::error::Injected record failure for PR validation"
+          exit 1
+
       - name: Checkout connector workflows
         uses: actions/checkout@v5
         with:
