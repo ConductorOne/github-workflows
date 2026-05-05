@@ -72,7 +72,7 @@ Builds and publishes container images:
 
 **Outputs:** GHCR and ECR Public images with attached attestations
 
-### record-connector-registry
+### publish-release-manifest
 
 Finalizes distributable release artifacts:
 

@@ -250,7 +250,7 @@ jobs:
             ((PROVENANCE_COUNT++)) || true
           done
 
-          # Note: checksums provenance is generated in record-connector-registry job
+          # Note: checksums provenance is generated in publish-release-manifest job
           # after merging with Windows hashes
 
           echo "Generated provenance bundles: ${PROVENANCE_COUNT}"
@@ -911,7 +911,7 @@ jobs:
             echo "✅ Attested $URI"
           done < "$DIGEST_FILE"
 
-  record-connector-registry:
+  publish-release-manifest:
     # Release manifest publication: manifest + checksums + S3 upload.
     # Require binaries to succeed; windows and docker may be skipped based on inputs.
     # Each optional job must succeed if it ran — a failure means incomplete release artifacts.
@@ -1147,8 +1147,8 @@ jobs:
   # ================================================================
   record-registry-api:
     # Use !cancelled() so the explicit needs.result check controls skipped-job behavior.
-    if: ${{ !cancelled() && needs.record-connector-registry.result == 'success' }}
-    needs: [determine-workflows-ref, record-connector-registry]
+    if: ${{ !cancelled() && needs.publish-release-manifest.result == 'success' }}
+    needs: [determine-workflows-ref, publish-release-manifest]
     permissions:
       id-token: write
       contents: read
@@ -1208,7 +1208,7 @@ jobs:
       - name: Write merged manifest from manifest publication job
         working-directory: _workflows
         env:
-          MERGED_MANIFEST: ${{ needs.record-connector-registry.outputs.merged_manifest }}
+          MERGED_MANIFEST: ${{ needs.publish-release-manifest.outputs.merged_manifest }}
         run: |
           mkdir -p _output
           echo "$MERGED_MANIFEST" | jq . > _output/manifest.json
@@ -1262,8 +1262,8 @@ jobs:
   verify-release:
     # Verify release artifacts and attestations after publishing
     # This job is not blocking - failures trigger Datadog notification but don't fail the release
-    needs: [determine-workflows-ref, record-connector-registry]
-    if: always() && needs.record-connector-registry.result == 'success'
+    needs: [determine-workflows-ref, publish-release-manifest]
+    if: always() && needs.publish-release-manifest.result == 'success'
     permissions:
       id-token: write # Required for cosign verification
       contents: read
@@ -1303,7 +1303,7 @@ jobs:
         goreleaser-binaries,
         goreleaser-windows,
         goreleaser-docker,
-        record-connector-registry,
+        publish-release-manifest,
         record-registry-api,
         verify-release,
       ]

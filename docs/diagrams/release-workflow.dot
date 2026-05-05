@@ -23,7 +23,7 @@ digraph ReleaseWorkflow {
 
     docker [label="goreleaser-docker\n• multi-arch OCI images\n• Lambda image (arm64)\n• GHCR push\n• ECR Public push\n• image attestations", fillcolor="#ecfeff"];
 
-    record [label="record-connector-registry\n• merge manifests\n• sign manifest\n• upload manifest/checksums", fillcolor="#ecfeff"];
+    record [label="publish-release-manifest\n• merge manifests\n• sign manifest\n• upload manifest/checksums", fillcolor="#ecfeff"];
 
     registry_api [label="record-registry-api\n• attach docs + metadata\n• record release via API", fillcolor="#ecfeff"];
 
