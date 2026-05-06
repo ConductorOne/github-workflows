@@ -250,7 +250,7 @@ jobs:
             ((PROVENANCE_COUNT++)) || true
           done
 
-          # Note: checksums provenance is generated in record-connector-registry job
+          # Note: checksums provenance is generated in publish-release-manifest job
           # after merging with Windows hashes
 
           echo "Generated provenance bundles: ${PROVENANCE_COUNT}"
@@ -837,20 +837,24 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.RELENG_GITHUB_TOKEN }}
 
       - name: Set up Go for workflows
-        if: inputs.docker == true
+        if: inputs.docker == true || inputs.lambda == true
         uses: actions/setup-go@v6
         with:
           go-version-file: "_workflows/go.mod"
 
-      - name: Extract GHCR and ECR public image digests from OCI assets
+      - name: Extract image digests from GoReleaser assets
         id: extract-images
-        if: inputs.docker == true
+        if: inputs.docker == true || inputs.lambda == true
         working-directory: _workflows
         env:
           CALLER_DIST_OCI: ../_caller/dist/oci
+          CALLER_DIST_LAMBDA: ../_caller/dist/lambda
         run: |
           IMAGES_JSON=$(go run ./cmd/extract-images \
+            -include-public=${{ inputs.docker }} \
+            -include-lambda=${{ inputs.lambda }} \
             -asset-dir "${CALLER_DIST_OCI}" \
+            -lambda-asset-dir "${CALLER_DIST_LAMBDA}" \
             -repo-name "${{ github.event.repository.name }}" \
             -tag "${{ inputs.tag }}")
 
@@ -907,8 +911,8 @@ jobs:
             echo "✅ Attested $URI"
           done < "$DIGEST_FILE"
 
-  record-connector-registry:
-    # Legacy dist recording: manifest + S3 upload.
+  publish-release-manifest:
+    # Release manifest publication: manifest + checksums + S3 upload.
     # Require binaries to succeed; windows and docker may be skipped based on inputs.
     # Each optional job must succeed if it ran — a failure means incomplete release artifacts.
     # see: https://docs.github.com/en/actions/using-jobs/using-conditions-to-control-job-execution
@@ -1137,138 +1141,14 @@ jobs:
               --content-type "application/octet-stream"
           fi
 
-      - name: Invoke Lambda with retries
-        run: |
-          set +e    # Disable default fail-fast to support retries
-          if [[ "$ACTIONS_STEP_DEBUG" == "true" ]]; then
-            set -x  # Debug logging
-          fi
-
-          TMPFILE=$(mktemp)
-          MAX_RETRIES=5
-          RETRY_DELAY=10  # seconds
-
-          for ((i=1; i<=MAX_RETRIES; i++)); do
-            echo "Attempt $i to invoke Lambda..."
-
-            RESPONSE=$(aws lambda invoke \
-              --function-name "${{ github.event.repository.owner.login }}-${{ github.event.repository.name }}-artifact-releases" \
-              --payload "{\"tag\":\"${{ inputs.tag }}\"}" \
-              --cli-binary-format raw-in-base64-out \
-              "$TMPFILE" 2>&1)
-            EXIT_CODE=$?
-
-            echo "AWS CLI exited with code: $EXIT_CODE"
-            cat "$TMPFILE"
-
-            STATUS_CODE=$(jq -r '.statusCode' < "$TMPFILE" 2>/dev/null)
-
-            if [[ $EXIT_CODE -eq 0 && "$STATUS_CODE" == "200" ]]; then
-              echo "Lambda invoked successfully."
-              break
-
-            elif [[ "$RESPONSE" == *"CodeArtifactUserPendingException"* ]]; then
-              echo "Lambda not ready (CodeArtifactUserPendingException)."
-
-              if [[ $i -lt $MAX_RETRIES ]]; then
-                WAIT_TIME=$((i * RETRY_DELAY))
-                echo "Retrying in $WAIT_TIME seconds..."
-                sleep "$WAIT_TIME"
-              else
-                echo "Lambda still not ready after $MAX_RETRIES attempts."
-                rm -f "$TMPFILE"
-                exit 1
-              fi
-
-            else
-              echo "Lambda invoke failed with unexpected error: $RESPONSE"
-              rm -f "$TMPFILE"
-              exit 1
-            fi
-          done
-
-          rm -f "$TMPFILE"
-
-  record-lambda-registry:
-    if: inputs.lambda == true
-    # Legacy per-connector Lambda invocation — records to connectorreleases DynamoDB.
-    # Only needs binaries + docker (container images). Does not gate on windows/msi since
-    # the Lambda pipeline only cares about container images. Will be removed after cutover
-    # to the registry API (record-connector-registry replaces this path).
-    needs: [goreleaser-binaries, goreleaser-docker]
-    permissions:
-      id-token: write
-      contents: read
-    runs-on: ubuntu-latest
-    steps:
-      - name: Configure AWS credentials via OIDC
-        uses: aws-actions/configure-aws-credentials@v5
-        with:
-          role-to-assume: "arn:aws:iam::168442440833:role/GitHubActionsECRPushRole-${{ github.event.repository.name }}"
-          aws-region: us-west-2
-
-      - name: Invoke Lambda with retries
-        run: |
-          set +e    # Disable default fail-fast to support retries
-          if [[ "$ACTIONS_STEP_DEBUG" == "true" ]]; then
-            set -x  # Debug logging
-          fi
-
-          TMPFILE=$(mktemp)
-          MAX_RETRIES=5
-          RETRY_DELAY=10  # seconds
-
-          for ((i=1; i<=MAX_RETRIES; i++)); do
-            echo "Attempt $i to invoke Lambda..."
-
-            RESPONSE=$(aws lambda invoke \
-              --function-name "${{ github.event.repository.name }}-releases" \
-              --payload "{\"tag\":\"${{ inputs.tag }}\"}" \
-              --cli-binary-format raw-in-base64-out \
-              "$TMPFILE" 2>&1)
-            EXIT_CODE=$?
-
-            echo "AWS CLI exited with code: $EXIT_CODE"
-            cat "$TMPFILE"
-
-            STATUS_CODE=$(jq -r '.statusCode' < "$TMPFILE" 2>/dev/null)
-
-            if [[ $EXIT_CODE -eq 0 && "$STATUS_CODE" == "200" ]]; then
-              echo "Lambda invoked successfully."
-              break
-
-            elif [[ "$RESPONSE" == *"CodeArtifactUserPendingException"* ]]; then
-              echo "Lambda not ready (CodeArtifactUserPendingException)."
-
-              if [[ $i -lt $MAX_RETRIES ]]; then
-                WAIT_TIME=$((i * RETRY_DELAY))
-                echo "Retrying in $WAIT_TIME seconds..."
-                sleep "$WAIT_TIME"
-              else
-                echo "Lambda still not ready after $MAX_RETRIES attempts."
-                rm -f "$TMPFILE"
-                exit 1
-              fi
-
-            else
-              echo "Lambda invoke failed with unexpected error: $RESPONSE"
-              rm -f "$TMPFILE"
-              exit 1
-            fi
-          done
-
-          rm -f "$TMPFILE"
-
   # ================================================================
-  # Registry API: record release after all legacy recording completes.
-  # Depends on both dist (record-connector-registry) and lambda (record-lambda-registry)
-  # so the recording has the full picture: assets, images, config_schema, capabilities.
-  # continue-on-error on the recording step so failures don't block the release.
-  # Will become the sole recording path after cutover.
+  # Registry API: record release after release manifest publication.
+  # This is the sole release metadata recording path.
   # ================================================================
   record-registry-api:
-    if: ${{ !cancelled() && needs.record-connector-registry.result == 'success' && (needs.record-lambda-registry.result == 'success' || needs.record-lambda-registry.result == 'skipped') }}
-    needs: [determine-workflows-ref, record-connector-registry, record-lambda-registry]
+    # Use !cancelled() so the explicit needs.result check controls skipped-job behavior.
+    if: ${{ !cancelled() && needs.publish-release-manifest.result == 'success' }}
+    needs: [determine-workflows-ref, publish-release-manifest]
     permissions:
       id-token: write
       contents: read
@@ -1325,10 +1205,10 @@ jobs:
           RELEASED_AT=$(echo "$RELEASE_JSON" | jq -r '.published_at // .created_at // empty')
           echo "released_at=$RELEASED_AT" >> "$GITHUB_OUTPUT"
 
-      - name: Write merged manifest from dist recording job
+      - name: Write merged manifest from manifest publication job
         working-directory: _workflows
         env:
-          MERGED_MANIFEST: ${{ needs.record-connector-registry.outputs.merged_manifest }}
+          MERGED_MANIFEST: ${{ needs.publish-release-manifest.outputs.merged_manifest }}
         run: |
           mkdir -p _output
           echo "$MERGED_MANIFEST" | jq . > _output/manifest.json
@@ -1382,8 +1262,8 @@ jobs:
   verify-release:
     # Verify release artifacts and attestations after publishing
     # This job is not blocking - failures trigger Datadog notification but don't fail the release
-    needs: [determine-workflows-ref, record-connector-registry]
-    if: always() && needs.record-connector-registry.result == 'success'
+    needs: [determine-workflows-ref, publish-release-manifest]
+    if: always() && needs.publish-release-manifest.result == 'success'
     permissions:
       id-token: write # Required for cosign verification
       contents: read
@@ -1423,8 +1303,7 @@ jobs:
         goreleaser-binaries,
         goreleaser-windows,
         goreleaser-docker,
-        record-connector-registry,
-        record-lambda-registry,
+        publish-release-manifest,
         record-registry-api,
         verify-release,
       ]
