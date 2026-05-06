@@ -9,7 +9,6 @@
 # - Binary assets exist and are downloadable
 # - Provenance attestations exist and verify with cosign
 # - SBOM attestations exist and verify with cosign
-# - GHCR image attestation (if present)
 # - ECR Public image attestation (if present)
 #
 # Exit codes:
@@ -195,26 +194,9 @@ for platform in $(echo "$MANIFEST" | jq -r '.assets | keys[]'); do
   rm -f "$TEMP_DIR/$FILENAME"
 done
 
-# 4. Validate GHCR image attestation (if present)
 echo ""
 echo "=== Container Image Validation ==="
-GHCR_URI=$(echo "$MANIFEST" | jq -r '.images.ghcr.uri // empty')
-if [[ -n "$GHCR_URI" ]]; then
-  info "Validating GHCR image: $GHCR_URI"
-  if cosign verify-attestation \
-    --type https://slsa.dev/provenance/v1 \
-    --certificate-oidc-issuer "$CERT_OIDC_ISSUER" \
-    --certificate-identity-regexp "$CERT_IDENTITY_REGEXP" \
-    "$GHCR_URI" > /dev/null 2>&1; then
-    pass "GHCR image attestation verified"
-  else
-    fail "GHCR image attestation verification failed"
-  fi
-else
-  warn "No GHCR image in manifest (docker may have been skipped)"
-fi
-
-# 5. Validate ECR Public image attestation (if present)
+# 4. Validate ECR Public image attestation (if present)
 ECR_URI=$(echo "$MANIFEST" | jq -r '.images.ecrPublic.uri // empty')
 if [[ -n "$ECR_URI" ]]; then
   info "Validating ECR Public image: $ECR_URI"
@@ -231,7 +213,7 @@ else
   warn "No ECR Public image in manifest (docker may have been skipped)"
 fi
 
-# 6. Validate manifest signature (if present)
+# 5. Validate manifest signature (if present)
 echo ""
 echo "=== Manifest Signature Validation ==="
 MANIFEST_SIG_URL="${BASE_URL}/${ORG_REPO}/${VERSION}/manifest.json.sig"

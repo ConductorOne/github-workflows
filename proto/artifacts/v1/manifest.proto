@@ -32,8 +32,8 @@ message Manifest {
   // Keys are platform identifiers like "darwin-arm64", "linux-amd64", "windows-amd64", "checksums"
   map<string, Asset> assets = 6;
 
-  // images is a map of registry identifiers to container image metadata.
-  // Keys are registry identifiers like "ghcr", "ecrPublic"
+  // images is a map of image identifiers to container image metadata.
+  // Keys are image identifiers like "ecrPublic", "lambda-arm64"
   map<string, Image> images = 7;
 
   // signature_href is the URL to the manifest signature file (manifest.json.sig)
@@ -88,7 +88,7 @@ message Asset {
 
 // Image represents metadata for a container image (digest-first).
 message Image {
-  // ref is the tag-based image reference (e.g., "ghcr.io/conductorone/baton-ukg:0.1.98")
+  // ref is the tag-based image reference (e.g., "public.ecr.aws/conductorone/baton-ukg:0.1.98")
   string ref = 1;
 
   // digest is the immutable image digest in the format "sha256:<hex>" (e.g., "sha256:abc123...")

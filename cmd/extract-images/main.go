@@ -31,7 +31,7 @@ func main() {
 	flag.StringVar(&lambdaDigestFile, "lambda-digest-file", "", "Path to Lambda digest file (if not provided, will be constructed from repo-name, tag, and lambda-asset-dir)")
 	flag.StringVar(&repoName, "repo-name", "", "Repository name")
 	flag.StringVar(&tag, "tag", "", "Release tag (e.g., v0.1.65 or 0.1.65)")
-	flag.BoolVar(&includePublic, "include-public", true, "Extract GHCR and ECR public image metadata")
+	flag.BoolVar(&includePublic, "include-public", true, "Extract ECR public image metadata")
 	flag.BoolVar(&includeLambda, "include-lambda", false, "Extract private Lambda image metadata")
 	flag.Parse()
 
@@ -65,17 +65,11 @@ func main() {
 			os.Exit(1)
 		}
 
-		foundGHCR, foundECR := extractPublicImages(content, version, images)
-		if !foundGHCR && !foundECR {
-			fmt.Fprintf(os.Stderr, "extract-images: ::error::Could not find GHCR or ECR public index image in %s\n", digestFile)
+		foundECR := extractPublicImages(content, version, images)
+		if !foundECR {
+			fmt.Fprintf(os.Stderr, "extract-images: ::error::Could not find ECR public index image in %s\n", digestFile)
 			fmt.Fprintf(os.Stderr, "extract-images: Contents of digest file:\n%s\n", content)
 			os.Exit(1)
-		}
-		if !foundGHCR {
-			fmt.Fprintf(os.Stderr, "extract-images: ::warning::Could not find GHCR index image in %s\n", digestFile)
-		}
-		if !foundECR {
-			fmt.Fprintf(os.Stderr, "extract-images: ::warning::Could not find ECR public index image in %s\n", digestFile)
 		}
 	}
 
@@ -118,8 +112,8 @@ func digestPath(assetDir, repoName, version string) string {
 	return fmt.Sprintf("%s/%s_%s_digests.txt", assetDir, repoName, version)
 }
 
-func extractPublicImages(content []byte, version string, images map[string]*pb.Image) (bool, bool) {
-	var foundGHCR, foundECR bool
+func extractPublicImages(content []byte, version string, images map[string]*pb.Image) bool {
+	var foundECR bool
 	for _, line := range parseDigestLines(content) {
 		// Only capture the multi-arch index images (tagged with just version, not version-arch)
 		if !strings.HasSuffix(line.ref, fmt.Sprintf(":%s", version)) {
@@ -131,17 +125,7 @@ func extractPublicImages(content []byte, version string, images map[string]*pb.I
 			continue
 		}
 
-		if strings.HasPrefix(line.ref, "ghcr.io/conductorone/") {
-			isIndex := true
-			images["ghcr"] = pb.Image_builder{
-				Ref:     &line.ref,
-				Digest:  &line.digest,
-				Tag:     &version,
-				Uri:     &uri,
-				IsIndex: &isIndex,
-			}.Build()
-			foundGHCR = true
-		} else if strings.HasPrefix(line.ref, "public.ecr.aws/conductorone/") {
+		if strings.HasPrefix(line.ref, "public.ecr.aws/conductorone/") {
 			isIndex := true
 			images["ecrPublic"] = pb.Image_builder{
 				Ref:     &line.ref,
@@ -154,7 +138,7 @@ func extractPublicImages(content []byte, version string, images map[string]*pb.I
 		}
 	}
 
-	return foundGHCR, foundECR
+	return foundECR
 }
 
 func extractLambdaImage(content []byte, repoName, version string, images map[string]*pb.Image) bool {

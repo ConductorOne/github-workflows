@@ -67,11 +67,6 @@ func TestTransformImagesAppliesManifestImageAttestation(t *testing.T) {
 				Digest:  strPtr("sha256:ecr"),
 				IsIndex: &isIndex,
 			}.Build(),
-			"ghcr": pb.Image_builder{
-				Ref:     strPtr("ghcr.io/example/baton-example:v1.2.3"),
-				Digest:  strPtr("sha256:ghcr"),
-				IsIndex: &isIndex,
-			}.Build(),
 		},
 	}.Build()
 
@@ -117,8 +112,8 @@ func TestRecordReleaseRequestMarshalsAttestations(t *testing.T) {
 			},
 		},
 		Images: map[string]*ReleaseImage{
-			"ghcr": {
-				Platform:     "ghcr",
+			"ecrPublic": {
+				Platform:     "ecrPublic",
 				Attestations: []*ReleaseAttestation{{Type: slsaProvenance}},
 			},
 		},
@@ -147,11 +142,11 @@ func TestRecordReleaseRequestMarshalsAttestations(t *testing.T) {
 	if got.Assets["linux-amd64"].Attestations[0].URL == "" {
 		t.Fatal("asset attestation URL was not marshaled")
 	}
-	if len(got.Images["ghcr"].Attestations) != 1 {
-		t.Fatalf("image attestations = %#v, want one entry", got.Images["ghcr"].Attestations)
+	if len(got.Images["ecrPublic"].Attestations) != 1 {
+		t.Fatalf("image attestations = %#v, want one entry", got.Images["ecrPublic"].Attestations)
 	}
-	if got.Images["ghcr"].Attestations[0].URL != "" {
-		t.Fatalf("image attestation URL = %q, want empty", got.Images["ghcr"].Attestations[0].URL)
+	if got.Images["ecrPublic"].Attestations[0].URL != "" {
+		t.Fatalf("image attestation URL = %q, want empty", got.Images["ecrPublic"].Attestations[0].URL)
 	}
 }
 

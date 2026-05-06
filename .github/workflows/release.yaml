@@ -773,14 +773,6 @@ jobs:
           envsubst '$REPO_NAME' < templates/.Dockerfile-lambda-template.tmpl | tee "${GENERATED_DIR}/Dockerfile.lambda"
           envsubst < templates/.goreleaser-docker-lambda-template.yaml.tmpl | tee "${GENERATED_DIR}/.goreleaser.lambda.yaml"
 
-      - name: Docker Login
-        if: inputs.docker == true
-        uses: docker/login-action@v3
-        with:
-          registry: ghcr.io
-          username: ${{ github.repository_owner }}
-          password: ${{ secrets.RELENG_GITHUB_TOKEN }}
-
       - name: Set up QEMU
         if: inputs.docker == true || inputs.lambda == true
         uses: docker/setup-qemu-action@v3
@@ -1267,7 +1259,6 @@ jobs:
     permissions:
       id-token: write # Required for cosign verification
       contents: read
-      packages: read # Required for GHCR image verification
     runs-on: ubuntu-latest
     steps:
       - name: Checkout shared workflows
@@ -1279,14 +1270,6 @@ jobs:
 
       - name: Install cosign
         uses: sigstore/cosign-installer@v3
-
-      - name: Docker Login
-        if: inputs.docker == true
-        uses: docker/login-action@v3
-        with:
-          registry: ghcr.io
-          username: ${{ github.repository_owner }}
-          password: ${{ secrets.RELENG_GITHUB_TOKEN }}
 
       - name: Validate release artifacts
         working-directory: _workflows

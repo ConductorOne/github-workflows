@@ -21,7 +21,7 @@ digraph ReleaseWorkflow {
 
     windows [label="goreleaser-windows\n• Windows zip + MSI\n• WiX Toolset\n• SBOMs, provenance\n• upload to S3", fillcolor="#ecfeff"];
 
-    docker [label="goreleaser-docker\n• multi-arch OCI images\n• Lambda image (arm64)\n• GHCR push\n• ECR Public push\n• image attestations", fillcolor="#ecfeff"];
+    docker [label="goreleaser-docker\n• multi-arch OCI images\n• Lambda image (arm64)\n• ECR Public push\n• image attestations", fillcolor="#ecfeff"];
 
     record [label="publish-release-manifest\n• merge manifests\n• sign manifest\n• upload manifest/checksums", fillcolor="#ecfeff"];
 
@@ -32,7 +32,6 @@ digraph ReleaseWorkflow {
 
   // Outputs
   s3 [label="S3\n• archives\n• attestations\n• manifest", fillcolor="#fef9c3"];
-  ghcr [label="GHCR\n• images\n• OCI attestations", fillcolor="#f9fafb"];
   ecr [label="ECR Public\n• OCI images\n• Lambda image", fillcolor="#fef9c3"];
   registry [label="Connector Registry API\n• release metadata\n• assets + images", fillcolor="#dcfce7"];
 
@@ -48,7 +47,6 @@ digraph ReleaseWorkflow {
   docker -> record;
   binaries -> s3 [label="artifacts"];
   windows -> s3 [label="artifacts"];
-  docker -> ghcr [label="push"];
   docker -> ecr [label="push"];
   record -> s3 [label="manifest"];
   record -> registry_api;

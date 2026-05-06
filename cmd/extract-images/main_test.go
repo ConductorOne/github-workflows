@@ -9,20 +9,12 @@ import (
 
 func TestExtractPublicImages(t *testing.T) {
 	images := make(map[string]*pb.Image)
-	foundGHCR, foundECR := extractPublicImages([]byte(`
-aaa111  ghcr.io/conductorone/baton-example:0.1.2
-bbb222  ghcr.io/conductorone/baton-example:0.1.2-amd64
+	foundECR := extractPublicImages([]byte(`
 ccc333  public.ecr.aws/conductorone/baton-example:0.1.2
 `), "0.1.2", images)
 
-	if !foundGHCR || !foundECR {
-		t.Fatalf("foundGHCR=%t foundECR=%t, want both true", foundGHCR, foundECR)
-	}
-	if images["ghcr"].GetDigest() != "sha256:aaa111" {
-		t.Fatalf("ghcr digest = %q", images["ghcr"].GetDigest())
-	}
-	if !images["ghcr"].GetIsIndex() {
-		t.Fatal("ghcr image should be marked as an index")
+	if !foundECR {
+		t.Fatal("ECR public image was not found")
 	}
 	if images["ecrPublic"].GetUri() != "public.ecr.aws/conductorone/baton-example@sha256:ccc333" {
 		t.Fatalf("ecrPublic uri = %q", images["ecrPublic"].GetUri())
@@ -61,9 +53,9 @@ func TestMarshalImagesSortsKeys(t *testing.T) {
 			Digest:  strPtr("sha256:lambda"),
 			IsIndex: boolPtr(false),
 		}.Build(),
-		"ghcr": pb.Image_builder{
-			Ref:     strPtr("ghcr.io/conductorone/baton-example:0.1.2"),
-			Digest:  strPtr("sha256:ghcr"),
+		"ecrPublic": pb.Image_builder{
+			Ref:     strPtr("public.ecr.aws/conductorone/baton-example:0.1.2"),
+			Digest:  strPtr("sha256:ecr"),
 			IsIndex: &isIndex,
 		}.Build(),
 	}
@@ -80,8 +72,8 @@ func TestMarshalImagesSortsKeys(t *testing.T) {
 	if len(decoded) != 2 {
 		t.Fatalf("decoded keys = %d, want 2", len(decoded))
 	}
-	if got[4:10] != `"ghcr"` {
-		t.Fatalf("first key was not ghcr in sorted output:\n%s", got)
+	if got[4:15] != `"ecrPublic"` {
+		t.Fatalf("first key was not ecrPublic in sorted output:\n%s", got)
 	}
 }
 
