@@ -148,8 +148,11 @@ func extractLambdaImage(content []byte, repoName, version string, images map[str
 			continue
 		}
 
-		ref := fmt.Sprintf("%s:%s", repoName, tag)
-		uri := fmt.Sprintf("%s@%s", repoName, line.digest)
+		ref := line.ref
+		uri, ok := digestPinnedURI(ref, line.digest)
+		if !ok {
+			continue
+		}
 		isIndex := false
 		images[lambdaArm64ImageKey] = pb.Image_builder{
 			Ref:     &ref,

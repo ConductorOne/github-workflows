@@ -21,7 +21,7 @@ ccc333  public.ecr.aws/conductorone/baton-example:0.1.2
 	}
 }
 
-func TestExtractLambdaImageUsesGenericRef(t *testing.T) {
+func TestExtractLambdaImagePreservesECRRef(t *testing.T) {
 	images := make(map[string]*pb.Image)
 	found := extractLambdaImage([]byte(`
 ddd444  168442440833.dkr.ecr.us-west-2.amazonaws.com/baton-example:0.1.2-arm64
@@ -34,8 +34,11 @@ ddd444  168442440833.dkr.ecr.us-west-2.amazonaws.com/baton-example:0.1.2-arm64
 	if image == nil {
 		t.Fatalf("missing %s image", lambdaArm64ImageKey)
 	}
-	if image.GetRef() != "baton-example:0.1.2-arm64" {
+	if image.GetRef() != "168442440833.dkr.ecr.us-west-2.amazonaws.com/baton-example:0.1.2-arm64" {
 		t.Fatalf("lambda ref = %q", image.GetRef())
+	}
+	if image.GetUri() != "168442440833.dkr.ecr.us-west-2.amazonaws.com/baton-example@sha256:ddd444" {
+		t.Fatalf("lambda uri = %q", image.GetUri())
 	}
 	if image.GetDigest() != "sha256:ddd444" {
 		t.Fatalf("lambda digest = %q", image.GetDigest())
