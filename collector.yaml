@@ -1,0 +1,29 @@
+# OpenTelemetry Collector configuration for Lambda connector extensions.
+# The collector runs as a Lambda extension process, receiving telemetry from
+# the connector via OTLP on localhost and forwarding it to the central
+# collector before Lambda freezes or shuts down the execution environment.
+receivers:
+  otlp:
+    protocols:
+      grpc:
+        endpoint: localhost:4317
+      http:
+        endpoint: localhost:4318
+
+exporters:
+  otlp:
+    endpoint: otel-collector:4317
+    tls:
+      insecure_skip_verify: true
+
+service:
+  pipelines:
+    traces:
+      receivers: [otlp]
+      exporters: [otlp]
+    metrics:
+      receivers: [otlp]
+      exporters: [otlp]
+    logs:
+      receivers: [otlp]
+      exporters: [otlp]

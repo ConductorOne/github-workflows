@@ -25,6 +25,8 @@ dockers:
     dockerfile: ${DOCKERFILE_LAMBDA_PATH}
     image_templates:
       - "168442440833.dkr.ecr.us-west-2.amazonaws.com/${REPO_NAME}:{{ .Version }}-arm64"
+    extra_files:
+      - collector.yaml
     build_flag_templates:
       - "--platform=linux/arm64"
       - "--label=org.opencontainers.image.created={{.Date}}"
