@@ -11,11 +11,11 @@ This is a READ-ONLY review — do NOT write files, create commits, or run build/
 
 ## Procedure
 
-1. Run `gh pr diff` and `gh pr view` to understand the PR.
-2. Run `gh pr view --comments` and review all existing PR comments and inline review comments. Note issues already identified so you do not duplicate them.
-3. Check for `.claude/skills/ci-review.md` using Glob. If found, invoke `/ci-review` and incorporate its results.
+1. Use the repository and pull request number supplied in the prompt.
+2. Run `gh pr diff <pr_number> --repo <repository>` and `gh pr view <pr_number> --repo <repository>` to understand the PR. Do not rely on a local checkout.
+3. Run `gh pr view <pr_number> --repo <repository> --comments` and review all existing PR comments and inline review comments. Note issues already identified so you do not duplicate them.
 4. Review changed files against the criteria below. Use Task sub-agents to parallelize across files or concern areas as you see fit. Exclude `vendor/`, `conf.gen.go`, generated files, and lockfiles from review.
-5. Validate findings — read the code yourself and drop false positives. Skip any issue already raised in an existing comment.
+5. Validate findings and drop false positives. Skip any issue already raised in an existing comment.
 6. Post results (new findings only).
 
 ## File Context
@@ -114,7 +114,9 @@ Criteria:
 - P5: API argument order — multiple string params are easy to swap (verify against function signature)
 - P6: ParentResourceId nil check before access
 
-When provisioning files change, read the FULL file content (not just diffs) — entity source correctness requires understanding the complete Grant/Revoke flow.
+When provisioning files change, inspect the full file content through `gh api` if the diff
+does not contain enough context — entity source correctness requires understanding the
+complete Grant/Revoke flow.
 
 ### Breaking Changes
 

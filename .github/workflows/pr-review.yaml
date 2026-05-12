@@ -13,14 +13,6 @@ jobs:
       pull-requests: write
       issues: write
     steps:
-    - name: PR Commit Count
-      run: echo "PR_FETCH_DEPTH=$(( ${{ github.event.pull_request.commits }} + 1 ))" >> "${GITHUB_ENV}"
-    - name: Checkout PR head
-      uses: actions/checkout@v6
-      with:
-        repository: ${{ github.event.pull_request.head.repo.full_name }}
-        ref: ${{ github.event.pull_request.head.sha }}
-        fetch-depth: ${{ env.PR_FETCH_DEPTH }}
     - name: Checkout workflows repo
       uses: actions/checkout@v6
       with:
@@ -41,6 +33,13 @@ jobs:
         track_progress: true
         include_fix_links: true
         allowed_bots: "*"
-        claude_args: --model claude-opus-4-6 --max-turns 100 --allowedTools "Read,Glob,Grep,Task,Skill,mcp__github_inline_comment__create_inline_comment,Bash(gh pr comment:*),Bash(gh pr diff:*),Bash(gh pr view:*),Bash(gh pr review:*)"
+        claude_args: --model claude-opus-4-6 --max-turns 100 --allowedTools "Read,Glob,Grep,Task,Skill,mcp__github_inline_comment__create_inline_comment,Bash(gh pr comment:*),Bash(gh pr diff:*),Bash(gh pr view:*),Bash(gh pr review:*),Bash(gh api:*)"
         prompt: |
+          Repository: ${{ github.repository }}
+          Pull request: ${{ github.event.pull_request.number }}
+          Head SHA: ${{ github.event.pull_request.head.sha }}
+
+          This workflow runs under pull_request_target and intentionally does not check out PR head code.
+          Review the PR through the GitHub API using the repository and pull request number above.
+
           Use the /pr-review skill to review this PR.
