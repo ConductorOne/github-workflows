@@ -23,14 +23,28 @@ REVIEW_STATE_PATTERN = re.compile(
 # Bot logins that post review comments via GitHub Actions.
 BOT_LOGINS = {"github-actions[bot]", "github-actions"}
 DEFAULT_REVIEW_SUMMARY_HEADING = "### Connector PR Review:"
+LEGACY_REVIEW_SUMMARY_HEADING = "### PR Review:"
+
+
+def review_comment_heading(comment: dict, summary_heading: str) -> Optional[str]:
+    body = comment["body"].lstrip()
+    for heading in (summary_heading, LEGACY_REVIEW_SUMMARY_HEADING):
+        if body.startswith(heading):
+            return heading
+    return None
 
 
 def is_bot_review_comment(comment: dict, summary_heading: str) -> bool:
     """Check if a comment is a bot-posted review summary."""
     return (
         comment["user"] in BOT_LOGINS
-        and comment["body"].lstrip().startswith(summary_heading)
+        and review_comment_heading(comment, summary_heading) is not None
     )
+
+
+def is_legacy_review_comment(comment: dict, summary_heading: str) -> bool:
+    """Check if a comment is a bot-posted pre-migration review summary."""
+    return review_comment_heading(comment, summary_heading) == LEGACY_REVIEW_SUMMARY_HEADING
 
 
 def gh_api_paginate(endpoint: str) -> list[dict]:
@@ -153,6 +167,8 @@ def main():
             continue
 
         if workflow_ref and state.get("workflow_ref") != workflow_ref:
+            if is_legacy_review_comment(c, summary_heading) and legacy_summary_comment_id is None:
+                legacy_summary_comment_id = c["id"]
             continue
 
         summary_comment_id = c["id"]
@@ -173,7 +189,7 @@ def main():
     pr = json.loads(pr_result.stdout)
     current_sha = pr["head"]["sha"]
     current_base_sha = pr["base"]["sha"]
-    head_repo = pr["head"]["repo"]["full_name"]
+    head_repo = (pr["head"].get("repo") or {}).get("full_name")
     print(f"Current PR head: {current_sha[:12]}")
     print(f"Current PR base: {current_base_sha[:12]}")
 
@@ -186,6 +202,9 @@ def main():
         print("No previous review state found, using full review mode")
     elif last_review_base_sha != current_base_sha:
         print("PR base changed since last review, using full review mode")
+        last_reviewed_sha = None
+    elif not head_repo:
+        print("PR head repository is unavailable, using full review mode")
         last_reviewed_sha = None
     else:
         incremental_diff = fetch_compare_diff(head_repo, last_reviewed_sha, current_sha)

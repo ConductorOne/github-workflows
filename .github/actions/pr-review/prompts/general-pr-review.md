@@ -45,7 +45,13 @@ Read `.github/resolved-threads.json` — it contains a summary of outdated bot r
 that were automatically resolved before this review started. Use `resolved_count` from this
 file when reporting "Threads Resolved" in the summary.
 
-### Step 4 — Review changed files
+### Step 4 — Check For Trusted Base Review Skill
+
+Check for `.claude/skills/ci-review.md` using Glob. The workspace is the trusted PR base
+checkout, not PR head code. If the skill exists, invoke `/ci-review` and incorporate its
+results alongside the general checks.
+
+### Step 5 — Review changed files
 
 If review mode is `"incremental"`, read the file named by `incremental_diff_path` for
 suggestions. Still scan the full PR diff (`gh pr diff <pr_number> --repo <repository>`) for
@@ -57,13 +63,13 @@ Use `gh pr view` and `gh api` for extra context when needed.
 
 Exclude vendored code, generated files, and lockfiles from review.
 
-### Step 5 — Validate findings
+### Step 6 — Validate findings
 
 Read the code yourself and drop false positives. Only flag real issues.
 Skip any issue that was already raised in an existing PR comment or inline review comment.
 Do not re-flag issues on unchanged code that were pre-resolved (see step 3).
 
-### Step 6 — Post results (new findings only)
+### Step 7 — Post results (new findings only)
 
 Before posting any comment or review, re-fetch the PR with `gh api` and confirm the current
 head SHA still equals `current_sha` from `.github/pr-context.json`. If it changed, stop without
