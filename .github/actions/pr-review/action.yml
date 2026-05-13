@@ -1,0 +1,85 @@
+name: PR Review
+description: Run Claude-powered PR review with context fetching and thread resolution
+
+inputs:
+  anthropic_api_key:
+    description: Anthropic API key
+    required: true
+  github_token:
+    description: GitHub token with PR read/write permissions
+    required: true
+  pr_number:
+    description: Pull request number
+    required: true
+  review_prompt:
+    description: "Review prompt profile to use: connector or general"
+    required: false
+    default: connector
+
+runs:
+  using: composite
+  steps:
+  - name: Resolve review prompt config
+    id: review-config
+    shell: bash
+    env:
+      REVIEW_PROMPT: ${{ inputs.review_prompt }}
+    run: |
+      case "${REVIEW_PROMPT}" in
+        ""|"connector")
+          echo "prompt_file=${GITHUB_ACTION_PATH}/prompts/connector-pr-review.md" >> "${GITHUB_OUTPUT}"
+          echo "summary_heading=### Connector PR Review:" >> "${GITHUB_OUTPUT}"
+          ;;
+        "general")
+          echo "prompt_file=${GITHUB_ACTION_PATH}/prompts/general-pr-review.md" >> "${GITHUB_OUTPUT}"
+          echo "summary_heading=### General PR Review:" >> "${GITHUB_OUTPUT}"
+          ;;
+        *)
+          echo "::error::review_prompt must be 'connector' or 'general'"
+          exit 1
+          ;;
+      esac
+  - name: Fetch PR context
+    shell: bash
+    env:
+      GH_TOKEN: ${{ inputs.github_token }}
+      PR_NUMBER: ${{ inputs.pr_number }}
+      REVIEW_SUMMARY_HEADING: ${{ steps.review-config.outputs.summary_heading }}
+    run: python3 ${{ github.action_path }}/scripts/fetch-pr-context.py
+  - name: Resolve outdated bot review threads
+    shell: bash
+    env:
+      GH_TOKEN: ${{ inputs.github_token }}
+      PR_NUMBER: ${{ inputs.pr_number }}
+    run: python3 ${{ github.action_path }}/scripts/resolve-outdated-threads.py
+  - name: Load review prompt
+    id: prompt
+    shell: bash
+    env:
+      PROMPT_FILE: ${{ steps.review-config.outputs.prompt_file }}
+    run: |
+      DELIM="PROMPT_EOF_$(openssl rand -hex 8)"
+      {
+        echo "REVIEW_PROMPT<<${DELIM}"
+        cat "${PROMPT_FILE}"
+        echo "${DELIM}"
+      } >> "${GITHUB_ENV}"
+  - name: Run Claude PR Review
+    uses: anthropics/claude-code-action@v1
+    with:
+      anthropic_api_key: ${{ inputs.anthropic_api_key }}
+      github_token: ${{ inputs.github_token }}
+      include_fix_links: true
+      allowed_bots: "*"
+      claude_args: --model claude-opus-4-6 --max-turns 100 --allowedTools "Read,Glob,Skill,mcp__github_inline_comment__create_inline_comment,Bash(gh pr diff:*),Bash(gh pr view:*),Bash(gh pr review:*),Bash(gh api:*)"
+      prompt: ${{ env.REVIEW_PROMPT }}
+  - name: Upload review context artifacts
+    if: always()
+    uses: actions/upload-artifact@v4
+    with:
+      name: pr-review-context
+      path: |
+        .github/pr-context.json
+        .github/resolved-threads.json
+        .github/incremental.diff
+      retention-days: 7

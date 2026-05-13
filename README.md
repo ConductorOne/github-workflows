@@ -2,6 +2,29 @@
 
 Shared GitHub workflows and actions for ConductorOne connector repositories.
 
+## PR Review Workflow
+
+Runs Claude-powered PR review without checking out PR head code. The default prompt
+profile is `connector`, which keeps connector-specific review criteria for repos covered
+by required workflows or rulesets.
+
+Repos that need a non-connector review can set the repository variable
+`PR_REVIEW_PROMPT=general`, or reusable workflow callers can pass
+`review_prompt: general`.
+
+### Custom Review Criteria
+
+Repos can extend the review with project-specific criteria by adding a trusted
+base-branch skill file:
+
+```
+.claude/skills/ci-review.md
+```
+
+If this file exists on the PR base commit, the reviewer will invoke it and incorporate
+the results alongside the selected prompt profile. The workflow does not load skill
+files from PR head code.
+
 ## Release Workflow
 
 Handles building, signing, and publishing connector releases. See [detailed documentation](docs/release-workflow.md) for security properties and internals.
