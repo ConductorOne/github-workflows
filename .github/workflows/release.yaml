@@ -74,8 +74,9 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Validate tag format
+        env:
+          TAG: ${{ inputs.tag }}
         run: |
-          TAG="${{ inputs.tag }}"
           # Strict semver regex with 'v' prefix (per https://semver.org)
           # Supports: v1.2.3, v1.2.3-alpha, v1.2.3-alpha.1, v1.2.3+build, v1.2.3-rc.1+build.123
           SEMVER_REGEX='^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-((0|[1-9][0-9]*|[0-9]*[a-zA-Z-][0-9a-zA-Z-]*)(\.(0|[1-9][0-9]*|[0-9]*[a-zA-Z-][0-9a-zA-Z-]*))*))?(\+([0-9a-zA-Z-]+(\.[0-9a-zA-Z-]+)*))?$'
@@ -91,18 +92,44 @@ jobs:
           echo "::error::dockerfile_template can only be used when lambda is false"
           exit 1
 
+      - name: Validate dockerfile_template has safe path
+        if: inputs.dockerfile_template != ''
+        env:
+          DOCKERFILE_TEMPLATE: ${{ inputs.dockerfile_template }}
+        run: |
+          if [[ "$DOCKERFILE_TEMPLATE" == /* ]] || [[ "$DOCKERFILE_TEMPLATE" == *".."* ]] || [[ ! "$DOCKERFILE_TEMPLATE" =~ ^[A-Za-z0-9._/-]+$ ]]; then
+            echo "::error::dockerfile_template must be a relative path with safe characters and without '..' traversal. Got: $DOCKERFILE_TEMPLATE"
+            exit 1
+          fi
+
       - name: Validate docker_extra_files requires dockerfile_template
         if: inputs.docker_extra_files != '' && inputs.dockerfile_template == ''
         run: |
           echo "::error::docker_extra_files can only be used when dockerfile_template is set"
           exit 1
 
+      - name: Validate docker_extra_files have safe paths
+        if: inputs.docker_extra_files != ''
+        env:
+          DOCKER_EXTRA_FILES: ${{ inputs.docker_extra_files }}
+        run: |
+          IFS=',' read -ra FILES <<< "$DOCKER_EXTRA_FILES"
+          for file in "${FILES[@]}"; do
+            file="${file#"${file%%[![:space:]]*}"}"
+            file="${file%"${file##*[![:space:]]}"}"
+            if [[ -z "$file" ]] || [[ "$file" == /* ]] || [[ "$file" == *".."* ]] || [[ ! "$file" =~ ^[A-Za-z0-9._/-]+$ ]]; then
+              echo "::error::docker_extra_files entries must be relative paths with safe characters and without '..' traversal. Got: $file"
+              exit 1
+            fi
+          done
+
       - name: Validate msi_wxs_path has no path traversal
         if: inputs.msi_wxs_path != ''
+        env:
+          WXS_PATH: ${{ inputs.msi_wxs_path }}
         run: |
-          WXS_PATH="${{ inputs.msi_wxs_path }}"
-          if [[ "$WXS_PATH" == /* ]] || [[ "$WXS_PATH" == *".."* ]]; then
-            echo "::error::msi_wxs_path must be a relative path without '..' traversal. Got: $WXS_PATH"
+          if [[ "$WXS_PATH" == /* ]] || [[ "$WXS_PATH" == *".."* ]] || [[ ! "$WXS_PATH" =~ ^[A-Za-z0-9._/-]+$ ]]; then
+            echo "::error::msi_wxs_path must be a relative path with safe characters and without '..' traversal. Got: $WXS_PATH"
             exit 1
           fi
 
@@ -161,6 +188,7 @@ jobs:
         uses: actions/setup-go@v6
         with:
           go-version-file: "_caller/go.mod"
+          cache: false
 
       - name: Calculate S3 directory
         id: s3-directory
@@ -335,6 +363,7 @@ jobs:
         uses: actions/setup-go@v6
         with:
           go-version-file: "_workflows/go.mod"
+          cache: false
 
       - name: Generate manifest.json
         id: generate-binaries-manifest
@@ -409,6 +438,7 @@ jobs:
         uses: actions/setup-go@v6
         with:
           go-version-file: "_caller/go.mod"
+          cache: false
 
       - name: Generate or locate WXS file
         id: wxs
@@ -647,6 +677,7 @@ jobs:
         uses: actions/setup-go@v6
         with:
           go-version-file: "_workflows/go.mod"
+          cache: false
 
       - name: Generate Windows manifest
         id: generate-windows-manifest
@@ -699,6 +730,7 @@ jobs:
         uses: actions/setup-go@v6
         with:
           go-version-file: "_caller/go.mod"
+          cache: false
 
       - name: Install cosign
         if: inputs.docker == true
@@ -833,6 +865,7 @@ jobs:
         uses: actions/setup-go@v6
         with:
           go-version-file: "_workflows/go.mod"
+          cache: false
 
       - name: Extract image digests from GoReleaser assets
         id: extract-images
@@ -928,6 +961,7 @@ jobs:
         uses: actions/setup-go@v6
         with:
           go-version-file: "_workflows/go.mod"
+          cache: false
 
       - name: Merge binaries, Windows, and images manifests
         working-directory: _workflows
@@ -1157,6 +1191,7 @@ jobs:
         uses: actions/setup-go@v6
         with:
           go-version-file: "_workflows/go.mod"
+          cache: false
 
       - name: Checkout connector repo
         uses: actions/checkout@v5
