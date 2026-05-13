@@ -69,6 +69,8 @@ env:
   S3_BUCKET: "connector-artifact-registry"
   GENERATED_DIR: "_generated"
 
+permissions: {}
+
 jobs:
   validate-inputs:
     runs-on: ubuntu-latest
@@ -176,6 +178,7 @@ jobs:
           path: _caller
           repository: ${{ github.event.repository.full_name }}
           fetch-depth: 0
+          persist-credentials: false
 
       - name: Checkout connector workflows
         uses: actions/checkout@v5
@@ -183,6 +186,7 @@ jobs:
           path: _workflows
           repository: ConductorOne/github-workflows
           ref: ${{ needs.determine-workflows-ref.outputs.ref }}
+          persist-credentials: false
 
       - name: Set up Go for caller
         uses: actions/setup-go@v6
@@ -426,6 +430,7 @@ jobs:
           path: _caller
           repository: ${{ github.event.repository.full_name }}
           fetch-depth: 0
+          persist-credentials: false
 
       - name: Checkout connector workflows
         uses: actions/checkout@v5
@@ -433,6 +438,7 @@ jobs:
           path: _workflows
           repository: ConductorOne/github-workflows
           ref: ${{ needs.determine-workflows-ref.outputs.ref }}
+          persist-credentials: false
 
       - name: Set up Go for caller
         uses: actions/setup-go@v6
@@ -716,6 +722,7 @@ jobs:
           path: _caller
           repository: ${{ github.event.repository.full_name }}
           fetch-depth: 0
+          persist-credentials: false
 
       - name: Checkout connector workflows
         if: inputs.docker == true || inputs.lambda == true
@@ -724,6 +731,7 @@ jobs:
           path: _workflows
           repository: ConductorOne/github-workflows
           ref: ${{ needs.determine-workflows-ref.outputs.ref }}
+          persist-credentials: false
 
       - name: Set up Go for caller
         if: inputs.docker == true || inputs.lambda == true
@@ -956,6 +964,7 @@ jobs:
           path: _workflows
           repository: ConductorOne/github-workflows
           ref: ${{ needs.determine-workflows-ref.outputs.ref }}
+          persist-credentials: false
 
       - name: Set up Go for workflows
         uses: actions/setup-go@v6
@@ -1186,6 +1195,7 @@ jobs:
           path: _workflows
           repository: ConductorOne/github-workflows
           ref: ${{ needs.determine-workflows-ref.outputs.ref }}
+          persist-credentials: false
 
       - name: Set up Go for workflows
         uses: actions/setup-go@v6
@@ -1197,6 +1207,7 @@ jobs:
         uses: actions/checkout@v5
         with:
           path: _connector
+          persist-credentials: false
 
       - name: Read connector documentation
         id: read-docs
@@ -1302,6 +1313,7 @@ jobs:
           repository: ConductorOne/github-workflows
           ref: ${{ needs.determine-workflows-ref.outputs.ref }}
           path: _workflows
+          persist-credentials: false
 
       - name: Install cosign
         uses: sigstore/cosign-installer@v3
