@@ -11,15 +11,40 @@ inputs:
   pr_number:
     description: Pull request number
     required: true
+  review_prompt:
+    description: "Review prompt profile to use: connector or general"
+    required: false
+    default: connector
 
 runs:
   using: composite
   steps:
+  - name: Resolve review prompt config
+    id: review-config
+    shell: bash
+    env:
+      REVIEW_PROMPT: ${{ inputs.review_prompt }}
+    run: |
+      case "${REVIEW_PROMPT}" in
+        ""|"connector")
+          echo "prompt_file=${GITHUB_ACTION_PATH}/prompts/connector-pr-review.md" >> "${GITHUB_OUTPUT}"
+          echo "summary_heading=### Connector PR Review:" >> "${GITHUB_OUTPUT}"
+          ;;
+        "general")
+          echo "prompt_file=${GITHUB_ACTION_PATH}/prompts/general-pr-review.md" >> "${GITHUB_OUTPUT}"
+          echo "summary_heading=### General PR Review:" >> "${GITHUB_OUTPUT}"
+          ;;
+        *)
+          echo "::error::review_prompt must be 'connector' or 'general'"
+          exit 1
+          ;;
+      esac
   - name: Fetch PR context
     shell: bash
     env:
       GH_TOKEN: ${{ inputs.github_token }}
       PR_NUMBER: ${{ inputs.pr_number }}
+      REVIEW_SUMMARY_HEADING: ${{ steps.review-config.outputs.summary_heading }}
     run: python3 ${{ github.action_path }}/scripts/fetch-pr-context.py
   - name: Resolve outdated bot review threads
     shell: bash
@@ -30,11 +55,13 @@ runs:
   - name: Load review prompt
     id: prompt
     shell: bash
+    env:
+      PROMPT_FILE: ${{ steps.review-config.outputs.prompt_file }}
     run: |
       DELIM="PROMPT_EOF_$(openssl rand -hex 8)"
       {
         echo "REVIEW_PROMPT<<${DELIM}"
-        cat ${{ github.action_path }}/prompts/baseline-pr-review.md
+        cat "${PROMPT_FILE}"
         echo "${DELIM}"
       } >> "${GITHUB_ENV}"
   - name: Run Claude PR Review

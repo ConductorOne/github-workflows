@@ -12,6 +12,7 @@ Read `.github/pr-context.json`. It contains pre-fetched PR data with these field
 - `current_sha`: the HEAD SHA; use this as `CURRENT_SHA`
 - `current_base_sha`: the PR base SHA; use this as `CURRENT_BASE_SHA`
 - `workflow_ref`: the workflow ref that owns this review state; use this as `CURRENT_WORKFLOW_REF`
+- `summary_heading`: the exact markdown heading for the summary comment
 - `review_mode`: `"incremental"` or `"full"`
 - `last_reviewed_sha`: the previous reviewed SHA, used only for deduplication
 - `summary_comment_id`: the existing bot summary comment to update, if one exists
@@ -79,10 +80,11 @@ If it is not set, create one with
 `gh api repos/<repository>/issues/<pr_number>/comments -f body=...`.
 Do not delete existing summary comments before the new review has been posted.
 
-Use this template for the summary body:
+Use this template for the summary body. The heading must be exactly the `summary_heading`
+value from `.github/pr-context.json`.
 
 ```
-### Connector PR Review: <PR title>
+<summary_heading> <PR title>
 
 **Blocking Issues: N** | **Suggestions: M** | **Threads Resolved: R**
 _Review mode: incremental since `<last_reviewed_sha short>`_ (or _Review mode: full_)

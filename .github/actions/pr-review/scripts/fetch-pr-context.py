@@ -22,13 +22,14 @@ REVIEW_STATE_PATTERN = re.compile(
 
 # Bot logins that post review comments via GitHub Actions.
 BOT_LOGINS = {"github-actions[bot]", "github-actions"}
+DEFAULT_REVIEW_SUMMARY_HEADING = "### Connector PR Review:"
 
 
-def is_bot_review_comment(comment: dict) -> bool:
+def is_bot_review_comment(comment: dict, summary_heading: str) -> bool:
     """Check if a comment is a bot-posted review summary."""
     return (
         comment["user"] in BOT_LOGINS
-        and comment["body"].lstrip().startswith("### Connector PR Review:")
+        and comment["body"].lstrip().startswith(summary_heading)
     )
 
 
@@ -103,8 +104,15 @@ def main():
     repo = os.environ.get("GITHUB_REPOSITORY", "")
     pr_number = os.environ.get("PR_NUMBER", "")
     workflow_ref = os.environ.get("GITHUB_WORKFLOW_REF", "")
+    summary_heading = os.environ.get(
+        "REVIEW_SUMMARY_HEADING",
+        DEFAULT_REVIEW_SUMMARY_HEADING,
+    ).strip()
     if not repo or not pr_number:
         print("GITHUB_REPOSITORY and PR_NUMBER must be set", file=sys.stderr)
+        sys.exit(1)
+    if not summary_heading.startswith("### ") or not summary_heading.endswith(":"):
+        print("REVIEW_SUMMARY_HEADING must look like a markdown heading", file=sys.stderr)
         sys.exit(1)
 
     endpoint = f"repos/{repo}/issues/{pr_number}/comments"
@@ -123,7 +131,7 @@ def main():
 
     # Only bot-authored review comments are authoritative state. User-authored
     # markers are untrusted PR content and must not influence review mode.
-    review_comments = [c for c in comments if is_bot_review_comment(c)]
+    review_comments = [c for c in comments if is_bot_review_comment(c, summary_heading)]
 
     # Extract last_reviewed_sha from the newest valid bot review state.
     last_reviewed_sha = None
@@ -197,6 +205,7 @@ def main():
         "current_sha": current_sha,
         "current_base_sha": current_base_sha,
         "workflow_ref": workflow_ref,
+        "summary_heading": summary_heading,
         "review_mode": review_mode,
         "last_reviewed_sha": last_reviewed_sha,
         "last_review_base_sha": last_review_base_sha,

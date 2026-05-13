@@ -1,5 +1,12 @@
 on:
   pull_request_target:
+  workflow_call:
+    inputs:
+      review_prompt:
+        description: "Review prompt profile to use: connector or general"
+        required: false
+        default: connector
+        type: string
 concurrency:
   group: pr-review-${{ github.workflow_ref }}-${{ github.event.pull_request.number }}
   cancel-in-progress: true
@@ -24,4 +31,5 @@ jobs:
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
           github_token: ${{ secrets.GITHUB_TOKEN }}
           pr_number: ${{ github.event.pull_request.number }}
+          review_prompt: ${{ inputs.review_prompt || vars.PR_REVIEW_PROMPT || 'connector' }}
     timeout-minutes: 10
