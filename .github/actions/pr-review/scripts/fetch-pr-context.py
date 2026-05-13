@@ -20,8 +20,9 @@ REVIEW_STATE_PATTERN = re.compile(
     r"<!--\s*review-state:\s*(\{.*?\})\s*-->", re.DOTALL
 )
 
-# Bot logins that post review comments via GitHub Actions.
-BOT_LOGINS = {"github-actions[bot]", "github-actions"}
+# Bot login that posts review comments via GitHub Actions. The [bot] suffix is
+# GitHub-reserved, unlike ordinary account names.
+BOT_LOGINS = {"github-actions[bot]"}
 DEFAULT_REVIEW_SUMMARY_HEADING = "### Connector PR Review:"
 
 
@@ -29,6 +30,7 @@ def is_bot_review_comment(comment: dict, summary_heading: str) -> bool:
     """Check if a comment is a bot-posted review summary."""
     return (
         comment["user"] in BOT_LOGINS
+        and comment.get("user_type") == "Bot"
         and comment["body"].lstrip().startswith(summary_heading)
     )
 
@@ -111,6 +113,9 @@ def main():
     if not repo or not pr_number:
         print("GITHUB_REPOSITORY and PR_NUMBER must be set", file=sys.stderr)
         sys.exit(1)
+    if not workflow_ref:
+        print("GITHUB_WORKFLOW_REF must be set", file=sys.stderr)
+        sys.exit(1)
     if not summary_heading.startswith("### ") or not summary_heading.endswith(":"):
         print("REVIEW_SUMMARY_HEADING must look like a markdown heading", file=sys.stderr)
         sys.exit(1)
@@ -126,6 +131,7 @@ def main():
         comments.append({
             "id": c["id"],
             "user": c.get("user", {}).get("login", "unknown"),
+            "user_type": c.get("user", {}).get("type", "unknown"),
             "body": c.get("body", ""),
         })
 
@@ -152,7 +158,7 @@ def main():
         except json.JSONDecodeError:
             continue
 
-        if workflow_ref and state.get("workflow_ref") != workflow_ref:
+        if state.get("workflow_ref") != workflow_ref:
             continue
 
         summary_comment_id = c["id"]
@@ -216,6 +222,7 @@ def main():
         "pr_number": pr_number,
         "current_sha": current_sha,
         "current_base_sha": current_base_sha,
+        "head_repo": head_repo,
         "workflow_ref": workflow_ref,
         "summary_heading": summary_heading,
         "review_mode": review_mode,

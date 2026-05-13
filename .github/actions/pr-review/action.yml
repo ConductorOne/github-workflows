@@ -52,6 +52,15 @@ runs:
       GH_TOKEN: ${{ inputs.github_token }}
       PR_NUMBER: ${{ inputs.pr_number }}
     run: python3 ${{ github.action_path }}/scripts/resolve-outdated-threads.py
+  - name: Install review helper scripts
+    shell: bash
+    run: |
+      mkdir -p .github/pr-review-bin
+      cp "${{ github.action_path }}/scripts/read-pr-file.py" .github/pr-review-bin/read-pr-file
+      cp "${{ github.action_path }}/scripts/post-inline-comment.py" .github/pr-review-bin/post-inline-comment
+      cp "${{ github.action_path }}/scripts/post-summary.py" .github/pr-review-bin/post-summary
+      cp "${{ github.action_path }}/scripts/post-verdict.py" .github/pr-review-bin/post-verdict
+      chmod +x .github/pr-review-bin/*
   - name: Load review prompt
     id: prompt
     shell: bash
@@ -66,12 +75,14 @@ runs:
       } >> "${GITHUB_ENV}"
   - name: Run Claude PR Review
     uses: anthropics/claude-code-action@v1
+    env:
+      GH_TOKEN: ${{ inputs.github_token }}
     with:
       anthropic_api_key: ${{ inputs.anthropic_api_key }}
       github_token: ${{ inputs.github_token }}
       include_fix_links: true
       allowed_bots: "*"
-      claude_args: --model claude-opus-4-6 --max-turns 100 --allowedTools "Read,mcp__github_inline_comment__create_inline_comment,Bash(gh pr diff:*),Bash(gh pr view:*),Bash(gh pr review:*),Bash(gh api:*)"
+      claude_args: --model claude-opus-4-6 --max-turns 100 --allowedTools "Read,Bash(gh pr diff:*),Bash(gh pr view:*),Bash(.github/pr-review-bin/read-pr-file:*),Bash(.github/pr-review-bin/post-inline-comment:*),Bash(.github/pr-review-bin/post-summary:*),Bash(.github/pr-review-bin/post-verdict:*)"
       prompt: ${{ env.REVIEW_PROMPT }}
   - name: Upload review context artifacts
     if: always()
