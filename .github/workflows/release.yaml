@@ -177,8 +177,24 @@ jobs:
         with:
           path: _caller
           repository: ${{ github.event.repository.full_name }}
+          ref: refs/tags/${{ inputs.tag }}
           fetch-depth: 0
           persist-credentials: false
+
+      - name: Verify caller checkout matches release tag
+        working-directory: _caller
+        shell: bash
+        env:
+          RELEASE_TAG: ${{ inputs.tag }}
+        run: |
+          set -euo pipefail
+          tag_commit="$(git rev-list -n 1 "refs/tags/$RELEASE_TAG")"
+          head_commit="$(git rev-parse HEAD)"
+          if [ "$head_commit" != "$tag_commit" ]; then
+            echo "::error::Checked out $head_commit but refs/tags/$RELEASE_TAG resolves to $tag_commit"
+            exit 1
+          fi
+          echo "Verified $RELEASE_TAG at $head_commit"
 
       - name: Checkout connector workflows
         uses: actions/checkout@v5
@@ -429,8 +445,24 @@ jobs:
         with:
           path: _caller
           repository: ${{ github.event.repository.full_name }}
+          ref: refs/tags/${{ inputs.tag }}
           fetch-depth: 0
           persist-credentials: false
+
+      - name: Verify caller checkout matches release tag
+        working-directory: _caller
+        shell: bash
+        env:
+          RELEASE_TAG: ${{ inputs.tag }}
+        run: |
+          set -euo pipefail
+          tag_commit="$(git rev-list -n 1 "refs/tags/$RELEASE_TAG")"
+          head_commit="$(git rev-parse HEAD)"
+          if [ "$head_commit" != "$tag_commit" ]; then
+            echo "::error::Checked out $head_commit but refs/tags/$RELEASE_TAG resolves to $tag_commit"
+            exit 1
+          fi
+          echo "Verified $RELEASE_TAG at $head_commit"
 
       - name: Checkout connector workflows
         uses: actions/checkout@v5
@@ -721,8 +753,24 @@ jobs:
         with:
           path: _caller
           repository: ${{ github.event.repository.full_name }}
+          ref: refs/tags/${{ inputs.tag }}
           fetch-depth: 0
           persist-credentials: false
+
+      - name: Verify caller checkout matches release tag
+        working-directory: _caller
+        shell: bash
+        env:
+          RELEASE_TAG: ${{ inputs.tag }}
+        run: |
+          set -euo pipefail
+          tag_commit="$(git rev-list -n 1 "refs/tags/$RELEASE_TAG")"
+          head_commit="$(git rev-parse HEAD)"
+          if [ "$head_commit" != "$tag_commit" ]; then
+            echo "::error::Checked out $head_commit but refs/tags/$RELEASE_TAG resolves to $tag_commit"
+            exit 1
+          fi
+          echo "Verified $RELEASE_TAG at $head_commit"
 
       - name: Checkout connector workflows
         if: inputs.docker == true || inputs.lambda == true
@@ -1207,7 +1255,27 @@ jobs:
         uses: actions/checkout@v5
         with:
           path: _connector
+          repository: ${{ github.event.repository.full_name }}
+          ref: refs/tags/${{ inputs.tag }}
+          fetch-depth: 0
           persist-credentials: false
+
+      - name: Verify connector checkout matches release tag
+        id: verify-connector-checkout
+        working-directory: _connector
+        shell: bash
+        env:
+          RELEASE_TAG: ${{ inputs.tag }}
+        run: |
+          set -euo pipefail
+          tag_commit="$(git rev-list -n 1 "refs/tags/$RELEASE_TAG")"
+          head_commit="$(git rev-parse HEAD)"
+          if [ "$head_commit" != "$tag_commit" ]; then
+            echo "::error::Checked out $head_commit but refs/tags/$RELEASE_TAG resolves to $tag_commit"
+            exit 1
+          fi
+          echo "commit_sha=$head_commit" >> "$GITHUB_OUTPUT"
+          echo "Verified $RELEASE_TAG at $head_commit"
 
       - name: Read connector documentation
         id: read-docs
@@ -1288,7 +1356,7 @@ jobs:
             -name "${{ github.event.repository.name }}" \
             -version "${{ inputs.tag }}" \
             -repository-url "https://github.com/${{ github.repository }}" \
-            -commit-sha "${{ github.sha }}" \
+            -commit-sha "${{ steps.verify-connector-checkout.outputs.commit_sha }}" \
             -workflow-run-id "${{ github.run_id }}" \
             -registry-url "https://dist.conductorone.com" \
             $DOCS_FLAG \

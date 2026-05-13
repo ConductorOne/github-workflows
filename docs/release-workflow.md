@@ -100,6 +100,13 @@ Post-release validation (non-blocking):
 
 ## Security Properties
 
+### Release Source Identity
+
+Release jobs check out caller code from `refs/tags/<tag>` and verify the
+checked-out commit matches the tag target before building artifacts or recording
+registry metadata. This prevents a release run from publishing artifacts for one
+commit while labeling them as a different tag.
+
 ### Keyless Signing
 
 All signatures use Sigstore's keyless signing:
