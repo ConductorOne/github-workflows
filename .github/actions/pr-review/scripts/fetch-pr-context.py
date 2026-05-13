@@ -133,23 +133,35 @@ def main():
     # markers are untrusted PR content and must not influence review mode.
     review_comments = [c for c in comments if is_bot_review_comment(c, summary_heading)]
 
-    # Extract last_reviewed_sha from the newest valid bot review state.
+    # Extract state from the newest bot review comment owned by this workflow.
+    # If only legacy markerless comments exist, reuse the newest one so the first
+    # marker-writing run does not create a duplicate summary.
     last_reviewed_sha = None
     last_review_base_sha = None
-    summary_comment_id = review_comments[-1]["id"] if review_comments else None
+    summary_comment_id = None
+    legacy_summary_comment_id = None
     for c in reversed(review_comments):
         match = REVIEW_STATE_PATTERN.search(c["body"])
-        if match:
-            try:
-                state = json.loads(match.group(1))
-                if workflow_ref and state.get("workflow_ref") != workflow_ref:
-                    continue
-                last_reviewed_sha = state.get("last_reviewed_sha")
-                last_review_base_sha = state.get("base_sha")
-                if last_reviewed_sha:
-                    break
-            except json.JSONDecodeError:
-                pass
+        if not match:
+            if legacy_summary_comment_id is None:
+                legacy_summary_comment_id = c["id"]
+            continue
+
+        try:
+            state = json.loads(match.group(1))
+        except json.JSONDecodeError:
+            continue
+
+        if workflow_ref and state.get("workflow_ref") != workflow_ref:
+            continue
+
+        summary_comment_id = c["id"]
+        last_reviewed_sha = state.get("last_reviewed_sha")
+        last_review_base_sha = state.get("base_sha")
+        break
+
+    if summary_comment_id is None:
+        summary_comment_id = legacy_summary_comment_id
 
     pr_endpoint = f"repos/{repo}/pulls/{pr_number}"
     pr_result = subprocess.run(
