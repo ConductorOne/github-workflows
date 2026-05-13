@@ -186,8 +186,9 @@ These file patterns indicate what kind of code you are reviewing:
 - C5: Shared request helper and `WithQueryParam` patterns where appropriate
 - C6: URL construction via `url.JoinPath` or `url.Parse`, never string concatenation
 - C7: Endpoint paths as constants, not inline strings
-- C8: Page-token parsing and next-page calculation belong in client code, not connector resource builders.
-  Connector-side chunking of an already in-memory list is fine.
+- C8: Connector List methods should pass raw page tokens to client methods. Client code owns
+  token parsing, default values, and next-page calculation. Connector-side chunking of an
+  already in-memory list is fine.
 
 ### Resource
 
@@ -202,10 +203,13 @@ These file patterns indicate what kind of code you are reviewing:
 - R9: User resources include status, email, profile, and login when available
 - R10: Resource IDs are stable immutable API IDs, never emails or mutable fields
 - R11: API calls receive `ctx`; long or expensive I/O loops check cancellation
-- R12: Service accounts and non-human identities should still be user resources with service-account account type.
-  Do not model identities as app resources unless they are actually access targets.
+- R12: Service accounts and non-human identities should still be user resources with service-account
+  account type. In hand-coded connectors, check for the SDK service-account option. In
+  baton-http configs, check for the equivalent service account type under user traits. Do not
+  model identities as app resources unless they are actually access targets.
 - R13: `WithExternalID` is deprecated in the SDK. Do not require it unless the connector's own
-  Grant/Revoke code explicitly depends on `GetExternalId()`.
+  Grant/Revoke code explicitly depends on `GetExternalId()`. Do not flag missing external ID
+  in baton-http connectors unless the generated or custom provisioning path reads it.
 
 ### Connector
 
@@ -268,6 +272,7 @@ the PR description, and paired with documentation updates.
   and handle unavailable endpoints inside each builder.
 - F2: Do not fetch all pages inside a connector List, Entitlements, Grants, or HTTP client method.
   The SDK should drive pagination one page at a time for checkpointing, rate limits, and cancellation.
+  Client methods should accept a token or cursor and return one page.
 - F3: Do not silently continue after API or parsing errors that affect synced data.
 
 ### Config And Dependencies
@@ -319,6 +324,7 @@ Do not flag these patterns without clear repo-specific evidence:
 - Dependency changes should match the code changes.
 - New dependencies should be justified by the changed code.
 - Removed dependencies should not still be needed.
+- Check whether the connector is on a recent enough baton-sdk version for the behavior it relies on.
 - SDK version changes should not unintentionally widen or narrow connector behavior.
 
 ## Finding Severity

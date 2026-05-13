@@ -171,12 +171,19 @@ repository actually implements a connector.
 - Behavior changes that should be feature-gated, documented, or covered by compatibility tests
 - Error type, status code, retry, pagination, or annotation behavior changes that callers may depend on
 - Config, environment variable, flag, or file format changes without migration handling
+- Deprecation changes that remove compatibility before downstream callers have a replacement path
+- Semver-sensitive changes to generated clients, public structs, interfaces, or wire formats
+- Context propagation changes in public APIs or long-running operations
+- Generated artifact drift when source definitions, schemas, or specs change
+- Changes in SDK behavior that downstream connectors may rely on, even if this repo is not itself a connector
 
 ### Tests And Documentation
 - Missing tests for new behavior, regressions, or compatibility-sensitive paths
 - Tests that assert implementation details instead of observable behavior
 - Flaky timing, ordering, network, or filesystem assumptions
 - Public behavior changes without documentation or example updates
+- Examples that no longer compile or no longer match the public API
+- Dependency changes that do not match the implementation changes
 
 ## Finding Severity
 
