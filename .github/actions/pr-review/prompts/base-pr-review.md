@@ -49,7 +49,9 @@ file when reporting "Threads Resolved" in the summary.
 
 Check for `.claude/skills/ci-review.md` using Glob. The workspace is the trusted PR base
 checkout, not PR head code. If the skill exists, invoke `/ci-review` and incorporate its
-results alongside the general checks.
+results as an additive layer alongside the base checks and any built-in mixins in this
+prompt. For connector repositories, this means the effective review stack is base prompt
++ connector mixin + trusted repo-local `ci-review.md` when that skill exists.
 
 ### Step 5 — Review changed files
 
@@ -149,10 +151,10 @@ specific fix in plain English. If there are no findings, omit this section entir
 
 ## Review Criteria
 
-Use these criteria for connector-adjacent repositories that are not connector implementations,
-such as SDKs, shared workflow repos, and support libraries. Do not apply connector implementation
-rules such as resource builder registration, connector docs, or SaaS API pagination unless the
-repository actually implements a connector.
+Use these base criteria for every repository. Built-in mixins may add domain-specific checks.
+Do not apply connector implementation rules such as resource builder registration, connector
+docs, or SaaS API pagination unless a connector mixin is present or the trusted repo-local skill
+explicitly asks for those checks.
 
 ### Security (blocking)
 - Injection: SQL, command, path traversal, XSS, LDAP/NoSQL/XML — unsanitized user input in queries, commands, file paths, or templates

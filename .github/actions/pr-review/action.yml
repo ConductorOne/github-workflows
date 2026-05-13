@@ -27,11 +27,11 @@ runs:
     run: |
       case "${REVIEW_PROMPT}" in
         ""|"connector")
-          echo "prompt_file=${GITHUB_ACTION_PATH}/prompts/connector-pr-review.md" >> "${GITHUB_OUTPUT}"
+          echo "built_in_mixins=connector" >> "${GITHUB_OUTPUT}"
           echo "summary_heading=### Connector PR Review:" >> "${GITHUB_OUTPUT}"
           ;;
         "general")
-          echo "prompt_file=${GITHUB_ACTION_PATH}/prompts/general-pr-review.md" >> "${GITHUB_OUTPUT}"
+          echo "built_in_mixins=" >> "${GITHUB_OUTPUT}"
           echo "summary_heading=### General PR Review:" >> "${GITHUB_OUTPUT}"
           ;;
         *)
@@ -56,12 +56,20 @@ runs:
     id: prompt
     shell: bash
     env:
-      PROMPT_FILE: ${{ steps.review-config.outputs.prompt_file }}
+      BUILT_IN_MIXINS: ${{ steps.review-config.outputs.built_in_mixins }}
     run: |
       DELIM="PROMPT_EOF_$(openssl rand -hex 8)"
+      PROMPT_DIR="${GITHUB_ACTION_PATH}/prompts"
       {
         echo "REVIEW_PROMPT<<${DELIM}"
-        cat "${PROMPT_FILE}"
+        cat "${PROMPT_DIR}/base-pr-review.md"
+        if [ -n "${BUILT_IN_MIXINS}" ]; then
+          IFS=',' read -ra MIXINS <<< "${BUILT_IN_MIXINS}"
+          for mixin in "${MIXINS[@]}"; do
+            echo
+            cat "${PROMPT_DIR}/mixins/${mixin}.md"
+          done
+        fi
         echo "${DELIM}"
       } >> "${GITHUB_ENV}"
   - name: Run Claude PR Review
