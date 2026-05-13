@@ -63,6 +63,8 @@ Exclude `vendor/`, `conf.gen.go`, generated files, and lockfiles from review.
 Read the relevant code yourself and drop false positives. Only flag real issues.
 Skip any issue that was already raised in an existing PR comment or inline review comment.
 Do not re-flag issues on unchanged code that were pre-resolved in step 3.
+Only report findings you can support from the code. If confidence is low, omit the finding
+or downgrade it to a suggestion.
 
 ### Step 6: Post Results
 
@@ -184,6 +186,8 @@ These file patterns indicate what kind of code you are reviewing:
 - C5: Shared request helper and `WithQueryParam` patterns where appropriate
 - C6: URL construction via `url.JoinPath` or `url.Parse`, never string concatenation
 - C7: Endpoint paths as constants, not inline strings
+- C8: Page-token parsing and next-page calculation belong in client code, not connector resource builders.
+  Connector-side chunking of an already in-memory list is fine.
 
 ### Resource
 
@@ -198,6 +202,10 @@ These file patterns indicate what kind of code you are reviewing:
 - R9: User resources include status, email, profile, and login when available
 - R10: Resource IDs are stable immutable API IDs, never emails or mutable fields
 - R11: API calls receive `ctx`; long or expensive I/O loops check cancellation
+- R12: Service accounts and non-human identities should still be user resources with service-account account type.
+  Do not model identities as app resources unless they are actually access targets.
+- R13: `WithExternalID` is deprecated in the SDK. Do not require it unless the connector's own
+  Grant/Revoke code explicitly depends on `GetExternalId()`.
 
 ### Connector
 
@@ -246,7 +254,21 @@ Criteria:
 - B5: Removed resource types or entitlements
 - B6: Trait type changes
 - B7: New required OAuth scopes
-- B8: Safe changes: display name changes, adding new types, adding trait options, adding pagination
+- B8: New endpoints added to existing sync paths can be breaking when they require new scopes or permissions
+- B9: Safe changes: display name changes, adding new resource types, adding trait options, adding pagination
+
+Breaking connector changes should be gated behind opt-in config where possible, called out in
+the PR description, and paired with documentation updates.
+
+### Forbidden Patterns
+
+- F1: Do not conditionally register resource builders from startup API probes. If a paid-feature
+  endpoint temporarily returns 403/404, conditional registration can make previously synced
+  resource types disappear and be interpreted as deletions. Always register supported builders
+  and handle unavailable endpoints inside each builder.
+- F2: Do not fetch all pages inside a connector List, Entitlements, Grants, or HTTP client method.
+  The SDK should drive pagination one page at a time for checkpointing, rate limits, and cancellation.
+- F3: Do not silently continue after API or parsing errors that affect synced data.
 
 ### Config And Dependencies
 
@@ -286,8 +308,18 @@ Do not flag these patterns without clear repo-specific evidence:
 5. Type assertion: `.(Type)` without `, ok :=` can panic.
 6. Error: logging and continuing can silently drop data.
 7. Error: `fmt.Errorf("...%v", err)` should usually be `%w`.
-8. IDs: using email as a user resource ID can create unstable identities.
+8. IDs: using email as a user resource ID can create unstable identities when a stable API ID exists.
 9. ParentResourceId access without a nil check can panic.
+10. New endpoints in existing sync paths can require new scopes for existing installs.
+11. baton-http sections without their own pagination block may inherit global pagination config;
+    only flag missing pagination after checking the effective config.
+
+### Dependency Checks
+
+- Dependency changes should match the code changes.
+- New dependencies should be justified by the changed code.
+- Removed dependencies should not still be needed.
+- SDK version changes should not unintentionally widen or narrow connector behavior.
 
 ## Finding Severity
 

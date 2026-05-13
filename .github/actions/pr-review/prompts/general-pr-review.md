@@ -143,6 +143,11 @@ specific fix in plain English. If there are no findings, omit this section entir
 
 ## Review Criteria
 
+Use these criteria for connector-adjacent repositories that are not connector implementations,
+such as SDKs, shared workflow repos, and support libraries. Do not apply connector implementation
+rules such as resource builder registration, connector docs, or SaaS API pagination unless the
+repository actually implements a connector.
+
 ### Security (blocking)
 - Injection: SQL, command, path traversal, XSS, LDAP/NoSQL/XML — unsanitized user input in queries, commands, file paths, or templates
 - Auth: missing/insufficient authentication or authorization checks, IDOR
@@ -161,12 +166,24 @@ specific fix in plain English. If there are no findings, omit this section entir
 - Concurrency: data races, goroutine leaks, misuse of sync primitives, missing context propagation
 - API contracts: interface violations, breaking changes to public APIs, incorrect library usage
 
+### SDK And Shared Library Compatibility
+- Exported API changes that break existing callers
+- Behavior changes that should be feature-gated, documented, or covered by compatibility tests
+- Error type, status code, retry, pagination, or annotation behavior changes that callers may depend on
+- Config, environment variable, flag, or file format changes without migration handling
+
+### Tests And Documentation
+- Missing tests for new behavior, regressions, or compatibility-sensitive paths
+- Tests that assert implementation details instead of observable behavior
+- Flaky timing, ordering, network, or filesystem assumptions
+- Public behavior changes without documentation or example updates
+
 ## Finding Severity
 
 | Severity | Blocks Merge | Use When |
 |-|-|-|
 | `blocking-security` | Yes | Confident security vulnerability |
-| `blocking-correctness` | Yes | Confident bug or crash |
-| `suggestion` | No | Uncertain issues, style, edge cases |
+| `blocking-correctness` | Yes | Confident bug, crash, data loss, or compatibility break |
+| `suggestion` | No | Uncertain issues, style, test gaps, doc gaps, or maintainability |
 
 **When in doubt, use suggestion.**
