@@ -118,6 +118,9 @@ def main():
     repo = os.environ.get("GITHUB_REPOSITORY", "")
     pr_number = os.environ.get("PR_NUMBER", "")
     workflow_ref = os.environ.get("GITHUB_WORKFLOW_REF", "")
+    run_id = os.environ.get("GITHUB_RUN_ID", "")
+    server_url = os.environ.get("GITHUB_SERVER_URL", "https://github.com").rstrip("/")
+    review_run_url = f"{server_url}/{repo}/actions/runs/{run_id}" if repo and run_id else None
     summary_heading = os.environ.get(
         "REVIEW_SUMMARY_HEADING",
         DEFAULT_REVIEW_SUMMARY_HEADING,
@@ -236,6 +239,7 @@ def main():
         "current_sha": current_sha,
         "current_base_sha": current_base_sha,
         "workflow_ref": workflow_ref,
+        "review_run_url": review_run_url,
         "summary_heading": summary_heading,
         "review_mode": review_mode,
         "last_reviewed_sha": last_reviewed_sha,
