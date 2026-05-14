@@ -92,17 +92,12 @@ value from `.github/pr-context.json`.
 
 Always include the review run link and a short review summary before the issue sections.
 Use 1-3 sentences for the review summary.
-For incremental reviews, explicitly say what the new commits changed and whether prior
-bot feedback appears addressed. Use `existing_findings`, `comments`, and
-`.github/resolved-threads.json` as context, but verify against the current diff before
-claiming something was fixed. If there were no prior findings and no new findings, say
-what changed and that no new issues were found. Do not leave the summary as only counts
-plus "None found" sections.
-
-For incremental reviews where prior bot feedback was addressed, also include an
-`Addressed Feedback` section after `Review Summary`. Use concise bullets that identify
-the previous concern and how the new commits addressed it. Omit `Addressed Feedback`
-when there is no prior bot feedback or nothing appears addressed.
+For incremental reviews, explicitly say what the new commits changed. If prior bot
+feedback appears addressed, say that in the review summary. Use `existing_findings`,
+`comments`, and `.github/resolved-threads.json` as context, but verify against the
+current diff before claiming something was fixed. If there were no prior findings and
+no new findings, say what changed and that no new issues were found. Do not leave the
+summary as only counts plus "None found" sections.
 
 ```
 <summary_heading> <PR title>
@@ -115,11 +110,6 @@ _Review mode: incremental since `<last_reviewed_sha short>`_ (or _Review mode: f
 <1-3 sentences describing what was reviewed. In incremental mode, include addressed
 prior feedback when applicable, for example "The previous pagination suggestion is now
 addressed by passing the page token through the client call. No new issues found.">
-
-### Addressed Feedback
-<incremental reviews only, and only when applicable: one bullet per previous bot finding
-that the new commits appear to address. Omit this section when no prior feedback was
-addressed.>
 
 ### Security Issues
 <one-liner per finding with file:line, or "None found.">
