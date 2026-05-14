@@ -89,11 +89,24 @@ Do not delete existing summary comments before the new review has been posted.
 Use this template for the summary body. The heading must be exactly the `summary_heading`
 value from `.github/pr-context.json`.
 
+Always include a short review summary before the issue sections. Use 1-3 sentences.
+For incremental reviews, explicitly say what the new commits changed and whether prior
+bot feedback appears addressed. Use `existing_findings`, `comments`, and
+`.github/resolved-threads.json` as context, but verify against the current diff before
+claiming something was fixed. If there were no prior findings and no new findings, say
+what changed and that no new issues were found. Do not leave the summary as only counts
+plus "None found" sections.
+
 ```
 <summary_heading> <PR title>
 
 **Blocking Issues: N** | **Suggestions: M** | **Threads Resolved: R**
 _Review mode: incremental since `<last_reviewed_sha short>`_ (or _Review mode: full_)
+
+### Review Summary
+<1-3 sentences describing what was reviewed. In incremental mode, include addressed
+prior feedback when applicable, for example "The previous pagination suggestion is now
+addressed by passing the page token through the client call. No new issues found.">
 
 ### Security Issues
 <one-liner per finding with file:line, or "None found.">
