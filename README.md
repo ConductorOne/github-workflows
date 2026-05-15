@@ -203,6 +203,35 @@ jobs:
 | `run_tests` | No | `true` | Run `go test` |
 | `connector` | No | `""` | Connector name — triggers [regression testing](docs/verify-workflow.md#regression) when set |
 
+## Connector Docs Verify Workflow
+
+Runs a standalone `docs/connector.mdx` validation check for connector repositories. See [detailed documentation](docs/connector-docs-verify.md) for behavior and rollout notes.
+
+The workflow is safe to require on every connector pull request because it always reports a status. It skips validation when `docs/connector.mdx` is unchanged, fails if that file was changed and removed, and validates MDX safety when the file changed.
+
+### Usage
+
+```yaml
+name: Connector Docs
+
+on:
+  pull_request:
+    types: [opened, reopened, synchronize]
+  push:
+    branches:
+      - main
+
+jobs:
+  connector-docs:
+    uses: ConductorOne/github-workflows/.github/workflows/connector-docs-verify.yaml@v4
+    with:
+      ref: ${{ github.event.pull_request.head.sha || github.sha }}
+```
+
+When used with the job id `connector-docs`, the required status check context is `connector-docs / validate`.
+
+Roll out the caller workflow before marking the check required. The shared workflow ref, such as `v4`, must include `connector-docs-verify.yaml` before connector repos call it.
+
 ## Available Actions
 
 ### Get Baton

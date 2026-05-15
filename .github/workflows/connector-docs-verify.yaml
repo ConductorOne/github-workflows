@@ -1,0 +1,318 @@
+on:
+  workflow_call:
+    inputs:
+      ref:
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  pull-requests: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check docs change
+        id: docs-change
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number || '' }}
+          REPOSITORY: ${{ github.event.repository.full_name }}
+        run: |
+          set -euo pipefail
+
+          if [ -z "$PR_NUMBER" ]; then
+            echo "validate=unknown" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          API_URL="${GITHUB_API_URL:-https://api.github.com}"
+          PAGE=1
+          SHOULD_VALIDATE=false
+          while true; do
+            FILES=$(curl -fsSL \
+              -H "Authorization: Bearer $GH_TOKEN" \
+              -H "Accept: application/vnd.github+json" \
+              "${API_URL}/repos/${REPOSITORY}/pulls/${PR_NUMBER}/files?per_page=100&page=${PAGE}")
+
+            if echo "$FILES" | jq -e '.[] | select(.filename == "docs/connector.mdx")' >/dev/null; then
+              SHOULD_VALIDATE=true
+              break
+            fi
+
+            FILE_COUNT=$(echo "$FILES" | jq 'length')
+            if [ "$FILE_COUNT" -lt 100 ]; then
+              break
+            fi
+            PAGE=$((PAGE + 1))
+          done
+
+          echo "validate=$SHOULD_VALIDATE" >> "$GITHUB_OUTPUT"
+          if [ "$SHOULD_VALIDATE" != "true" ]; then
+            echo "docs/connector.mdx unchanged; skipping MDX validation"
+          fi
+
+      - name: Setup Node
+        if: steps.docs-change.outputs.validate != 'false'
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Install MDX lint dependencies
+        if: steps.docs-change.outputs.validate != 'false'
+        run: |
+          mkdir -p /tmp/mdx-lint
+          npm init -y --silent --prefix /tmp/mdx-lint > /dev/null 2>&1
+          npm install --ignore-scripts --silent --prefix /tmp/mdx-lint @mdx-js/mdx@3.1.1 remark-gfm@4.0.1 remark-frontmatter@5.0.0 2>&1 | tail -n 1
+
+      - name: Checkout caller repo
+        if: steps.docs-change.outputs.validate != 'false'
+        uses: actions/checkout@v5
+        with:
+          repository: ${{ github.event.pull_request.head.repo.full_name || github.event.repository.full_name }}
+          ref: ${{ inputs.ref }}
+          path: _caller
+          persist-credentials: false
+
+      - name: Resolve docs validation
+        if: steps.docs-change.outputs.validate != 'false'
+        id: docs
+        shell: bash
+        env:
+          PRECHECK: ${{ steps.docs-change.outputs.validate }}
+        run: |
+          set -euo pipefail
+
+          if [ "$PRECHECK" = "unknown" ] && [ ! -f "_caller/docs/connector.mdx" ]; then
+            echo "validate=false" >> "$GITHUB_OUTPUT"
+            echo "docs/connector.mdx missing; skipping MDX validation"
+            exit 0
+          fi
+
+          if [ ! -f "_caller/docs/connector.mdx" ]; then
+            echo "::error file=docs/connector.mdx::docs/connector.mdx changed but is missing at the checked-out ref."
+            exit 1
+          fi
+
+          echo "validate=true" >> "$GITHUB_OUTPUT"
+
+      - name: Validate MDX documentation
+        if: steps.docs.outputs.validate == 'true'
+        shell: bash {0}
+        run: |
+          cat > /tmp/mdx-lint/mdx-lint.mjs << 'LINT_EOF'
+          import { compile } from "@mdx-js/mdx";
+          import remarkGfm from "remark-gfm";
+          import remarkFrontmatter from "remark-frontmatter";
+
+          const ALLOWED_COMPONENTS = new Set([
+            "Tip",
+            "Warning",
+            "Note",
+            "Info",
+            "Icon",
+            "Frame",
+            "Card",
+            "Check",
+            "Tabs",
+            "Tab",
+            "Steps",
+            "Step",
+          ]);
+
+          const EVENT_HANDLER_RE = /\son[a-z]+\s*=/i;
+          const MDX_COMPONENT_TAG_RE = /<\/?([A-Za-z][A-Za-z0-9.]*)\b/g;
+
+          function decodeHtmlEntities(input) {
+            return input
+              .replace(/&#x([0-9a-f]+);?/gi, (_, hex) =>
+                String.fromCodePoint(Number.parseInt(hex, 16)),
+              )
+              .replace(/&#([0-9]+);?/g, (_, dec) =>
+                String.fromCodePoint(Number.parseInt(dec, 10)),
+              )
+              .replace(/&colon;/gi, ":")
+              .replace(/&tab;/gi, "\t")
+              .replace(/&newline;/gi, "\n")
+              .replace(/&amp;/gi, "&");
+          }
+
+          function containsDangerousUrl(input) {
+            const decoded = decodeHtmlEntities(input);
+            const normalized = [...decoded]
+              .filter((ch) => !/[\s\p{C}]/u.test(ch))
+              .join("")
+              .toLowerCase();
+
+            return (
+              normalized.includes("javascript:") ||
+              normalized.includes("vbscript:") ||
+              normalized.includes("data:text/html")
+            );
+          }
+
+          function openingFence(line) {
+            const match = /^( {0,3})(`{3,}|~{3,})(.*)$/.exec(line);
+            if (!match) {
+              return null;
+            }
+            const marker = match[2];
+            const info = match[3] ?? "";
+            const char = marker[0];
+            if (char === "`" && info.includes("`")) {
+              return null;
+            }
+            return { char, length: marker.length };
+          }
+
+          function isClosingFence(line, fence) {
+            const match = /^( {0,3})(`{3,}|~{3,})[ \t]*$/.exec(line);
+            return (
+              match !== null &&
+              match[2][0] === fence.char &&
+              match[2].length >= fence.length
+            );
+          }
+
+          function stripInlineCode(line) {
+            let output = "";
+            let index = 0;
+            while (index < line.length) {
+              if (line[index] !== "`") {
+                output += line[index];
+                index += 1;
+                continue;
+              }
+
+              const end = line.indexOf("`", index + 1);
+              if (end === -1) {
+                output += line.slice(index);
+                break;
+              }
+
+              output += " ".repeat(end - index + 1);
+              index = end + 1;
+            }
+            return output;
+          }
+
+          function validateSource(content) {
+            if (!content.trim()) {
+              throw new Error("documentation cannot be empty");
+            }
+            if (content.includes("\0")) {
+              throw new Error("documentation contains NUL bytes");
+            }
+            if (content.includes("\ufeff")) {
+              throw new Error("documentation contains byte order marks");
+            }
+
+            let inFence = false;
+            let fence = null;
+            const lines = content.split(/\r?\n/);
+            for (const [index, line] of lines.entries()) {
+              const lineNumber = index + 1;
+              if (inFence) {
+                if (isClosingFence(line, fence)) {
+                  inFence = false;
+                  fence = null;
+                }
+                continue;
+              }
+
+              const marker = openingFence(line);
+              if (marker) {
+                inFence = true;
+                fence = marker;
+                continue;
+              }
+
+              const checkLine = stripInlineCode(line);
+              const trimmed = checkLine.trim().toLowerCase();
+              if (
+                trimmed === "import" ||
+                trimmed.startsWith("import ") ||
+                trimmed === "export" ||
+                trimmed.startsWith("export ")
+              ) {
+                throw new Error(`line ${lineNumber} contains MDX import/export`);
+              }
+              if (checkLine.includes("{") || checkLine.includes("}")) {
+                throw new Error(`line ${lineNumber} contains MDX expression braces`);
+              }
+              if (EVENT_HANDLER_RE.test(checkLine)) {
+                throw new Error(`line ${lineNumber} contains an event handler attribute`);
+              }
+              if (containsDangerousUrl(checkLine)) {
+                throw new Error(`line ${lineNumber} contains a dangerous URL scheme`);
+              }
+              for (const match of checkLine.matchAll(MDX_COMPONENT_TAG_RE)) {
+                const component = match[1];
+                if (!ALLOWED_COMPONENTS.has(component)) {
+                  throw new Error(
+                    `line ${lineNumber} contains disallowed JSX component "${component}"`,
+                  );
+                }
+              }
+            }
+            if (inFence) {
+              throw new Error("documentation contains an unclosed code fence");
+            }
+          }
+
+          let content = "";
+          for await (const chunk of process.stdin) {
+            content += chunk;
+          }
+
+          try {
+            validateSource(content);
+          } catch (err) {
+            process.stderr.write(`mdx-lint: ${err.message}\n`);
+            process.exit(1);
+          }
+
+          let compiled;
+          try {
+            compiled = String(
+              await compile(content, {
+                outputFormat: "function-body",
+                remarkPlugins: [remarkGfm, remarkFrontmatter],
+              }),
+            );
+          } catch (err) {
+            process.stderr.write(`mdx-lint: ${err.message}\n`);
+            process.exit(1);
+          }
+
+          const refPattern = /_missingMdxReference\("([^"]+)"/g;
+          const unknown = new Set();
+          let match;
+          while ((match = refPattern.exec(compiled)) !== null) {
+            const name = match[1];
+            if (!ALLOWED_COMPONENTS.has(name)) {
+              unknown.add(name);
+            }
+          }
+
+          if (unknown.size > 0) {
+            for (const name of unknown) {
+              process.stderr.write(
+                `mdx-lint: Unknown component <${name}>. Allowed: ${[...ALLOWED_COMPONENTS].join(", ")}\n`,
+              );
+            }
+            process.exit(1);
+          }
+          LINT_EOF
+
+          node /tmp/mdx-lint/mdx-lint.mjs < _caller/docs/connector.mdx
+          LINT_RC=$?
+
+          if [ "$LINT_RC" -eq 0 ]; then
+            echo "MDX validation passed"
+          else
+            echo "::error file=docs/connector.mdx::MDX validation failed. See log output above for details."
+            exit 1
+          fi

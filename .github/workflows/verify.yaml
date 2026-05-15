@@ -126,7 +126,7 @@ jobs:
 
           const ALLOWED = new Set([
             "Tip","Warning","Note","Info","Icon",
-            "Frame","Card","Tabs","Tab","Steps","Step",
+            "Frame","Card","Check","Tabs","Tab","Steps","Step",
           ]);
 
           let content = "";
