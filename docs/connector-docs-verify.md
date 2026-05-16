@@ -8,10 +8,14 @@ The `connector-docs-verify.yaml` workflow runs a standalone
 This workflow is meant to be safe as a required status check on every connector
 pull request:
 
-1. It checks out the caller repository at the requested ref.
+1. It checks out this workflow repository at the exact workflow commit.
 2. It checks whether `docs/connector.mdx` changed in the pull request.
-3. If the file is unchanged, the job exits successfully.
-4. If the file changed, the job validates that the file still exists and passes
+3. It installs the checked-in MDX validator dependencies with npm lifecycle
+   scripts disabled.
+4. It checks out the caller repository at the requested ref with persisted
+   credentials disabled.
+5. If the file is unchanged, the job exits successfully.
+6. If the file changed, the job validates that the file still exists and passes
    MDX safety checks.
 
 The required check context is stable when the caller job id is
@@ -24,11 +28,10 @@ connector-docs / validate
 ## MDX Checks
 
 The validator compiles MDX without evaluating PR content and rejects unsafe
-constructs before compilation:
+constructs by walking the MDX AST before compilation:
 
 - empty documentation
 - NUL bytes or byte-order marks
-- unclosed code fences
 - MDX imports or exports outside code fences
 - MDX expression braces outside code fences
 - event-handler attributes

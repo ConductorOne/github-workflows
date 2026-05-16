@@ -209,6 +209,8 @@ Runs a standalone `docs/connector.mdx` validation check for connector repositori
 
 The workflow is safe to require on every connector pull request because it always reports a status. It skips validation when `docs/connector.mdx` is unchanged, fails if that file was changed and removed, and validates MDX safety when the file changed.
 
+The reusable workflow checks out its own validator at the exact workflow commit, installs locked dependencies with npm lifecycle scripts disabled, and checks out caller code without persisted credentials.
+
 ### Usage
 
 ```yaml
