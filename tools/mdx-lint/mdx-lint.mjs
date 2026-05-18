@@ -65,7 +65,7 @@ function containsDangerousUrl(input) {
   return (
     normalized.includes("javascript:") ||
     normalized.includes("vbscript:") ||
-    normalized.includes("data:text/html")
+    normalized.includes("data:")
   );
 }
 
