@@ -1,0 +1,87 @@
+on:
+  workflow_call:
+    inputs:
+      ref:
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  pull-requests: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout workflow repo
+        uses: actions/checkout@v5
+        with:
+          repository: ${{ job.workflow_repository }}
+          ref: ${{ job.workflow_sha }}
+          path: _workflow
+          persist-credentials: false
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: _workflow/tools/mdx-lint/package-lock.json
+
+      - name: Check docs change
+        id: docs-change
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number || '' }}
+          REPOSITORY: ${{ github.event.repository.full_name }}
+        run: node _workflow/tools/connector-docs/check-docs-change.mjs
+
+      - name: Install MDX lint dependencies
+        if: steps.docs-change.outputs.validate != 'false'
+        run: |
+          npm ci --ignore-scripts --silent --prefix _workflow/tools/mdx-lint 2>&1 | tail -n 1
+
+      - name: Checkout caller repo
+        if: steps.docs-change.outputs.validate != 'false'
+        uses: actions/checkout@v5
+        with:
+          repository: ${{ github.event.pull_request.head.repo.full_name || github.event.repository.full_name }}
+          ref: ${{ inputs.ref }}
+          path: _caller
+          persist-credentials: false
+
+      - name: Resolve docs validation
+        if: steps.docs-change.outputs.validate != 'false'
+        id: docs
+        shell: bash
+        env:
+          PRECHECK: ${{ steps.docs-change.outputs.validate }}
+        run: |
+          set -euo pipefail
+
+          if [ "$PRECHECK" = "unknown" ] && [ ! -f "_caller/docs/connector.mdx" ]; then
+            echo "validate=false" >> "$GITHUB_OUTPUT"
+            echo "docs/connector.mdx missing; skipping MDX validation"
+            exit 0
+          fi
+
+          if [ ! -f "_caller/docs/connector.mdx" ]; then
+            echo "::error file=docs/connector.mdx::docs/connector.mdx changed but is missing at the checked-out ref."
+            exit 1
+          fi
+
+          echo "validate=true" >> "$GITHUB_OUTPUT"
+
+      - name: Validate MDX documentation
+        if: steps.docs.outputs.validate == 'true'
+        shell: bash
+        run: |
+          node _workflow/tools/mdx-lint/mdx-lint.mjs < _caller/docs/connector.mdx
+          LINT_RC=$?
+
+          if [ "$LINT_RC" -eq 0 ]; then
+            echo "MDX validation passed"
+          else
+            echo "::error file=docs/connector.mdx::MDX validation failed. See log output above for details."
+            exit 1
+          fi

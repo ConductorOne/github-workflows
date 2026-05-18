@@ -8,7 +8,8 @@ When a pull request is opened or code is pushed to main, the shared verify workf
 
 1. Runs `golangci-lint` on the connector code
 2. Runs `go test` (optional, enabled by default)
-3. Runs baton-regression verification (optional, when `connector` is provided)
+3. Validates `docs/connector.mdx` when the file exists
+4. Runs baton-regression verification (optional, when `connector` is provided)
 
 ## Jobs
 
@@ -19,6 +20,14 @@ Checks out the caller repo and runs `golangci-lint` with a 6-minute timeout. If 
 ### test
 
 Runs `go test -v -covermode=count -json ./...` and annotates results. Skipped if `run_tests: false`.
+
+### docs
+
+Validates `docs/connector.mdx` when the file exists. The validator compiles MDX
+without evaluating PR content and rejects unsupported JSX components.
+
+For branch rules that need a standalone docs safety check, prefer the stricter
+[`connector-docs-verify.yaml`](connector-docs-verify.md) workflow.
 
 ### regression
 
