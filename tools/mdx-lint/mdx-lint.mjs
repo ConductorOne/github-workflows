@@ -14,6 +14,8 @@
 //   0 - valid MDX
 //   1 - validation or compilation error (message on stderr)
 
+import { pathToFileURL } from "node:url";
+
 import { compile } from "@mdx-js/mdx";
 import remarkFrontmatter from "remark-frontmatter";
 import remarkGfm from "remark-gfm";
@@ -159,7 +161,7 @@ function validateTree(tree) {
   });
 }
 
-function parse(content) {
+function parseMdx(content) {
   const processor = unified()
     .use(remarkParse)
     .use(remarkMdx)
@@ -168,29 +170,19 @@ function parse(content) {
   return processor.parse(content);
 }
 
-async function main() {
-  let content = "";
-  for await (const chunk of process.stdin) {
-    content += chunk;
+export async function lintMdxContent(content) {
+  if (!content.trim()) {
+    throw new Error("documentation cannot be empty");
+  }
+  if (content.includes("\0")) {
+    throw new Error("documentation contains NUL bytes");
+  }
+  if (content.includes("\ufeff")) {
+    throw new Error("documentation contains byte order marks");
   }
 
-  try {
-    if (!content.trim()) {
-      throw new Error("documentation cannot be empty");
-    }
-    if (content.includes("\0")) {
-      throw new Error("documentation contains NUL bytes");
-    }
-    if (content.includes("\ufeff")) {
-      throw new Error("documentation contains byte order marks");
-    }
-
-    const tree = parse(content);
-    validateTree(tree);
-  } catch (err) {
-    process.stderr.write(`mdx-lint: ${err.message}\n`);
-    process.exit(1);
-  }
+  const tree = parseMdx(content);
+  validateTree(tree);
 
   try {
     await compile(content, {
@@ -198,9 +190,27 @@ async function main() {
       remarkPlugins: [remarkGfm, remarkFrontmatter],
     });
   } catch (err) {
+    throw new Error(err.message);
+  }
+}
+
+async function readStdin() {
+  let content = "";
+  for await (const chunk of process.stdin) {
+    content += chunk;
+  }
+  return content;
+}
+
+async function main() {
+  try {
+    await lintMdxContent(await readStdin());
+  } catch (err) {
     process.stderr.write(`mdx-lint: ${err.message}\n`);
     process.exit(1);
   }
 }
 
-main();
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+  main();
+}

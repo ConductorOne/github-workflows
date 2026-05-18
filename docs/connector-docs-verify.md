@@ -96,5 +96,7 @@ Use a staged rollout:
 4. Require `connector-docs / validate` in branch rules only after the check is
    present on targeted repos.
 
-The existing `verify.yaml` docs job is a compatibility check. Use this
-standalone workflow as the required docs safety gate.
+The existing `verify.yaml` docs job reuses the same MDX validator for
+compatibility. Use this standalone workflow as the required docs safety gate
+because it always reports the `connector-docs / validate` check that branch
+rules target.

@@ -13,55 +13,7 @@ jobs:
   validate:
     runs-on: ubuntu-latest
     steps:
-      - name: Check docs change
-        id: docs-change
-        shell: bash
-        env:
-          GH_TOKEN: ${{ github.token }}
-          PR_NUMBER: ${{ github.event.pull_request.number || '' }}
-          REPOSITORY: ${{ github.event.repository.full_name }}
-        run: |
-          set -euo pipefail
-
-          if [ -z "$PR_NUMBER" ]; then
-            echo "validate=unknown" >> "$GITHUB_OUTPUT"
-            exit 0
-          fi
-
-          API_URL="${GITHUB_API_URL:-https://api.github.com}"
-          PAGE=1
-          PAGE_LIMIT=30
-          SHOULD_VALIDATE=false
-          while true; do
-            FILES=$(curl -fsSL \
-              -H "Authorization: Bearer $GH_TOKEN" \
-              -H "Accept: application/vnd.github+json" \
-              "${API_URL}/repos/${REPOSITORY}/pulls/${PR_NUMBER}/files?per_page=100&page=${PAGE}")
-
-            if echo "$FILES" | jq -e '.[] | select(.filename == "docs/connector.mdx" or .previous_filename == "docs/connector.mdx")' >/dev/null; then
-              SHOULD_VALIDATE=true
-              break
-            fi
-
-            FILE_COUNT=$(echo "$FILES" | jq 'length')
-            if [ "$PAGE" -ge "$PAGE_LIMIT" ] && [ "$FILE_COUNT" -eq 100 ]; then
-              echo "::warning::PR file list reached the GitHub API cap; validating docs/connector.mdx because changed files cannot be proven complete."
-              SHOULD_VALIDATE=true
-              break
-            fi
-            if [ "$FILE_COUNT" -lt 100 ]; then
-              break
-            fi
-            PAGE=$((PAGE + 1))
-          done
-
-          echo "validate=$SHOULD_VALIDATE" >> "$GITHUB_OUTPUT"
-          if [ "$SHOULD_VALIDATE" != "true" ]; then
-            echo "docs/connector.mdx unchanged; skipping MDX validation"
-          fi
-
       - name: Checkout workflow repo
-        if: steps.docs-change.outputs.validate != 'false'
         uses: actions/checkout@v5
         with:
           repository: ${{ job.workflow_repository }}
@@ -70,12 +22,19 @@ jobs:
           persist-credentials: false
 
       - name: Setup Node
-        if: steps.docs-change.outputs.validate != 'false'
         uses: actions/setup-node@v4
         with:
           node-version: 20
           cache: npm
           cache-dependency-path: _workflow/tools/mdx-lint/package-lock.json
+
+      - name: Check docs change
+        id: docs-change
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number || '' }}
+          REPOSITORY: ${{ github.event.repository.full_name }}
+        run: node _workflow/tools/connector-docs/check-docs-change.mjs
 
       - name: Install MDX lint dependencies
         if: steps.docs-change.outputs.validate != 'false'
