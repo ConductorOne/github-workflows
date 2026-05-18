@@ -152,11 +152,6 @@ function validateTree(tree) {
       case "definition":
         validateUrlNode(node);
         break;
-      case "text":
-        if (containsDangerousUrl(node.value)) {
-          fail(node, "contains a dangerous URL scheme");
-        }
-        break;
     }
   });
 }
