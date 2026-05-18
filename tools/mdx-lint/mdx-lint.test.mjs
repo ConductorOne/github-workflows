@@ -44,6 +44,19 @@ Read the public setup guide at https://example.com/docs.
 `);
   });
 
+  it("allows dangerous URL scheme names in plain prose", async () => {
+    await expectValid(`<Steps>
+  <Step>
+    In the permissions section, choose the relevant permissions:
+
+    To sync (read) data:
+
+    - Project: Read
+  </Step>
+</Steps>
+`);
+  });
+
   it("rejects unknown JSX components", async () => {
     await expectInvalid("<Unknown />\n", /disallowed JSX component "Unknown"/);
   });
