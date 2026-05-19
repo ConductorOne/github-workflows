@@ -33,6 +33,7 @@ const ALLOWED_COMPONENTS = new Set([
   "Info",
   "Icon",
   "Frame",
+  "CardGroup",
   "Card",
   "Check",
   "Tabs",
@@ -41,6 +42,7 @@ const ALLOWED_COMPONENTS = new Set([
   "Step",
 ]);
 
+const ALLOWED_INTRINSIC_ELEMENTS = new Set(["br"]);
 const URL_ATTRIBUTE_NAMES = new Set(["href", "src", "action", "formaction"]);
 
 function decodeHtmlEntities(input) {
@@ -79,6 +81,26 @@ function at(node) {
 
 function fail(node, message) {
   throw new Error(`${at(node)} ${message}`);
+}
+
+function isMdxCommentExpression(node) {
+  const value = String(node.value ?? "").trim();
+  if (!value) {
+    return false;
+  }
+
+  let rest = value;
+  while (rest) {
+    if (!rest.startsWith("/*")) {
+      return false;
+    }
+    const end = rest.indexOf("*/", 2);
+    if (end < 0) {
+      return false;
+    }
+    rest = rest.slice(end + 2).trim();
+  }
+  return true;
 }
 
 function validateUrlNode(node) {
@@ -121,7 +143,10 @@ function validateJsxElement(node) {
   if (node.name.includes(".")) {
     fail(node, `contains disallowed JSX component "${node.name}"`);
   }
-  if (!ALLOWED_COMPONENTS.has(node.name)) {
+  if (
+    !ALLOWED_COMPONENTS.has(node.name) &&
+    !ALLOWED_INTRINSIC_ELEMENTS.has(node.name)
+  ) {
     fail(node, `contains disallowed JSX component "${node.name}"`);
   }
 
@@ -138,6 +163,9 @@ function validateTree(tree) {
         break;
       case "mdxFlowExpression":
       case "mdxTextExpression":
+        if (isMdxCommentExpression(node)) {
+          break;
+        }
         fail(node, "contains an MDX expression");
         break;
       case "mdxJsxFlowElement":

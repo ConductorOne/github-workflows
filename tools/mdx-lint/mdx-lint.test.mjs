@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
 import { describe, it } from "node:test";
 
 import { lintMdxContent } from "./mdx-lint.mjs";
@@ -10,6 +11,13 @@ async function expectValid(content) {
 async function expectInvalid(content, pattern) {
   await assert.rejects(() => lintMdxContent(content), pattern);
 }
+
+const sharedFixtures = JSON.parse(
+  await readFile(
+    new URL("./testdata/shared-mdx-validation.json", import.meta.url),
+    "utf8",
+  ),
+);
 
 describe("mdx-lint policy", () => {
   it("allows supported connector docs content", async () => {
@@ -70,6 +78,12 @@ Read the public setup guide at https://example.com/docs.
     await expectInvalid("{process.env.SECRET}\n", /MDX expression/);
   });
 
+  it("allows MDX comments", async () => {
+    await expectValid(`{/* AUTO-GENERATED:START - capabilities
+     Generated from baton_capabilities.json. Do not edit manually. */}
+`);
+  });
+
   it("rejects raw HTML elements", async () => {
     await expectInvalid("<div>raw html</div>\n", /disallowed JSX component "div"/);
   });
@@ -95,5 +109,20 @@ Read the public setup guide at https://example.com/docs.
   it("rejects BOM and NUL bytes", async () => {
     await expectInvalid("\ufeff# Title\n", /byte order marks/);
     await expectInvalid("hello\0world\n", /NUL bytes/);
+  });
+
+  describe("shared validation fixtures", () => {
+    for (const fixture of sharedFixtures) {
+      it(fixture.name, async () => {
+        if (fixture.valid) {
+          await expectValid(fixture.content);
+          return;
+        }
+        await expectInvalid(
+          fixture.content,
+          new RegExp(fixture.errorContains),
+        );
+      });
+    }
   });
 });
