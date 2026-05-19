@@ -1,0 +1,100 @@
+[
+  {
+    "name": "allow dangerous scheme word in prose",
+    "valid": true,
+    "content": "<Steps>\n  <Step>\n    In the permissions section, choose the relevant permissions:\n\n    To sync (read) data:\n\n    - Project: Read\n  </Step>\n</Steps>\n"
+  },
+  {
+    "name": "allow angle bracket placeholder in inline code",
+    "valid": true,
+    "content": "Give the app a globally unique name, such as \"c1-integration-`<org name>`\".\n"
+  },
+  {
+    "name": "allow data scheme literal in inline code",
+    "valid": true,
+    "content": "Use `data:` as the literal scheme name in examples.\n"
+  },
+  {
+    "name": "allow data URL literal in fenced code",
+    "valid": true,
+    "content": "```json\n{\"tenant\":\"{tenant}\",\"url\":\"data:image/png;base64,abc\"}\n```\n"
+  },
+  {
+    "name": "allow MDX comment",
+    "valid": true,
+    "content": "{/* AUTO-GENERATED:START - capabilities\n     Generated from baton_capabilities.json. Do not edit manually. */}\n"
+  },
+  {
+    "name": "allow nested indented fence placeholders",
+    "valid": true,
+    "content": "    ```yaml expandable\n      BATON_CLIENT_ID: <ConductorOne client ID>\n    ```\n"
+  },
+  {
+    "name": "allow tab-indented fenced content",
+    "valid": true,
+    "content": "    ```json expandable\n\t{\n\t  \"ok\": true\n\t}\n    ```\n"
+  },
+  {
+    "name": "allow escaped angle bracket placeholder",
+    "valid": true,
+    "content": "Use \\<CATALOG ITEM ID> as the placeholder.\n"
+  },
+  {
+    "name": "reject double escaped JSX tag",
+    "valid": false,
+    "errorContains": "disallowed JSX component",
+    "content": "This is not escaped JSX: \\\\<script>alert(1)</script>\n"
+  },
+  {
+    "name": "reject escaped fake MDX comment hiding JSX",
+    "valid": false,
+    "errorContains": "dangerous URL scheme",
+    "content": "Note: write the literal sequence \\{/* in your markdown when you need it.\n\n<Frame src=\"javascript:alert(1)\">bad</Frame>\n\nEnd of note */}.\n"
+  },
+  {
+    "name": "reject inline code fake MDX comment hiding JSX",
+    "valid": false,
+    "errorContains": "dangerous URL scheme",
+    "content": "Use `{/*` as literal syntax.\n\n<Frame src=\"javascript:alert(1)\">bad</Frame>\n\nUse `*/}` as literal syntax.\n"
+  },
+  {
+    "name": "reject mixed MDX comment expression",
+    "valid": false,
+    "errorContains": "MDX expression",
+    "content": "{/* a */ x /* b */}\n"
+  },
+  {
+    "name": "allow table line break element",
+    "valid": true,
+    "content": "| Field | Description |\n| --- | --- |\n| Values | `one`<br/>`two` |\n"
+  },
+  {
+    "name": "allow CardGroup layout wrapper",
+    "valid": true,
+    "content": "<CardGroup>\n<Card title=\"Learn more\" icon=\"book\" horizontal href=\"https://example.com/docs\" />\n</CardGroup>\n"
+  },
+  {
+    "name": "reject backtick fence info string with backtick",
+    "valid": false,
+    "errorContains": "MDX expression",
+    "content": "``` `\n{process.env.REGISTRY_TOKEN}\n```\n"
+  },
+  {
+    "name": "reject markdown data URL",
+    "valid": false,
+    "errorContains": "dangerous URL scheme",
+    "content": "[image](data:image/png;base64,abc)\n"
+  },
+  {
+    "name": "reject JSX data URL attribute",
+    "valid": false,
+    "errorContains": "dangerous URL scheme",
+    "content": "<Frame src=\"data:image/svg+xml,<svg onload=alert(1)>\">bad</Frame>\n"
+  },
+  {
+    "name": "reject encoded javascript URL",
+    "valid": false,
+    "errorContains": "dangerous URL scheme",
+    "content": "[link](java&#x73;cript:alert(1))\n"
+  }
+]
