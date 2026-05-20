@@ -1,5 +1,9 @@
 on:
   pull_request_target:
+    types:
+      - opened
+      - synchronize
+      - reopened
   workflow_call:
     inputs:
       review_prompt:
