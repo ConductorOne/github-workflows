@@ -4,7 +4,9 @@ Shared GitHub workflows and actions for ConductorOne connector repositories.
 
 ## PR Review Workflow
 
-Runs Claude-powered PR review without checking out PR head code. The action builds its
+Runs Claude-powered PR review for same-repository pull requests. Fork PRs are skipped
+because they do not receive automatic Claude review. Review jobs check out the exact PR
+head SHA so Claude can inspect the proposed source tree locally. The action builds its
 prompt from a shared base prompt plus optional built-in mixins. The default profile is
 `connector`, which adds the connector mixin for repos covered by connector required
 workflows or rulesets.
@@ -17,24 +19,23 @@ Prompt layers are additive:
 1. `base-pr-review.md` applies to every repo.
 2. Built-in mixins add shared domain rules. Today, `review_prompt: connector` adds
    `mixins/connector.md`; `review_prompt: general` adds no built-in mixin.
-3. A trusted repo-local `.claude/skills/ci-review.md` can add project-specific rules
-   on top of the selected profile.
+3. A repo-local `.claude/skills/ci-review.md` can add project-specific rules on top
+   of the selected profile.
 
 Keep broadly shared connector criteria in the connector mixin. Use repo-local
 `ci-review.md` only for rules that are specific to one repo or a small set of repos.
 
 ### Custom Review Criteria
 
-Repos can extend the review with project-specific criteria by adding a trusted
-base-branch skill file:
+Repos can extend the review with project-specific criteria by adding a skill file:
 
 ```
 .claude/skills/ci-review.md
 ```
 
-If this file exists on the PR base commit, the reviewer will invoke it and incorporate
-the results alongside the selected prompt profile. The workflow does not load skill
-files from PR head code.
+If this file exists in the checked-out PR head, the reviewer will invoke it and
+incorporate the results alongside the selected prompt profile. Automatic review only
+runs for same-repository PRs.
 
 ## Release Workflow
 

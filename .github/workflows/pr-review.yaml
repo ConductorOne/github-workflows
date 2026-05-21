@@ -1,5 +1,6 @@
 on:
-  pull_request_target:
+  pull_request:
+    types: [opened, reopened, synchronize, ready_for_review]
   workflow_call:
     inputs:
       review_prompt:
@@ -8,11 +9,10 @@ on:
         default: connector
         type: string
 concurrency:
-  group: pr-review-${{ github.workflow_ref }}-${{ github.event.pull_request.number }}
+  group: pr-review-${{ github.workflow_ref }}-${{ github.event.pull_request.number || github.run_id }}
   cancel-in-progress: true
 jobs:
   pr-review:
-    if: github.repository != 'ConductorOne/github-workflows'
     runs-on: ubuntu-latest
     permissions:
       actions: read
@@ -20,16 +20,30 @@ jobs:
       pull-requests: write
       issues: write
     steps:
-      - name: Checkout PR base
-        uses: actions/checkout@v6
+      - name: Report skipped review
+        if: github.event.pull_request.head.repo.full_name != github.repository
+        run: |
+          echo "Skipped: Claude review only runs on same-repo PRs."
+      - name: Checkout PR head
+        if: github.event.pull_request.head.repo.full_name == github.repository
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
         with:
-          ref: ${{ github.event.pull_request.base.sha }}
+          ref: ${{ github.event.pull_request.head.sha }}
+          persist-credentials: false
+      - name: Checkout workflow repo
+        if: github.event.pull_request.head.repo.full_name == github.repository
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+        with:
+          repository: ${{ job.workflow_repository }}
+          ref: ${{ job.workflow_sha }}
+          path: _workflow
           persist-credentials: false
       - name: Run PR Review
-        uses: ConductorOne/github-workflows/.github/actions/pr-review@main
+        if: github.event.pull_request.head.repo.full_name == github.repository
+        uses: ./_workflow/.github/actions/pr-review
         with:
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
           github_token: ${{ secrets.GITHUB_TOKEN }}
           pr_number: ${{ github.event.pull_request.number }}
-          review_prompt: ${{ inputs.review_prompt || 'connector' }}
+          review_prompt: ${{ github.repository == 'ConductorOne/github-workflows' && 'general' || inputs.review_prompt || 'connector' }}
     timeout-minutes: 15

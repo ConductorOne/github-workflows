@@ -20,6 +20,7 @@ from typing import Optional
 REVIEW_PREFIXES = ("🔴 Security:", "🟠 Bug:", "🟡 Suggestion:")
 DEFAULT_API_ATTEMPTS = 3
 HTTP_STATUS_PATTERN = re.compile(r"HTTP\s+(\d{3})")
+BOT_LOGINS = {"github-actions[bot]", "github-actions"}
 
 LIST_THREADS_QUERY = """
 query($owner: String!, $repo: String!, $number: Int!, $after: String) {
@@ -32,7 +33,8 @@ query($owner: String!, $repo: String!, $number: Int!, $after: String) {
           isOutdated
           path
           line
-          comments(first: 1) {
+          comments(first: 20) {
+            totalCount
             nodes {
               body
               author { login }
@@ -133,6 +135,10 @@ def should_resolve(thread: dict) -> bool:
         return False
     comments = thread["comments"]["nodes"]
     if not comments:
+        return False
+    if thread["comments"]["totalCount"] != len(comments):
+        return False
+    if any((c.get("author") or {}).get("login", "") not in BOT_LOGINS for c in comments):
         return False
     body = comments[0].get("body", "")
     return any(body.startswith(prefix) for prefix in REVIEW_PREFIXES)

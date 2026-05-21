@@ -3,9 +3,9 @@
 Apply these extra criteria when reviewing Baton connector implementation repositories.
 Baton connectors are Go projects that sync identity data from SaaS APIs into ConductorOne.
 
-When provisioning files change, inspect the full file content through `gh api` if the diff does
-not contain enough context. Exclude `vendor/`, `conf.gen.go`, generated files, and lockfiles from
-connector-specific review.
+When provisioning files change, inspect the full file content from the local checkout if the
+diff does not contain enough context. Exclude `vendor/`, `conf.gen.go`, generated files, and
+lockfiles from connector-specific review.
 
 ### File Context
 

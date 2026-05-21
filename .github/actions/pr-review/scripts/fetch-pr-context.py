@@ -4,7 +4,7 @@
 Fetches all issue comments via gh api, then extracts:
 - last_reviewed_sha: the SHA from the <!-- review-state: ... --> marker
 - review_mode: "incremental" when a GitHub API compare diff is available, otherwise "full"
-- All comments (for dedup of existing findings)
+- Trusted owner/member/collaborator comments (for human review context)
 
 Writes structured JSON to .github/pr-context.json.
 """
@@ -24,6 +24,7 @@ HTTP_STATUS_PATTERN = re.compile(r"HTTP\s+(\d{3})")
 
 # Bot logins that post review comments via GitHub Actions.
 BOT_LOGINS = {"github-actions[bot]", "github-actions"}
+TRUSTED_COMMENT_ASSOCIATIONS = {"OWNER", "MEMBER", "COLLABORATOR"}
 DEFAULT_REVIEW_SUMMARY_HEADING = "### Connector PR Review:"
 LEGACY_REVIEW_SUMMARY_HEADING = "### PR Review:"
 DEFAULT_API_ATTEMPTS = 3
@@ -140,7 +141,7 @@ def parse_paginated_json(output: str) -> list[dict]:
 
 
 def fetch_compare_diff(head_repo: str, base_sha: str, head_sha: str) -> Optional[str]:
-    """Fetch a compare diff from the PR head repo without checking out PR code."""
+    """Fetch a compare diff from the PR head repo for incremental review."""
     endpoint = f"repos/{head_repo}/compare/{base_sha}...{head_sha}"
     try:
         metadata = gh_api([endpoint])
@@ -198,18 +199,30 @@ def main():
         raise
     print(f"Found {len(raw_comments)} comments")
 
-    # Extract comment summaries
-    comments = []
+    # Keep bot review comments for authoritative state, but only expose trusted
+    # owner/member/collaborator human comments to the review prompt. Public repo
+    # comments from contributors or random users are untrusted prompt input.
+    state_comments = []
+    trusted_context_comments = []
     for c in raw_comments:
-        comments.append({
+        author_association = c.get("author_association", "NONE")
+        comment = {
             "id": c["id"],
             "user": c.get("user", {}).get("login", "unknown"),
+            "author_association": author_association,
             "body": c.get("body", ""),
-        })
+        }
+        state_comments.append(comment)
+        if author_association in TRUSTED_COMMENT_ASSOCIATIONS:
+            trusted_context_comments.append(comment)
+
+    ignored_count = len(state_comments) - len(trusted_context_comments)
+    print(f"Trusted review-context comments: {len(trusted_context_comments)}")
+    print(f"Ignored untrusted or bot comments for prompt context: {ignored_count}")
 
     # Only bot-authored review comments are authoritative state. User-authored
     # markers are untrusted PR content and must not influence review mode.
-    review_comments = [c for c in comments if is_bot_review_comment(c, summary_heading)]
+    review_comments = [c for c in state_comments if is_bot_review_comment(c, summary_heading)]
 
     # Extract state from the newest bot review comment owned by this workflow.
     # If only legacy markerless comments exist, reuse the newest one so the first
@@ -252,9 +265,9 @@ def main():
     print(f"Current PR head: {current_sha[:12]}")
     print(f"Current PR base: {current_base_sha[:12]}")
 
-    # This action intentionally does not check out PR head code under
-    # pull_request_target. Use GitHub-provided diffs instead of relying on
-    # local git history from untrusted code.
+    # Review runs only for same-repo PRs with PR head checked out. GitHub
+    # compare diffs are used only to select incremental/full review mode and to
+    # provide a compact incremental artifact.
     review_mode = "full"
     incremental_diff_path = None
     if not last_reviewed_sha:
@@ -279,8 +292,9 @@ def main():
             last_reviewed_sha = None
 
     # Collect existing findings from bot review comments to help with dedup.
-    # Human comments remain available as context, but they are not authoritative
-    # review state and cannot suppress findings by mimicking the summary format.
+    # Trusted human comments remain available as context, but they are not
+    # authoritative review state and cannot suppress findings by mimicking the
+    # summary format.
     existing_findings = []
     for c in review_comments:
         body = c["body"]
@@ -303,7 +317,7 @@ def main():
         "summary_comment_id": summary_comment_id,
         "incremental_diff_path": incremental_diff_path,
         "existing_findings": existing_findings,
-        "comments": comments,
+        "comments": trusted_context_comments,
     }
 
     output_path = os.path.join(".github", "pr-context.json")
