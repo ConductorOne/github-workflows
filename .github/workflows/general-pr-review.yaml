@@ -39,5 +39,6 @@ jobs:
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
           github_token: ${{ secrets.GITHUB_TOKEN }}
           pr_number: ${{ github.event.pull_request.number }}
+          head_sha: ${{ github.event.pull_request.head.sha }}
           review_prompt: general
     timeout-minutes: 15

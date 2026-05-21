@@ -11,6 +11,9 @@ inputs:
   pr_number:
     description: Pull request number
     required: true
+  head_sha:
+    description: Expected pull request head SHA
+    required: false
   review_prompt:
     description: "Review prompt profile to use: connector or general"
     required: false
@@ -44,6 +47,7 @@ runs:
     env:
       GH_TOKEN: ${{ inputs.github_token }}
       PR_NUMBER: ${{ inputs.pr_number }}
+      PR_HEAD_SHA: ${{ inputs.head_sha }}
       REVIEW_SUMMARY_HEADING: ${{ steps.review-config.outputs.summary_heading }}
     run: python3 ${{ github.action_path }}/scripts/fetch-pr-context.py
   - name: Resolve outdated bot review threads

@@ -165,9 +165,24 @@ def fetch_compare_diff(head_repo: str, base_sha: str, head_sha: str) -> Optional
     return result.stdout
 
 
+def current_checkout_sha() -> Optional[str]:
+    """Return the current git checkout SHA, if the workspace is a git repo."""
+    try:
+        result = subprocess.run(
+            ["git", "rev-parse", "HEAD"],
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+    except subprocess.CalledProcessError:
+        return None
+    return result.stdout.strip()
+
+
 def main():
     repo = os.environ.get("GITHUB_REPOSITORY", "")
     pr_number = os.environ.get("PR_NUMBER", "")
+    expected_head_sha = os.environ.get("PR_HEAD_SHA", "").strip()
     workflow_ref = os.environ.get("GITHUB_WORKFLOW_REF", "")
     run_id = os.environ.get("GITHUB_RUN_ID", "")
     server_url = os.environ.get("GITHUB_SERVER_URL", "https://github.com").rstrip("/")
@@ -206,14 +221,16 @@ def main():
     trusted_context_comments = []
     for c in raw_comments:
         author_association = c.get("author_association", "NONE")
+        user = c.get("user") or {}
         comment = {
             "id": c["id"],
-            "user": c.get("user", {}).get("login", "unknown"),
+            "user": user.get("login", "unknown"),
+            "user_type": user.get("type", "unknown"),
             "author_association": author_association,
             "body": c.get("body", ""),
         }
         state_comments.append(comment)
-        if author_association in TRUSTED_COMMENT_ASSOCIATIONS:
+        if user.get("type") == "User" and author_association in TRUSTED_COMMENT_ASSOCIATIONS:
             trusted_context_comments.append(comment)
 
     ignored_count = len(state_comments) - len(trusted_context_comments)
@@ -259,7 +276,29 @@ def main():
     pr_endpoint = f"repos/{repo}/pulls/{pr_number}"
     pr_result = gh_api([pr_endpoint])
     pr = json.loads(pr_result.stdout)
-    current_sha = pr["head"]["sha"]
+    live_head_sha = pr["head"]["sha"]
+    if expected_head_sha and live_head_sha != expected_head_sha:
+        print(
+            f"PR head changed before review started: event={expected_head_sha}, live={live_head_sha}",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+
+    checkout_sha = current_checkout_sha()
+    if expected_head_sha and checkout_sha != expected_head_sha:
+        print(
+            f"Checkout SHA does not match event PR head: checkout={checkout_sha}, event={expected_head_sha}",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+    if not expected_head_sha and checkout_sha and checkout_sha != live_head_sha:
+        print(
+            f"Checkout SHA does not match live PR head: checkout={checkout_sha}, live={live_head_sha}",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+
+    current_sha = expected_head_sha or live_head_sha
     current_base_sha = pr["base"]["sha"]
     head_repo = (pr["head"].get("repo") or {}).get("full_name")
     print(f"Current PR head: {current_sha[:12]}")

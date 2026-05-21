@@ -13,6 +13,7 @@ concurrency:
   cancel-in-progress: true
 jobs:
   pr-review:
+    if: github.event_name != 'pull_request' || github.repository != 'ConductorOne/github-workflows'
     runs-on: ubuntu-latest
     permissions:
       actions: read
@@ -45,5 +46,6 @@ jobs:
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
           github_token: ${{ secrets.GITHUB_TOKEN }}
           pr_number: ${{ github.event.pull_request.number }}
-          review_prompt: ${{ github.repository == 'ConductorOne/github-workflows' && 'general' || inputs.review_prompt || 'connector' }}
+          head_sha: ${{ github.event.pull_request.head.sha }}
+          review_prompt: ${{ inputs.review_prompt || 'connector' }}
     timeout-minutes: 15
