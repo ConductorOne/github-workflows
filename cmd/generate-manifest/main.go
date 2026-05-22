@@ -147,16 +147,18 @@ func main() {
 	baseURLTrimmed := strings.TrimSuffix(baseURL, "/")
 	signatureHref := fmt.Sprintf("%s/manifest.json.sig", baseURLTrimmed)
 	certificateHref := fmt.Sprintf("%s/manifest.json.cert", baseURLTrimmed)
+	signatureBundleHref := fmt.Sprintf("%s/manifest.json.sigstore.json", baseURLTrimmed)
 
 	manifest := pb.Manifest_builder{
-		Version:         &version,
-		Name:            &repoName,
-		Org:             &orgName,
-		Semver:          &tag,
-		ReleasedAt:      timestamppb.New(now),
-		Assets:          assets,
-		SignatureHref:   &signatureHref,
-		CertificateHref: &certificateHref,
+		Version:             &version,
+		Name:                &repoName,
+		Org:                 &orgName,
+		Semver:              &tag,
+		ReleasedAt:          timestamppb.New(now),
+		Assets:              assets,
+		SignatureHref:       &signatureHref,
+		CertificateHref:     &certificateHref,
+		SignatureBundleHref: &signatureBundleHref,
 	}.Build()
 
 	// Marshal to JSON

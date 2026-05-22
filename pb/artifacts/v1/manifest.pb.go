@@ -25,22 +25,23 @@ const (
 // Manifest represents the immutable artifact metadata for a specific release version.
 // This manifest is stored at the versioned path: releases/{org}/{repo}/{tag}/manifest.json
 type Manifest struct {
-	state                       protoimpl.MessageState `protogen:"opaque.v1"`
-	xxx_hidden_Version          *string                `protobuf:"bytes,1,opt,name=version"`
-	xxx_hidden_Name             *string                `protobuf:"bytes,2,opt,name=name"`
-	xxx_hidden_Org              *string                `protobuf:"bytes,3,opt,name=org"`
-	xxx_hidden_Semver           *string                `protobuf:"bytes,4,opt,name=semver"`
-	xxx_hidden_ReleasedAt       *timestamppb.Timestamp `protobuf:"bytes,5,opt,name=released_at,json=releasedAt"`
-	xxx_hidden_Assets           map[string]*Asset      `protobuf:"bytes,6,rep,name=assets" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
-	xxx_hidden_Images           map[string]*Image      `protobuf:"bytes,7,rep,name=images" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
-	xxx_hidden_SignatureHref    *string                `protobuf:"bytes,8,opt,name=signature_href,json=signatureHref"`
-	xxx_hidden_CertificateHref  *string                `protobuf:"bytes,9,opt,name=certificate_href,json=certificateHref"`
-	xxx_hidden_ImageAttestation *AttestationDescriptor `protobuf:"bytes,10,opt,name=image_attestation,json=imageAttestation"`
-	xxx_hidden_AssetAttestation *AttestationDescriptor `protobuf:"bytes,11,opt,name=asset_attestation,json=assetAttestation"`
-	XXX_raceDetectHookData      protoimpl.RaceDetectHookData
-	XXX_presence                [1]uint32
-	unknownFields               protoimpl.UnknownFields
-	sizeCache                   protoimpl.SizeCache
+	state                          protoimpl.MessageState `protogen:"opaque.v1"`
+	xxx_hidden_Version             *string                `protobuf:"bytes,1,opt,name=version"`
+	xxx_hidden_Name                *string                `protobuf:"bytes,2,opt,name=name"`
+	xxx_hidden_Org                 *string                `protobuf:"bytes,3,opt,name=org"`
+	xxx_hidden_Semver              *string                `protobuf:"bytes,4,opt,name=semver"`
+	xxx_hidden_ReleasedAt          *timestamppb.Timestamp `protobuf:"bytes,5,opt,name=released_at,json=releasedAt"`
+	xxx_hidden_Assets              map[string]*Asset      `protobuf:"bytes,6,rep,name=assets" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
+	xxx_hidden_Images              map[string]*Image      `protobuf:"bytes,7,rep,name=images" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
+	xxx_hidden_SignatureHref       *string                `protobuf:"bytes,8,opt,name=signature_href,json=signatureHref"`
+	xxx_hidden_CertificateHref     *string                `protobuf:"bytes,9,opt,name=certificate_href,json=certificateHref"`
+	xxx_hidden_ImageAttestation    *AttestationDescriptor `protobuf:"bytes,10,opt,name=image_attestation,json=imageAttestation"`
+	xxx_hidden_AssetAttestation    *AttestationDescriptor `protobuf:"bytes,11,opt,name=asset_attestation,json=assetAttestation"`
+	xxx_hidden_SignatureBundleHref *string                `protobuf:"bytes,12,opt,name=signature_bundle_href,json=signatureBundleHref"`
+	XXX_raceDetectHookData         protoimpl.RaceDetectHookData
+	XXX_presence                   [1]uint32
+	unknownFields                  protoimpl.UnknownFields
+	sizeCache                      protoimpl.SizeCache
 }
 
 func (x *Manifest) Reset() {
@@ -163,24 +164,34 @@ func (x *Manifest) GetAssetAttestation() *AttestationDescriptor {
 	return nil
 }
 
+func (x *Manifest) GetSignatureBundleHref() string {
+	if x != nil {
+		if x.xxx_hidden_SignatureBundleHref != nil {
+			return *x.xxx_hidden_SignatureBundleHref
+		}
+		return ""
+	}
+	return ""
+}
+
 func (x *Manifest) SetVersion(v string) {
 	x.xxx_hidden_Version = &v
-	protoimpl.X.SetPresent(&(x.XXX_presence[0]), 0, 11)
+	protoimpl.X.SetPresent(&(x.XXX_presence[0]), 0, 12)
 }
 
 func (x *Manifest) SetName(v string) {
 	x.xxx_hidden_Name = &v
-	protoimpl.X.SetPresent(&(x.XXX_presence[0]), 1, 11)
+	protoimpl.X.SetPresent(&(x.XXX_presence[0]), 1, 12)
 }
 
 func (x *Manifest) SetOrg(v string) {
 	x.xxx_hidden_Org = &v
-	protoimpl.X.SetPresent(&(x.XXX_presence[0]), 2, 11)
+	protoimpl.X.SetPresent(&(x.XXX_presence[0]), 2, 12)
 }
 
 func (x *Manifest) SetSemver(v string) {
 	x.xxx_hidden_Semver = &v
-	protoimpl.X.SetPresent(&(x.XXX_presence[0]), 3, 11)
+	protoimpl.X.SetPresent(&(x.XXX_presence[0]), 3, 12)
 }
 
 func (x *Manifest) SetReleasedAt(v *timestamppb.Timestamp) {
@@ -197,12 +208,12 @@ func (x *Manifest) SetImages(v map[string]*Image) {
 
 func (x *Manifest) SetSignatureHref(v string) {
 	x.xxx_hidden_SignatureHref = &v
-	protoimpl.X.SetPresent(&(x.XXX_presence[0]), 7, 11)
+	protoimpl.X.SetPresent(&(x.XXX_presence[0]), 7, 12)
 }
 
 func (x *Manifest) SetCertificateHref(v string) {
 	x.xxx_hidden_CertificateHref = &v
-	protoimpl.X.SetPresent(&(x.XXX_presence[0]), 8, 11)
+	protoimpl.X.SetPresent(&(x.XXX_presence[0]), 8, 12)
 }
 
 func (x *Manifest) SetImageAttestation(v *AttestationDescriptor) {
@@ -211,6 +222,11 @@ func (x *Manifest) SetImageAttestation(v *AttestationDescriptor) {
 
 func (x *Manifest) SetAssetAttestation(v *AttestationDescriptor) {
 	x.xxx_hidden_AssetAttestation = v
+}
+
+func (x *Manifest) SetSignatureBundleHref(v string) {
+	x.xxx_hidden_SignatureBundleHref = &v
+	protoimpl.X.SetPresent(&(x.XXX_presence[0]), 11, 12)
 }
 
 func (x *Manifest) HasVersion() bool {
@@ -276,6 +292,13 @@ func (x *Manifest) HasAssetAttestation() bool {
 	return x.xxx_hidden_AssetAttestation != nil
 }
 
+func (x *Manifest) HasSignatureBundleHref() bool {
+	if x == nil {
+		return false
+	}
+	return protoimpl.X.Present(&(x.XXX_presence[0]), 11)
+}
+
 func (x *Manifest) ClearVersion() {
 	protoimpl.X.ClearPresent(&(x.XXX_presence[0]), 0)
 	x.xxx_hidden_Version = nil
@@ -318,6 +341,11 @@ func (x *Manifest) ClearAssetAttestation() {
 	x.xxx_hidden_AssetAttestation = nil
 }
 
+func (x *Manifest) ClearSignatureBundleHref() {
+	protoimpl.X.ClearPresent(&(x.XXX_presence[0]), 11)
+	x.xxx_hidden_SignatureBundleHref = nil
+}
+
 type Manifest_builder struct {
 	_ [0]func() // Prevents comparability and use of unkeyed literals for the builder.
 
@@ -349,6 +377,8 @@ type Manifest_builder struct {
 	// Per-asset attestations (provenance, SBOM) are in Asset.attestations[].
 	// This field documents the types used across all assets.
 	AssetAttestation *AttestationDescriptor
+	// signature_bundle_href is the URL to the Sigstore bundle file (manifest.json.sigstore.json).
+	SignatureBundleHref *string
 }
 
 func (b0 Manifest_builder) Build() *Manifest {
@@ -356,34 +386,38 @@ func (b0 Manifest_builder) Build() *Manifest {
 	b, x := &b0, m0
 	_, _ = b, x
 	if b.Version != nil {
-		protoimpl.X.SetPresentNonAtomic(&(x.XXX_presence[0]), 0, 11)
+		protoimpl.X.SetPresentNonAtomic(&(x.XXX_presence[0]), 0, 12)
 		x.xxx_hidden_Version = b.Version
 	}
 	if b.Name != nil {
-		protoimpl.X.SetPresentNonAtomic(&(x.XXX_presence[0]), 1, 11)
+		protoimpl.X.SetPresentNonAtomic(&(x.XXX_presence[0]), 1, 12)
 		x.xxx_hidden_Name = b.Name
 	}
 	if b.Org != nil {
-		protoimpl.X.SetPresentNonAtomic(&(x.XXX_presence[0]), 2, 11)
+		protoimpl.X.SetPresentNonAtomic(&(x.XXX_presence[0]), 2, 12)
 		x.xxx_hidden_Org = b.Org
 	}
 	if b.Semver != nil {
-		protoimpl.X.SetPresentNonAtomic(&(x.XXX_presence[0]), 3, 11)
+		protoimpl.X.SetPresentNonAtomic(&(x.XXX_presence[0]), 3, 12)
 		x.xxx_hidden_Semver = b.Semver
 	}
 	x.xxx_hidden_ReleasedAt = b.ReleasedAt
 	x.xxx_hidden_Assets = b.Assets
 	x.xxx_hidden_Images = b.Images
 	if b.SignatureHref != nil {
-		protoimpl.X.SetPresentNonAtomic(&(x.XXX_presence[0]), 7, 11)
+		protoimpl.X.SetPresentNonAtomic(&(x.XXX_presence[0]), 7, 12)
 		x.xxx_hidden_SignatureHref = b.SignatureHref
 	}
 	if b.CertificateHref != nil {
-		protoimpl.X.SetPresentNonAtomic(&(x.XXX_presence[0]), 8, 11)
+		protoimpl.X.SetPresentNonAtomic(&(x.XXX_presence[0]), 8, 12)
 		x.xxx_hidden_CertificateHref = b.CertificateHref
 	}
 	x.xxx_hidden_ImageAttestation = b.ImageAttestation
 	x.xxx_hidden_AssetAttestation = b.AssetAttestation
+	if b.SignatureBundleHref != nil {
+		protoimpl.X.SetPresentNonAtomic(&(x.XXX_presence[0]), 11, 12)
+		x.xxx_hidden_SignatureBundleHref = b.SignatureBundleHref
+	}
 	return m0
 }
 
@@ -1103,7 +1137,7 @@ var File_artifacts_v1_manifest_proto protoreflect.FileDescriptor
 
 const file_artifacts_v1_manifest_proto_rawDesc = "" +
 	"\n" +
-	"\x1bartifacts/v1/manifest.proto\x12\fartifacts.v1\x1a\x1fgoogle/protobuf/timestamp.proto\x1a!google/protobuf/go_features.proto\"\xad\x05\n" +
+	"\x1bartifacts/v1/manifest.proto\x12\fartifacts.v1\x1a!google/protobuf/go_features.proto\x1a\x1fgoogle/protobuf/timestamp.proto\"\xe1\x05\n" +
 	"\bManifest\x12\x18\n" +
 	"\aversion\x18\x01 \x01(\tR\aversion\x12\x12\n" +
 	"\x04name\x18\x02 \x01(\tR\x04name\x12\x10\n" +
@@ -1117,7 +1151,8 @@ const file_artifacts_v1_manifest_proto_rawDesc = "" +
 	"\x10certificate_href\x18\t \x01(\tR\x0fcertificateHref\x12P\n" +
 	"\x11image_attestation\x18\n" +
 	" \x01(\v2#.artifacts.v1.AttestationDescriptorR\x10imageAttestation\x12P\n" +
-	"\x11asset_attestation\x18\v \x01(\v2#.artifacts.v1.AttestationDescriptorR\x10assetAttestation\x1aN\n" +
+	"\x11asset_attestation\x18\v \x01(\v2#.artifacts.v1.AttestationDescriptorR\x10assetAttestation\x122\n" +
+	"\x15signature_bundle_href\x18\f \x01(\tR\x13signatureBundleHref\x1aN\n" +
 	"\vAssetsEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12)\n" +
 	"\x05value\x18\x02 \x01(\v2\x13.artifacts.v1.AssetR\x05value:\x028\x01\x1aN\n" +

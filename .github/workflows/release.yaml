@@ -1001,6 +1001,7 @@ jobs:
     needs: [determine-workflows-ref, goreleaser-binaries, goreleaser-windows, goreleaser-docker]
     outputs:
       merged_manifest: ${{ steps.export-manifest.outputs.merged_manifest }}
+      manifest_url: ${{ steps.upload-manifest.outputs.manifest_url }}
     permissions:
       id-token: write
       contents: read
@@ -1037,16 +1038,6 @@ jobs:
 
       - name: Install cosign
         uses: sigstore/cosign-installer@v3
-
-      - name: Sign manifest.json
-        working-directory: _workflows/_output
-        env: { COSIGN_EXPERIMENTAL: "1" }
-        shell: bash
-        run: |
-          set -euo pipefail
-          cosign sign-blob --yes "manifest.json" \
-            --output-signature "manifest.json.sig" \
-            --output-certificate "manifest.json.cert"
 
       - name: Configure AWS credentials via OIDC
         uses: aws-actions/configure-aws-credentials@v5
@@ -1142,7 +1133,7 @@ jobs:
             'if .assets.checksums then .assets.checksums.sha256 = $sha | .assets.checksums.sizeBytes = $size else . end' \
             manifest.json > manifest.tmp && mv manifest.tmp manifest.json
 
-      - name: Re-sign manifest.json
+      - name: Sign final manifest.json
         working-directory: _workflows/_output
         env: { COSIGN_EXPERIMENTAL: "1" }
         shell: bash
@@ -1150,7 +1141,8 @@ jobs:
           set -euo pipefail
           cosign sign-blob --yes "manifest.json" \
             --output-signature "manifest.json.sig" \
-            --output-certificate "manifest.json.cert"
+            --output-certificate "manifest.json.cert" \
+            --bundle "manifest.json.sigstore.json"
 
       - name: Export final manifest for registry API
         id: export-manifest
@@ -1213,16 +1205,21 @@ jobs:
             echo "::error::Failed to upload manifest.json to S3"
             exit 1
           fi
-          if [ -f "manifest.json.sig" ]; then
-            aws s3 cp "manifest.json.sig" "s3://$BUCKET/$DIRECTORY/manifest.json.sig" \
-              --cache-control "public,max-age=31536000,immutable" \
-              --content-type "application/octet-stream"
-          fi
-          if [ -f "manifest.json.cert" ]; then
-            aws s3 cp "manifest.json.cert" "s3://$BUCKET/$DIRECTORY/manifest.json.cert" \
-              --cache-control "public,max-age=31536000,immutable" \
-              --content-type "application/octet-stream"
-          fi
+          for required_file in manifest.json.sig manifest.json.cert manifest.json.sigstore.json; do
+            if [ ! -f "$required_file" ]; then
+              echo "::error::$required_file not found in $(pwd)"
+              exit 1
+            fi
+          done
+          aws s3 cp "manifest.json.sig" "s3://$BUCKET/$DIRECTORY/manifest.json.sig" \
+            --cache-control "public,max-age=31536000,immutable" \
+            --content-type "application/octet-stream"
+          aws s3 cp "manifest.json.cert" "s3://$BUCKET/$DIRECTORY/manifest.json.cert" \
+            --cache-control "public,max-age=31536000,immutable" \
+            --content-type "application/octet-stream"
+          aws s3 cp "manifest.json.sigstore.json" "s3://$BUCKET/$DIRECTORY/manifest.json.sigstore.json" \
+            --cache-control "public,max-age=31536000,immutable" \
+            --content-type "application/json"
 
   # ================================================================
   # Registry API: record release after release manifest publication.
@@ -1230,8 +1227,8 @@ jobs:
   # ================================================================
   record-registry-api:
     # Use !cancelled() so the explicit needs.result check controls skipped-job behavior.
-    if: ${{ !cancelled() && needs.publish-release-manifest.result == 'success' }}
-    needs: [determine-workflows-ref, publish-release-manifest]
+    if: ${{ !cancelled() && needs.publish-release-manifest.result == 'success' && needs.verify-release.result == 'success' }}
+    needs: [determine-workflows-ref, publish-release-manifest, verify-release]
     permissions:
       id-token: write
       contents: read
@@ -1352,6 +1349,7 @@ jobs:
 
           go run ./cmd/record-release \
             -manifest _output/manifest.json \
+            -manifest-url "${{ needs.publish-release-manifest.outputs.manifest_url }}" \
             -org "${{ github.event.repository.owner.login }}" \
             -name "${{ github.event.repository.name }}" \
             -version "${{ inputs.tag }}" \
@@ -1366,8 +1364,9 @@ jobs:
             $RELEASED_AT_FLAG
 
   verify-release:
-    # Verify release artifacts and attestations after publishing
-    # This job is not blocking - failures trigger Datadog notification but don't fail the release
+    # Verify release artifacts and attestations before recording the release.
+    # Registry-side verification is the trust boundary; this job prevents
+    # obviously bad artifacts from being submitted.
     needs: [determine-workflows-ref, publish-release-manifest]
     if: always() && needs.publish-release-manifest.result == 'success'
     permissions:
