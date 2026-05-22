@@ -16,6 +16,20 @@ if ! command -v $BATON &> /dev/null; then
   exit 1
 fi
 
+# If required-secrets input was provided, skip the test when any listed env
+# var is empty. This unblocks PRs from forks or repos whose org secret has
+# not been provisioned yet — running the binary without credentials yields
+# empty grants, which then fails the jq exit-status assertion below.
+if [ -n "${REQUIRED_SECRETS:-}" ]; then
+  # Normalize: split on comma or whitespace; iterate non-empty tokens.
+  for name in ${REQUIRED_SECRETS//,/ }; do
+    if [ -z "${!name:-}" ]; then
+      echo "::notice title=sync-test skipped::required secret $name is empty; skipping connector sync test"
+      exit 0
+    fi
+  done
+fi
+
 # Error on unbound variables now that we've set BATON
 set -u
 
