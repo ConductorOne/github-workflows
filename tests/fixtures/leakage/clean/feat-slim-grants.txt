@@ -1,0 +1,26 @@
+### TITLE
+feat(dotc1z): opt-in slim-blob grant writer with reader hydration
+
+### BODY
+## Summary
+
+Add a writer mode that strips Entitlement and Principal from grant data blobs
+and rebuilds identity-only stubs at read time. Saves disk bytes on tenants
+with many expanded group grants.
+
+## Why
+
+memory-pressure — Triggered on large tenants where N > 100K group memberships
+expand across many users; the embedded protos in each grant duplicate the
+same Resource and Entitlement data many times.
+
+## Test plan
+
+- `go test ./pkg/dotc1z/...` — pass.
+- Hydration is a pure function over the existing columns; covered by unit
+  tests for both nil and non-nil round-trips.
+
+## Risk
+
+medium — Reader behaves identically whether or not the writer ran in slim
+mode; the feature is opt-in via a syncer option.

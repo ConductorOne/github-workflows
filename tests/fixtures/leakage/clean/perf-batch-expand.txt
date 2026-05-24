@@ -1,0 +1,27 @@
+### TITLE
+perf(pkg/sync/expand): prefetch descendant grants to avoid per-principal queries
+
+### BODY
+## Summary
+
+Replace O(N) per-principal `ListGrantsForEntitlement` calls in the expand
+pipeline with a single bulk pre-fetch into an in-memory map. This removes the
+inner SQL query from the hot path on tenants with many source grants.
+
+## Why
+
+performance — Triggered on large tenants where N > 100K source grants. The
+per-call overhead of pure-Go SQLite compounds across many point lookups even
+though each lookup hits a compound index.
+
+## Test plan
+
+- `go test ./pkg/sync/expand/...` — pass, including diamond, multi-level,
+  cycle, and mixed-directness cases.
+- `go test -bench=BenchmarkExpand` — improvement over the baseline.
+
+## Risk
+
+low — Pre-fetch is per-call; no shared cache, so concurrent runActions cannot
+observe each other's writes through a stale map. Diamond-graph correctness is
+covered by the existing tests.

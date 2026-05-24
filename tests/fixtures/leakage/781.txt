@@ -1,0 +1,19 @@
+### TITLE
+feat(dotc1z): opt-in slim-blob grant writer with reader hydration
+
+### BODY
+## Summary
+
+Strip Entitlement and Principal from grant data blobs and rebuild identity
+stubs at read time.
+
+## Measurements (redacted fixture)
+
+Validation against a Synthetic-Acme target shows the c1z is smaller after
+the slim writer runs; the previous run carried 489 grants of duplicated
+embedded protos.
+
+## Reference
+
+Profile of be-temporal-sync prod surfaces the same hot path on every large
+sync.

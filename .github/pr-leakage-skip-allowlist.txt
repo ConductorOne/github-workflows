@@ -1,0 +1,15 @@
+# pr-leakage skip-token allowlist.
+#
+# Authors listed here may bypass the scanner by including the literal token
+# [skip-leakage-check] anywhere in the PR body. The token without an
+# allowlisted actor is a hard fail — using the token without permission is
+# strictly worse than not using it.
+#
+# One GitHub login per line. Empty lines and lines beginning with `#` ignored.
+#
+# Adding a login is a PR to this repo; the PR description documents why and
+# names the Security reviewer who signed off.
+#
+# Initial allowlist is intentionally empty. The default path is to rewrite the
+# PR body so it does not leak; the escape hatch exists for incidents where
+# naming a customer in a public artifact has explicit Security sign-off.

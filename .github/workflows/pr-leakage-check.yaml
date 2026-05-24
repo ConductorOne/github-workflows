@@ -1,0 +1,58 @@
+name: pr-leakage-check
+
+on:
+  workflow_call:
+    inputs:
+      pr_number:
+        description: 'Pull request number to scan'
+        required: true
+        type: number
+      tokens_ref:
+        description: 'Git ref in github-workflows to fetch token files and scanner from'
+        required: false
+        default: main
+        type: string
+
+permissions:
+  contents: read
+  pull-requests: read
+
+jobs:
+  check:
+    # Self-test is in a sibling workflow; skip when invoked from this repo.
+    if: ${{ github.repository != 'ConductorOne/github-workflows' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - name: Checkout github-workflows (token files + scanner)
+        uses: actions/checkout@v4
+        with:
+          repository: ConductorOne/github-workflows
+          ref: ${{ inputs.tokens_ref }}
+          path: gw
+          persist-credentials: false
+
+      - name: Fetch PR title, body, and commit messages
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR: ${{ inputs.pr_number }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/leak"
+          gh pr view "$PR" --repo "$REPO" \
+            --json title,body,commits \
+            -q '.title + "\n\n" + (.body // "") + "\n\n" + ((.commits // []) | map(.messageHeadline + "\n\n" + (.messageBody // "")) | join("\n\n---\n\n"))' \
+            > "$RUNNER_TEMP/leak/pr-text.txt"
+
+      - name: Run scanner
+        env:
+          ACTOR: ${{ github.actor }}
+        run: |
+          set -euo pipefail
+          python3 gw/.github/scripts/pr_leakage_scan.py \
+            --tokens gw/.github/pr-leakage-banned-tokens.yaml \
+            --customer-names gw/.github/pr-leakage-customer-names.txt \
+            --allowlist gw/.github/pr-leakage-skip-allowlist.txt \
+            --actor "$ACTOR" \
+            --input "$RUNNER_TEMP/leak/pr-text.txt"

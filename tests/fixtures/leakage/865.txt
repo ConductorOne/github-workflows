@@ -1,0 +1,18 @@
+### TITLE
+perf(sync): add WithMinCheckpointInterval syncer option
+
+### BODY
+## Summary
+
+Make the minimum checkpoint interval configurable so large-tenant syncs do
+not spend most of their CPU in checkpoint writes.
+
+## Measurements (redacted fixture)
+
+Profile of be-temporal-sync for the Synthetic-Acme connector: 72 GB c1z,
+180K users, 139K groups. Sixty percent of CPU spent in zstd compression
+inside `saveC1z`.
+
+## Reference
+
+Filed in https://linear.app/example/issue/synthetic

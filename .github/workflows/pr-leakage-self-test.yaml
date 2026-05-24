@@ -1,0 +1,61 @@
+name: pr-leakage-self-test
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/pr-leakage-check.yaml'
+      - '.github/workflows/pr-leakage-self-test.yaml'
+      - '.github/scripts/pr_leakage_scan.py'
+      - '.github/pr-leakage-banned-tokens.yaml'
+      - '.github/pr-leakage-customer-names.txt'
+      - '.github/pr-leakage-skip-allowlist.txt'
+      - 'tests/fixtures/leakage/**'
+  pull_request:
+    paths:
+      - '.github/workflows/pr-leakage-check.yaml'
+      - '.github/workflows/pr-leakage-self-test.yaml'
+      - '.github/scripts/pr_leakage_scan.py'
+      - '.github/pr-leakage-banned-tokens.yaml'
+      - '.github/pr-leakage-customer-names.txt'
+      - '.github/pr-leakage-skip-allowlist.txt'
+      - 'tests/fixtures/leakage/**'
+
+permissions:
+  contents: read
+
+jobs:
+  leaky-must-fire:
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    strategy:
+      fail-fast: false
+      matrix:
+        fixture: [781, 863, 865]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Scan leaky fixture (must fire at least once)
+        run: |
+          python3 .github/scripts/pr_leakage_scan.py \
+            --tokens .github/pr-leakage-banned-tokens.yaml \
+            --customer-names .github/pr-leakage-customer-names.txt \
+            --allowlist .github/pr-leakage-skip-allowlist.txt \
+            --input tests/fixtures/leakage/${{ matrix.fixture }}.txt \
+            --expect-fail
+
+  clean-must-pass:
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - uses: actions/checkout@v4
+      - name: Scan clean fixtures (must pass)
+        run: |
+          set -euo pipefail
+          for f in tests/fixtures/leakage/clean/*.txt; do
+            echo "--- scanning $f"
+            python3 .github/scripts/pr_leakage_scan.py \
+              --tokens .github/pr-leakage-banned-tokens.yaml \
+              --customer-names .github/pr-leakage-customer-names.txt \
+              --allowlist .github/pr-leakage-skip-allowlist.txt \
+              --input "$f"
+          done

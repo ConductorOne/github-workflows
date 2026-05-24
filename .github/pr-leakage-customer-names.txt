@@ -1,0 +1,13 @@
+# pr-leakage customer-name denylist.
+#
+# One customer name per line. Whole-word, case-insensitive, multi-word names
+# treated as `\s+` between tokens. Empty lines and lines beginning with `#`
+# ignored. Adding a name is a one-file PR to this repo; the next workflow run
+# in any consumer repo picks the change up because the caller stub pins @main.
+#
+# Seed entries are taken from the captured leak fixtures
+# (.github/pr-leakage-fixtures/leaky/). Add new entries only with a fixture
+# that proves the regression.
+
+Eli Lilly
+Synthetic-Acme

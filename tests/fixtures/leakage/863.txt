@@ -1,0 +1,22 @@
+### TITLE
+perf(expand): prefetch descendant grants to eliminate per-principal queries
+
+### BODY
+## Summary
+
+Replace per-principal SQL queries in `runAction` with a single bulk prefetch.
+
+## Measurements (redacted fixture)
+
+For Synthetic-Acme: 180K users, 139K groups, 72 GB c1z, a single expansion
+took 38 minutes through pure-Go SQLite. The pre-fetch reduces this to a
+single paginated scan.
+
+## Reference
+
+Profile evidence from be-temporal-sync prod showed CPU pinned in
+`ListGrantsForEntitlement`.
+
+## Link
+
+https://app.datadoghq.com/profiling

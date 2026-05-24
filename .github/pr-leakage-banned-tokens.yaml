@@ -1,0 +1,78 @@
+# pr-leakage banned tokens
+#
+# Parsed by .github/scripts/pr_leakage_scan.py. The parser supports a small
+# subset of YAML: top-level keys `always_on:` and `context_sensitive:`, each a
+# list of mappings whose keys are `id`, `pattern`, `description`, and
+# optionally `adjacent_any` (inline list), `window` (int), and
+# `require_quote_or_error` (bool). No anchors, no flow mappings, no block
+# scalars — keep entries to one regex per line.
+#
+# Rule IDs are stable. Removing a rule should be a deliberate PR with a
+# regression fixture explaining why.
+
+always_on:
+  - id: R1
+    pattern: '\b[a-z0-9-]+\.conductor\.one\b'
+    description: 'tenant subdomain on conductor.one'
+  - id: R2
+    pattern: '\b[a-z0-9-]+\.ductone\.com\b'
+    description: 'tenant subdomain on ductone.com (btipling.d2.ductone.com exception applied)'
+  - id: R3
+    pattern: '\b(prod|staging|preprod)-(usw2|use1|euw1|euc1|usw1|use2)\b'
+    description: 'internal region/env tag from profile labels'
+  - id: R4
+    pattern: '\bbe-(temporal-sync|temporal-worker|connector-runtime|api|sync-worker)\b'
+    description: 'internal service name'
+  - id: R5
+    pattern: 'https?://app\.datadoghq\.com/'
+    description: 'Datadog dashboard URL'
+  - id: R6
+    pattern: 'https?://[a-z0-9-]+\.datadoghq\.com/'
+    description: 'Datadog tenant URL'
+  - id: R7
+    pattern: 'https?://linear\.app/'
+    description: 'Linear ticket URL'
+  - id: R8
+    pattern: 'https?://[a-z0-9-]+\.slack\.com/'
+    description: 'Slack URL'
+  - id: R9
+    pattern: 'https?://[a-z0-9-]+\.notion\.so/'
+    description: 'Notion URL'
+  - id: R10a
+    pattern: 'https?://docs\.google\.com/'
+    description: 'Google Docs URL'
+  - id: R10b
+    pattern: 'https?://drive\.google\.com/'
+    description: 'Google Drive URL'
+  - id: R11
+    pattern: '\b[A-Za-z0-9._%+-]+@(conductorone\.com|ductone\.com)\b'
+    description: 'internal email address'
+  - id: R12a
+    pattern: '<@U[A-Z0-9]{8,}>'
+    description: 'Slack mention syntax'
+  - id: R12b
+    pattern: '<#C[A-Z0-9]{8,}>'
+    description: 'Slack channel reference syntax'
+
+context_sensitive:
+  - id: C1
+    pattern: '\b[0-9A-Za-z]{20,40}\b'
+    description: 'C1 tenant / app / org ID in tenant-adjacent prose'
+    adjacent_any: [tenant, Tenant, TENANT, tnt_, app_, org_]
+    window: 40
+  - id: C2
+    pattern: '\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b'
+    description: 'UUID inside quoted string or near the word error (verbatim production error shape)'
+    require_quote_or_error: true
+    window: 40
+  - id: C3
+    pattern: '\b\d{2,4}K?\s+(users|groups|members|grants|entitlements|principals|resources)\b'
+    description: 'customer-sized count measurement'
+  - id: C4
+    pattern: '\b\d{2,4}\s*(GB|TB)\s*(c1z|sync|tenant|database|sqlite)\b'
+    description: 'customer-sized storage measurement'
+  - id: C5
+    pattern: '\b\d{2,3}\s*(minute|minutes|min)\b'
+    description: 'customer wall-clock measurement near sync/tenant/temporal context'
+    adjacent_any: [sync, expansion, tenant, temporal, c1z]
+    window: 60

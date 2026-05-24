@@ -306,6 +306,87 @@ The `test-flow` parameter can be:
 - `enable-only`: Only test enabling the account
 - `disable-only`: Only test disabling the account
 
+## PR Leakage Check Workflow
+
+A reusable workflow that scans a PR's title, body, and every commit message
+for patterns that leak customer data, internal tenant identifiers, internal
+service names, or internal URLs. Pilot consumer is `ConductorOne/baton-sdk`;
+every `baton-*` repo can opt in with a small caller stub.
+
+### Files
+
+| File                                            | Purpose                                                                 |
+| ----------------------------------------------- | ----------------------------------------------------------------------- |
+| `.github/workflows/pr-leakage-check.yaml`       | The reusable workflow consumed via `workflow_call`.                     |
+| `.github/scripts/pr_leakage_scan.py`            | Pure-stdlib Python scanner (always-on + context-sensitive regexes).     |
+| `.github/pr-leakage-banned-tokens.yaml`         | Externalized rule set. Add or tune rules here.                          |
+| `.github/pr-leakage-customer-names.txt`         | Whole-word denylist of customer names known to have leaked previously.  |
+| `.github/pr-leakage-skip-allowlist.txt`         | GitHub logins permitted to bypass via `[skip-leakage-check]` token.     |
+| `.github/workflows/pr-leakage-self-test.yaml`   | Regression CI inside this repo: leaky fixtures must fire, clean pass.   |
+| `tests/fixtures/leakage/`                       | Captured fixtures (leaky + clean) the self-test runs against.           |
+
+### Wiring a baton-* repo
+
+Add `.github/workflows/pr-leakage.yaml` to the consumer repo:
+
+```yaml
+name: pr-leakage
+
+on:
+  pull_request:
+    types: [opened, edited, synchronize, reopened]
+
+permissions:
+  contents: read
+  pull-requests: read
+
+jobs:
+  check:
+    uses: ConductorOne/github-workflows/.github/workflows/pr-leakage-check.yaml@main
+    with:
+      pr_number: ${{ github.event.pull_request.number }}
+    secrets: inherit
+```
+
+The four trigger types matter:
+
+- `opened` — every new PR is scanned.
+- `edited` — a clean PR cannot have its body edited to add a customer name
+  without re-scanning.
+- `synchronize` — every push picks up new commit messages.
+- `reopened` — a closed-then-reopened PR is re-scanned.
+
+The workflow runs in the base-repo context with a read-only `GITHUB_TOKEN`
+and uses the scanner from `@main` of this repo, not from the PR head, so a
+fork PR cannot modify the scanner that runs on it.
+
+### Updating the rules
+
+Banned tokens and customer names live in this repo. A new pattern or name is
+a one-file PR here; every consumer picks the change up on its next workflow
+run because the caller stub pins `@main`.
+
+The self-test runs whenever any of the pr-leakage files change. Adding a new
+leak shape means adding a fixture under `tests/fixtures/leakage/` so the
+regression check has teeth.
+
+### Required check enforcement
+
+The workflow surfacing failures is separate from making the failure block
+merge. After the consumer stub lands and the check is observed working, a
+repo admin adds `pr-leakage / check` to the consumer's branch-protection
+required checks. The workflow does not flip branch-protection settings.
+
+### Escape hatch
+
+Including the literal token `[skip-leakage-check]` in a PR body bypasses the
+scanner only if the PR actor is listed in
+`.github/pr-leakage-skip-allowlist.txt`. The token without an allowlisted
+actor is a hard fail — using the token without permission is strictly worse
+than not using it. The default path is to rewrite the PR body so it does not
+leak; the escape hatch exists for incidents where naming a customer in a
+public artifact has explicit Security sign-off.
+
 ## Development
 
 See [release-workflow.md](docs/release-workflow.md) for testing and modification guidance.
