@@ -100,9 +100,11 @@ func TestTransformImagesSkipsAttestationForNonIndexImage(t *testing.T) {
 
 func TestRecordReleaseRequestMarshalsAttestations(t *testing.T) {
 	req := &RecordReleaseRequest{
-		Org:     "example",
-		Name:    "baton-example",
-		Version: "v1.2.3",
+		Org:                "example",
+		Name:               "baton-example",
+		Version:            "v1.2.3",
+		ManifestURL:        "https://dist.example.com/manifest.json",
+		SignatureBundleURL: "https://dist.example.com/manifest.json.sigstore.json",
 		Assets: map[string]*ReleaseAsset{
 			"linux-amd64": {
 				Platform: "linux-amd64",
@@ -125,7 +127,9 @@ func TestRecordReleaseRequestMarshalsAttestations(t *testing.T) {
 	}
 
 	var got struct {
-		Assets map[string]struct {
+		ManifestURL        string `json:"manifestUrl"`
+		SignatureBundleURL string `json:"signatureBundleUrl"`
+		Assets             map[string]struct {
 			Attestations []ReleaseAttestation `json:"attestations"`
 		} `json:"assets"`
 		Images map[string]struct {
@@ -136,6 +140,9 @@ func TestRecordReleaseRequestMarshalsAttestations(t *testing.T) {
 		t.Fatalf("unmarshal request: %v", err)
 	}
 
+	if got.ManifestURL == "" || got.SignatureBundleURL == "" {
+		t.Fatalf("manifest signature metadata was not marshaled: %#v", got)
+	}
 	if len(got.Assets["linux-amd64"].Attestations) != 1 {
 		t.Fatalf("asset attestations = %#v, want one entry", got.Assets["linux-amd64"].Attestations)
 	}

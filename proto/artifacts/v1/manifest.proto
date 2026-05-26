@@ -4,11 +4,11 @@ edition = "2023";
 
 package artifacts.v1;
 
-import "google/protobuf/timestamp.proto";
 import "google/protobuf/go_features.proto";
+import "google/protobuf/timestamp.proto";
 
-option go_package = "github.com/ConductorOne/github-workflows/pb/artifacts/v1";
 option features.(pb.go).api_level = API_OPAQUE;
+option go_package = "github.com/ConductorOne/github-workflows/pb/artifacts/v1";
 
 // Manifest represents the immutable artifact metadata for a specific release version.
 // This manifest is stored at the versioned path: releases/{org}/{repo}/{tag}/manifest.json
@@ -51,6 +51,9 @@ message Manifest {
   // Per-asset attestations (provenance, SBOM) are in Asset.attestations[].
   // This field documents the types used across all assets.
   AttestationDescriptor asset_attestation = 11;
+
+  // signature_bundle_href is the URL to the Sigstore bundle file (manifest.json.sigstore.json).
+  string signature_bundle_href = 12;
 }
 
 // Asset represents metadata for a single binary artifact.

@@ -218,8 +218,19 @@ echo ""
 echo "=== Manifest Signature Validation ==="
 MANIFEST_SIG_URL="${BASE_URL}/${ORG_REPO}/${VERSION}/manifest.json.sig"
 MANIFEST_CERT_URL="${BASE_URL}/${ORG_REPO}/${VERSION}/manifest.json.cert"
+MANIFEST_BUNDLE_URL="${BASE_URL}/${ORG_REPO}/${VERSION}/manifest.json.sigstore.json"
 
-if curl -sfL "$MANIFEST_SIG_URL" -o "$TEMP_DIR/manifest.json.sig" 2>/dev/null && \
+if curl -sfL "$MANIFEST_BUNDLE_URL" -o "$TEMP_DIR/manifest.json.sigstore.json" 2>/dev/null; then
+  if cosign verify-blob \
+    --bundle "$TEMP_DIR/manifest.json.sigstore.json" \
+    --certificate-oidc-issuer "$CERT_OIDC_ISSUER" \
+    --certificate-identity-regexp "$CERT_IDENTITY_REGEXP" \
+    "$TEMP_DIR/manifest.json" > /dev/null 2>&1; then
+    pass "Manifest Sigstore bundle verified"
+  else
+    fail "Manifest Sigstore bundle verification failed"
+  fi
+elif curl -sfL "$MANIFEST_SIG_URL" -o "$TEMP_DIR/manifest.json.sig" 2>/dev/null && \
    curl -sfL "$MANIFEST_CERT_URL" -o "$TEMP_DIR/manifest.json.cert" 2>/dev/null; then
   if cosign verify-blob \
     --signature "$TEMP_DIR/manifest.json.sig" \

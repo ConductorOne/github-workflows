@@ -19,21 +19,23 @@ import (
 
 // RecordReleaseRequest is the JSON body sent to the registry API.
 type RecordReleaseRequest struct {
-	Org            string                   `json:"org"`
-	Name           string                   `json:"name"`
-	Version        string                   `json:"version"`
-	RepositoryURL  string                   `json:"repositoryUrl"`
-	CommitSha      string                   `json:"commitSha"`
-	WorkflowRunID  string                   `json:"workflowRunId"`
-	Documentation  string                   `json:"documentation,omitempty"`
-	Changelog      string                   `json:"changelog,omitempty"`
-	ConfigSchema   string                   `json:"configSchema,omitempty"`
-	Capabilities   string                   `json:"capabilities,omitempty"`
-	SignatureURL   string                   `json:"signatureUrl,omitempty"`
-	CertificateURL string                   `json:"certificateUrl,omitempty"`
-	Assets         map[string]*ReleaseAsset `json:"assets,omitempty"`
-	Images         map[string]*ReleaseImage `json:"images,omitempty"`
-	ReleasedAt     string                   `json:"releasedAt,omitempty"`
+	Org                string                   `json:"org"`
+	Name               string                   `json:"name"`
+	Version            string                   `json:"version"`
+	RepositoryURL      string                   `json:"repositoryUrl"`
+	CommitSha          string                   `json:"commitSha"`
+	WorkflowRunID      string                   `json:"workflowRunId"`
+	Documentation      string                   `json:"documentation,omitempty"`
+	Changelog          string                   `json:"changelog,omitempty"`
+	ConfigSchema       string                   `json:"configSchema,omitempty"`
+	Capabilities       string                   `json:"capabilities,omitempty"`
+	SignatureURL       string                   `json:"signatureUrl,omitempty"`
+	CertificateURL     string                   `json:"certificateUrl,omitempty"`
+	ManifestURL        string                   `json:"manifestUrl,omitempty"`
+	SignatureBundleURL string                   `json:"signatureBundleUrl,omitempty"`
+	Assets             map[string]*ReleaseAsset `json:"assets,omitempty"`
+	Images             map[string]*ReleaseImage `json:"images,omitempty"`
+	ReleasedAt         string                   `json:"releasedAt,omitempty"`
 }
 
 // ReleaseAsset is the transformed asset for the registry API.
@@ -92,6 +94,7 @@ func main() {
 		changelogPath    string
 		configSchemaPath string
 		capabilitiesPath string
+		manifestURL      string
 		token            string
 	)
 
@@ -107,6 +110,7 @@ func main() {
 	flag.StringVar(&changelogPath, "changelog", "", "Path to a file containing release notes (optional)")
 	flag.StringVar(&configSchemaPath, "config-schema", "", "Path to config_schema.json file (optional)")
 	flag.StringVar(&capabilitiesPath, "capabilities", "", "Path to baton_capabilities.json file (optional)")
+	flag.StringVar(&manifestURL, "manifest-url", "", "Published manifest.json URL (required)")
 	var releasedAt string
 	flag.StringVar(&releasedAt, "released-at", "", "Release publish timestamp in RFC 3339 format (optional, defaults to server time)")
 	flag.StringVar(&token, "token", "", "Bearer token (or set REGISTRY_API_TOKEN env var)")
@@ -138,6 +142,9 @@ func main() {
 	if registryURL == "" {
 		missing = append(missing, "-registry-url")
 	}
+	if manifestURL == "" {
+		missing = append(missing, "-manifest-url")
+	}
 	if len(missing) > 0 {
 		fmt.Fprintf(os.Stderr, "record-release: error: missing required flags: %s\n", strings.Join(missing, ", "))
 		flag.Usage()
@@ -166,6 +173,10 @@ func main() {
 	}
 	if err := unmarshalOpts.Unmarshal(manifestBytes, manifest); err != nil {
 		fmt.Fprintf(os.Stderr, "record-release: error: parsing manifest: %v\n", err)
+		os.Exit(1)
+	}
+	if manifest.GetSignatureBundleHref() == "" {
+		fmt.Fprintf(os.Stderr, "record-release: error: manifest missing signatureBundleHref\n")
 		os.Exit(1)
 	}
 
@@ -220,21 +231,23 @@ func main() {
 
 	// Build request body
 	req := &RecordReleaseRequest{
-		Org:            org,
-		Name:           name,
-		Version:        version,
-		RepositoryURL:  repositoryURL,
-		CommitSha:      commitSha,
-		WorkflowRunID:  workflowRunID,
-		Documentation:  documentation,
-		Changelog:      changelog,
-		ConfigSchema:   configSchema,
-		Capabilities:   capabilities,
-		SignatureURL:   manifest.GetSignatureHref(),
-		CertificateURL: manifest.GetCertificateHref(),
-		Assets:         assets,
-		Images:         images,
-		ReleasedAt:     releasedAt,
+		Org:                org,
+		Name:               name,
+		Version:            version,
+		RepositoryURL:      repositoryURL,
+		CommitSha:          commitSha,
+		WorkflowRunID:      workflowRunID,
+		Documentation:      documentation,
+		Changelog:          changelog,
+		ConfigSchema:       configSchema,
+		Capabilities:       capabilities,
+		SignatureURL:       manifest.GetSignatureHref(),
+		CertificateURL:     manifest.GetCertificateHref(),
+		ManifestURL:        manifestURL,
+		SignatureBundleURL: manifest.GetSignatureBundleHref(),
+		Assets:             assets,
+		Images:             images,
+		ReleasedAt:         releasedAt,
 	}
 
 	bodyBytes, err := json.Marshal(req)
