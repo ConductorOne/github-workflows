@@ -29,7 +29,19 @@ assert_output \
   --output-name gha_artifacts_role_name
 
 assert_output \
+  "gha_artifacts_role_name=GHA-Artifacts-ConductorOne-baton-axiomatic-github-enter-571914a9" \
+  --prefix GHA-Artifacts- \
+  --suffix ConductorOne-baton-axiomatic-github-enterprise-cloud-extra-long-name \
+  --output-name gha_artifacts_role_name
+
+assert_output \
   "ecr_push_role_name=GitHubActionsECRPushRole-baton-axiomatic-github-enterprise-cloud" \
   --prefix GitHubActionsECRPushRole- \
   --suffix baton-axiomatic-github-enterprise-cloud \
+  --output-name ecr_push_role_name
+
+assert_output \
+  "ecr_push_role_name=GitHubActionsECRPushRole-baton-axiomatic-github-enterpr-302f51c5" \
+  --prefix GitHubActionsECRPushRole- \
+  --suffix baton-axiomatic-github-enterprise-cloud-extra \
   --output-name ecr_push_role_name

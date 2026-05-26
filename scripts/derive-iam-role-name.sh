@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
+export LC_ALL=C
 
 iam_role_name_max_length=64
 iam_role_name_hash_length=8
