@@ -10,8 +10,15 @@ protofmt:
 	@echo "Protobuf formatting complete."
 
 .PHONY: test
-test:
+test: test-go test-scripts
+
+.PHONY: test-go
+test-go:
 	go test ./cmd/record-release ./cmd/generate-manifest ./cmd/merge-manifests
+
+.PHONY: test-scripts
+test-scripts:
+	bash scripts/test-derive-iam-role-name.sh
 
 .PHONY: workflow-validate
 workflow-validate:

@@ -204,6 +204,19 @@ jobs:
           ref: ${{ needs.determine-workflows-ref.outputs.ref }}
           persist-credentials: false
 
+      - name: Derive AWS role names
+        id: role-names
+        working-directory: _workflows
+        shell: bash
+        env:
+          REPO_OWNER: ${{ github.event.repository.owner.login }}
+          REPO_NAME: ${{ github.event.repository.name }}
+        run: |
+          bash ./scripts/derive-iam-role-name.sh \
+            --prefix GHA-Artifacts- \
+            --suffix "${REPO_OWNER}-${REPO_NAME}" \
+            --output-name gha_artifacts_role_name >> "$GITHUB_OUTPUT"
+
       - name: Set up Go for caller
         uses: actions/setup-go@v6
         with:
@@ -256,7 +269,7 @@ jobs:
       - name: Configure AWS credentials via OIDC
         uses: aws-actions/configure-aws-credentials@v5
         with:
-          role-to-assume: arn:aws:iam::025044153841:role/GHA-Artifacts-${{ github.event.repository.owner.login }}-${{ github.event.repository.name }}
+          role-to-assume: arn:aws:iam::025044153841:role/${{ steps.role-names.outputs.gha_artifacts_role_name }}
           aws-region: us-west-2
 
       - name: Run GoReleaser
@@ -472,6 +485,19 @@ jobs:
           ref: ${{ needs.determine-workflows-ref.outputs.ref }}
           persist-credentials: false
 
+      - name: Derive AWS role names
+        id: role-names
+        working-directory: _workflows
+        shell: bash
+        env:
+          REPO_OWNER: ${{ github.event.repository.owner.login }}
+          REPO_NAME: ${{ github.event.repository.name }}
+        run: |
+          bash ./scripts/derive-iam-role-name.sh \
+            --prefix GHA-Artifacts- \
+            --suffix "${REPO_OWNER}-${REPO_NAME}" \
+            --output-name gha_artifacts_role_name >> "$GITHUB_OUTPUT"
+
       - name: Set up Go for caller
         uses: actions/setup-go@v6
         with:
@@ -639,7 +665,7 @@ jobs:
       - name: Configure AWS credentials via OIDC
         uses: aws-actions/configure-aws-credentials@v5
         with:
-          role-to-assume: arn:aws:iam::025044153841:role/GHA-Artifacts-${{ github.event.repository.owner.login }}-${{ github.event.repository.name }}
+          role-to-assume: arn:aws:iam::025044153841:role/${{ steps.role-names.outputs.gha_artifacts_role_name }}
           aws-region: us-west-2
 
       - name: Calculate S3 directory
@@ -781,6 +807,24 @@ jobs:
           ref: ${{ needs.determine-workflows-ref.outputs.ref }}
           persist-credentials: false
 
+      - name: Derive AWS role names
+        id: role-names
+        if: inputs.docker == true || inputs.lambda == true
+        working-directory: _workflows
+        shell: bash
+        env:
+          REPO_OWNER: ${{ github.event.repository.owner.login }}
+          REPO_NAME: ${{ github.event.repository.name }}
+        run: |
+          bash ./scripts/derive-iam-role-name.sh \
+            --prefix GHA-Artifacts- \
+            --suffix "${REPO_OWNER}-${REPO_NAME}" \
+            --output-name gha_artifacts_role_name >> "$GITHUB_OUTPUT"
+          bash ./scripts/derive-iam-role-name.sh \
+            --prefix GitHubActionsECRPushRole- \
+            --suffix "${REPO_NAME}" \
+            --output-name ecr_push_role_name >> "$GITHUB_OUTPUT"
+
       - name: Set up Go for caller
         if: inputs.docker == true || inputs.lambda == true
         uses: actions/setup-go@v6
@@ -875,7 +919,7 @@ jobs:
         if: inputs.docker == true
         uses: aws-actions/configure-aws-credentials@v5
         with:
-          role-to-assume: arn:aws:iam::025044153841:role/GHA-Artifacts-${{ github.event.repository.owner.login }}-${{ github.event.repository.name }}
+          role-to-assume: arn:aws:iam::025044153841:role/${{ steps.role-names.outputs.gha_artifacts_role_name }}
           aws-region: us-east-1
 
       - name: Login to Public ECR
@@ -899,7 +943,7 @@ jobs:
         if: inputs.lambda == true
         uses: aws-actions/configure-aws-credentials@v5
         with:
-          role-to-assume: "arn:aws:iam::168442440833:role/GitHubActionsECRPushRole-${{ github.event.repository.name }}"
+          role-to-assume: "arn:aws:iam::168442440833:role/${{ steps.role-names.outputs.ecr_push_role_name }}"
           aws-region: us-west-2
 
       - name: Login to Lambda ECR
@@ -1015,6 +1059,19 @@ jobs:
           ref: ${{ needs.determine-workflows-ref.outputs.ref }}
           persist-credentials: false
 
+      - name: Derive AWS role names
+        id: role-names
+        working-directory: _workflows
+        shell: bash
+        env:
+          REPO_OWNER: ${{ github.event.repository.owner.login }}
+          REPO_NAME: ${{ github.event.repository.name }}
+        run: |
+          bash ./scripts/derive-iam-role-name.sh \
+            --prefix GHA-Artifacts- \
+            --suffix "${REPO_OWNER}-${REPO_NAME}" \
+            --output-name gha_artifacts_role_name >> "$GITHUB_OUTPUT"
+
       - name: Set up Go for workflows
         uses: actions/setup-go@v6
         with:
@@ -1042,7 +1099,7 @@ jobs:
       - name: Configure AWS credentials via OIDC
         uses: aws-actions/configure-aws-credentials@v5
         with:
-          role-to-assume: arn:aws:iam::025044153841:role/GHA-Artifacts-${{ github.event.repository.owner.login }}-${{ github.event.repository.name }}
+          role-to-assume: arn:aws:iam::025044153841:role/${{ steps.role-names.outputs.gha_artifacts_role_name }}
           aws-region: us-west-2
 
       - name: Create unified checksums file
