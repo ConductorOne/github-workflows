@@ -79,7 +79,67 @@ describe("checkConnectorDocsChange", () => {
     assert.equal(fetchFn.calls.length, 30);
   });
 
-  it("fails closed on GitHub API errors", async () => {
+  it("retries transient GitHub API errors", async () => {
+    const calls = [];
+    const fetchFn = async () => {
+      calls.push(null);
+      if (calls.length === 1) {
+        return {
+          ok: false,
+          status: 404,
+          statusText: "Not Found",
+        };
+      }
+      return {
+        ok: true,
+        status: 200,
+        statusText: "OK",
+        async json() {
+          return [{ filename: "README.md" }];
+        },
+      };
+    };
+    const result = await checkConnectorDocsChange({
+      fetchFn,
+      maxAttempts: 3,
+      prNumber: "12",
+      repository: "example/repo",
+      retryDelayMs: 0,
+      sleepFn: async () => {},
+    });
+    assert.deepEqual(result, {
+      validate: "false",
+      reason: "docs_path_unchanged",
+    });
+    assert.equal(calls.length, 2);
+  });
+
+  it("does not retry authorization-style GitHub API errors", async () => {
+    const calls = [];
+    const fetchFn = async () => {
+      calls.push(null);
+      return {
+        ok: false,
+        status: 403,
+        statusText: "Forbidden",
+      };
+    };
+    await assert.rejects(
+      () =>
+        checkConnectorDocsChange({
+          fetchFn,
+          maxAttempts: 3,
+          prNumber: "12",
+          repository: "example/repo",
+          retryDelayMs: 0,
+          sleepFn: async () => {},
+        }),
+      /GitHub PR files request failed after 1 attempt\(s\): 403 Forbidden/,
+    );
+    assert.equal(calls.length, 1);
+  });
+
+  it("reports GitHub API errors with endpoint context", async () => {
     const fetchFn = async () => ({
       ok: false,
       status: 502,
@@ -89,10 +149,13 @@ describe("checkConnectorDocsChange", () => {
       () =>
         checkConnectorDocsChange({
           fetchFn,
+          maxAttempts: 2,
           prNumber: "12",
           repository: "example/repo",
+          retryDelayMs: 0,
+          sleepFn: async () => {},
         }),
-      /GitHub PR files request failed: 502 Bad Gateway/,
+      /GitHub PR files request failed after 2 attempt\(s\): 502 Bad Gateway. Endpoint: https:\/\/api.github.com\/repos\/example\/repo\/pulls\/12\/files\?per_page=100&page=1/,
     );
   });
 });
