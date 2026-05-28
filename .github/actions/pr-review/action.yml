@@ -11,6 +11,9 @@ inputs:
   pr_number:
     description: Pull request number
     required: true
+  head_sha:
+    description: Expected pull request head SHA
+    required: false
   review_prompt:
     description: "Review prompt profile to use: connector or general"
     required: false
@@ -44,6 +47,7 @@ runs:
     env:
       GH_TOKEN: ${{ inputs.github_token }}
       PR_NUMBER: ${{ inputs.pr_number }}
+      PR_HEAD_SHA: ${{ inputs.head_sha }}
       REVIEW_SUMMARY_HEADING: ${{ steps.review-config.outputs.summary_heading }}
     run: python3 ${{ github.action_path }}/scripts/fetch-pr-context.py
   - name: Resolve outdated bot review threads
@@ -73,17 +77,17 @@ runs:
         echo "${DELIM}"
       } >> "${GITHUB_ENV}"
   - name: Run Claude PR Review
-    uses: anthropics/claude-code-action@v1
+    uses: anthropics/claude-code-action@661a6fefbd0569ef35809da16775508ab1937862
     with:
       anthropic_api_key: ${{ inputs.anthropic_api_key }}
       github_token: ${{ inputs.github_token }}
       include_fix_links: true
       allowed_bots: "*"
-      claude_args: --model claude-opus-4-6 --max-turns 100 --allowedTools "Read,Glob,Skill,mcp__github_inline_comment__create_inline_comment,Bash(gh pr diff:*),Bash(gh pr view:*),Bash(gh pr review:*),Bash(gh api:*)"
+      claude_args: --model claude-opus-4-6 --max-turns 100 --allowedTools "Read,Glob,Grep,Skill,Task,mcp__github_inline_comment__create_inline_comment,Bash(gh pr diff:*),Bash(gh pr view:*),Bash(gh pr review:*),Bash(gh api:*)"
       prompt: ${{ env.REVIEW_PROMPT }}
   - name: Upload review context artifacts
     if: always()
-    uses: actions/upload-artifact@v4
+    uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
     with:
       name: pr-review-context
       path: |
