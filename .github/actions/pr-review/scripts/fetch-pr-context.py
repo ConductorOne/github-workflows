@@ -14,16 +14,19 @@ import os
 import re
 import subprocess
 import sys
+import time
 from typing import Optional
 
 REVIEW_STATE_PATTERN = re.compile(
     r"<!--\s*review-state:\s*(\{.*?\})\s*-->", re.DOTALL
 )
+HTTP_STATUS_PATTERN = re.compile(r"HTTP\s+(\d{3})")
 
 # Bot logins that post review comments via GitHub Actions.
 BOT_LOGINS = {"github-actions[bot]", "github-actions"}
 DEFAULT_REVIEW_SUMMARY_HEADING = "### Connector PR Review:"
 LEGACY_REVIEW_SUMMARY_HEADING = "### PR Review:"
+DEFAULT_API_ATTEMPTS = 3
 
 
 def review_comment_heading(comment: dict, summary_heading: str) -> Optional[str]:
@@ -47,18 +50,75 @@ def is_legacy_review_comment(comment: dict, summary_heading: str) -> bool:
     return review_comment_heading(comment, summary_heading) == LEGACY_REVIEW_SUMMARY_HEADING
 
 
+def command_error_summary(error: subprocess.CalledProcessError) -> str:
+    detail = (error.stderr or error.stdout or "").strip()
+    if not detail:
+        detail = f"exit status {error.returncode}"
+    return detail.splitlines()[-1]
+
+
+def error_http_status(error: subprocess.CalledProcessError) -> Optional[int]:
+    match = HTTP_STATUS_PATTERN.search(error.stderr or error.stdout or "")
+    if not match:
+        return None
+    return int(match.group(1))
+
+
+def retry_limit_for_error(
+    error: subprocess.CalledProcessError,
+    attempts: int,
+) -> int:
+    status = error_http_status(error)
+    if status == 404:
+        return min(attempts, 2)
+    if status in (408, 429) or (status is not None and status >= 500):
+        return attempts
+    if status is None:
+        return attempts
+    return 1
+
+
+def gh_api(args: list[str], *, attempts: int = DEFAULT_API_ATTEMPTS) -> subprocess.CompletedProcess:
+    """Run gh api with a small retry window for transient GitHub API failures."""
+    last_error = None
+    for attempt in range(1, attempts + 1):
+        try:
+            return subprocess.run(
+                ["gh", "api", *args],
+                capture_output=True,
+                text=True,
+                check=True,
+            )
+        except subprocess.CalledProcessError as e:
+            last_error = e
+            retry_limit = retry_limit_for_error(e, attempts)
+            e.retry_limit = retry_limit
+            if attempt >= retry_limit:
+                break
+            print(
+                "::warning::GitHub API request failed; "
+                f"retrying ({attempt}/{retry_limit}): gh api {' '.join(args)}: "
+                f"{command_error_summary(e)}",
+                file=sys.stderr,
+            )
+            time.sleep(attempt)
+    raise last_error
+
+
 def gh_api_paginate(endpoint: str) -> list[dict]:
     """Fetch all pages from a gh api endpoint."""
-    result = subprocess.run(
-        ["gh", "api", endpoint, "--paginate"],
-        capture_output=True,
-        text=True,
-        check=True,
+    result = gh_api(
+        [endpoint, "--paginate"],
     )
+    return parse_paginated_json(result.stdout)
+
+
+def parse_paginated_json(output: str) -> list[dict]:
+    """Parse gh api --paginate output."""
     # --paginate concatenates JSON arrays; each page is a JSON array
     # Parse by finding all top-level arrays
     entries = []
-    for line in result.stdout.strip().splitlines():
+    for line in output.strip().splitlines():
         line = line.strip()
         if not line:
             continue
@@ -73,7 +133,7 @@ def gh_api_paginate(endpoint: str) -> list[dict]:
     # If the whole output is a single JSON array, handle that too
     if not entries:
         try:
-            entries = json.loads(result.stdout)
+            entries = json.loads(output)
         except json.JSONDecodeError:
             pass
     return entries
@@ -83,12 +143,7 @@ def fetch_compare_diff(head_repo: str, base_sha: str, head_sha: str) -> Optional
     """Fetch a compare diff from the PR head repo without checking out PR code."""
     endpoint = f"repos/{head_repo}/compare/{base_sha}...{head_sha}"
     try:
-        metadata = subprocess.run(
-            ["gh", "api", endpoint],
-            capture_output=True,
-            text=True,
-            check=True,
-        )
+        metadata = gh_api([endpoint])
         compare = json.loads(metadata.stdout)
         status = compare.get("status", "")
         if status != "ahead":
@@ -97,12 +152,7 @@ def fetch_compare_diff(head_repo: str, base_sha: str, head_sha: str) -> Optional
                 file=sys.stderr,
             )
             return None
-        result = subprocess.run(
-            ["gh", "api", "-H", "Accept: application/vnd.github.diff", endpoint],
-            capture_output=True,
-            text=True,
-            check=True,
-        )
+        result = gh_api(["-H", "Accept: application/vnd.github.diff", endpoint])
     except subprocess.CalledProcessError as e:
         print(
             f"Could not fetch incremental diff from {head_repo}: {e.stderr}",
@@ -134,7 +184,18 @@ def main():
 
     endpoint = f"repos/{repo}/issues/{pr_number}/comments"
     print(f"Fetching comments from {endpoint}...")
-    raw_comments = gh_api_paginate(endpoint)
+    try:
+        raw_comments = gh_api_paginate(endpoint)
+    except subprocess.CalledProcessError as e:
+        retry_limit = getattr(e, "retry_limit", DEFAULT_API_ATTEMPTS)
+        print(
+            "::error::Could not fetch prior PR comments after "
+            f"{retry_limit} attempt(s). Endpoint: {endpoint}. "
+            f"Repository: {repo}. PR: {pr_number}. Last error: "
+            f"{command_error_summary(e)}",
+            file=sys.stderr,
+        )
+        raise
     print(f"Found {len(raw_comments)} comments")
 
     # Extract comment summaries
@@ -183,12 +244,7 @@ def main():
         summary_comment_id = legacy_summary_comment_id
 
     pr_endpoint = f"repos/{repo}/pulls/{pr_number}"
-    pr_result = subprocess.run(
-        ["gh", "api", pr_endpoint],
-        capture_output=True,
-        text=True,
-        check=True,
-    )
+    pr_result = gh_api([pr_endpoint])
     pr = json.loads(pr_result.stdout)
     current_sha = pr["head"]["sha"]
     current_base_sha = pr["base"]["sha"]
