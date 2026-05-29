@@ -18,6 +18,17 @@ inputs:
   sleep:
     description: 'Sleep time in seconds to wait after each write operation. If not provided, no sleep will be performed.'
     required: false
+  required-secrets:
+    description: |
+      Comma- or newline-separated list of env var names that must be non-empty for
+      this test to run. If any are empty (e.g. the workflow could not pull a fork
+      secret, or the org secret has not been provisioned yet), the action logs a
+      skip notice and exits 0 instead of failing on a missing-credential side
+      effect (no grants returned, empty token, etc.).
+
+      Example:
+        required-secrets: BATON_NETLIFY_ACCESS_TOKEN
+    required: false
 
 runs:
   using: "composite"
@@ -33,5 +44,6 @@ runs:
         BATON_PRINCIPAL_TYPE: ${{ inputs.baton-principal-type }}
         BATON: baton
         SLEEP: ${{ inputs.sleep }}
+        REQUIRED_SECRETS: ${{ inputs.required-secrets }}
       run: ${{ github.action_path }}/grant-revoke.sh
       shell: bash
