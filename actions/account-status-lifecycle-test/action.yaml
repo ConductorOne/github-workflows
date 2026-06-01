@@ -32,7 +32,7 @@ runs:
   using: "composite"
   steps:
     - name: Download Baton
-      uses: ConductorOne/github-workflows/actions/get-baton@v2
+      uses: ConductorOne/github-workflows/actions/get-baton@v4
 
     - name: Account Status Lifecycle Test
       env:
