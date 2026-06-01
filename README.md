@@ -239,7 +239,7 @@ Roll out the caller workflow before marking the check required. The shared workf
 
 ### Get Baton
 
-The get-baton action downloads the latest version of [Baton](https://github.com/conductorone/baton) and installs it to /usr/local/bin/baton.
+The get-baton action downloads the latest version of [Baton](https://github.com/conductorone/baton-sdk) and installs it to /usr/local/bin/baton.
 
 ```yaml
 - name: Install baton

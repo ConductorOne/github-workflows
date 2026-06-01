@@ -13,8 +13,8 @@ if [ "${ARCH}" = "x86_64" ]; then
   ARCH="amd64"
 fi
 
-RELEASES_URL="https://api.github.com/repos/conductorone/baton/releases/latest"
-BASE_URL="https://github.com/conductorone/baton/releases/download"
+RELEASES_URL="https://api.github.com/repos/conductorone/baton-sdk/releases/latest"
+BASE_URL="https://github.com/conductorone/baton-sdk/releases/download"
 
 curl_opts=(--fail-with-body "${RELEASES_URL}")
 if [ -n "${GITHUB_TOKEN:-}" ]; then
