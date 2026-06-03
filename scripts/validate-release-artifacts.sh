@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # validate-release-artifacts.sh - Validates release artifacts and attestations
 #
-# Usage: validate-release-artifacts.sh ORG/REPO VERSION
+# Usage: validate-release-artifacts.sh ORG/REPO VERSION [RELEASE_STORAGE_NAME]
 # Example: validate-release-artifacts.sh ConductorOne/baton-github-test v0.1.102
 #
 # Validates:
@@ -31,12 +31,25 @@ ORG_REPO="${1:-}"
 VERSION="${2:-}"
 
 if [[ -z "$ORG_REPO" || -z "$VERSION" ]]; then
-  echo "Usage: validate-release-artifacts.sh ORG/REPO VERSION"
+  echo "Usage: validate-release-artifacts.sh ORG/REPO VERSION [RELEASE_STORAGE_NAME]"
   echo "Example: validate-release-artifacts.sh ConductorOne/baton-github-test v0.1.102"
   exit 1
 fi
 
-MANIFEST_URL="${BASE_URL}/${ORG_REPO}/${VERSION}/manifest.json"
+ORG="${ORG_REPO%%/*}"
+REPO="${ORG_REPO#*/}"
+if [[ -z "$ORG" || -z "$REPO" || "$ORG" == "$ORG_REPO" ]]; then
+  echo "ORG/REPO must be in owner/name form, got: $ORG_REPO" >&2
+  exit 1
+fi
+
+RELEASE_STORAGE_NAME="${3:-$REPO}"
+if [[ "$RELEASE_STORAGE_NAME" == *"/"* || "$RELEASE_STORAGE_NAME" == *".."* || ! "$RELEASE_STORAGE_NAME" =~ ^[a-z0-9][a-z0-9-]*[a-z0-9]$ ]]; then
+  echo "release_storage_name must be one lowercase dash-style path segment, got: $RELEASE_STORAGE_NAME" >&2
+  exit 1
+fi
+
+MANIFEST_URL="${BASE_URL}/${ORG}/${RELEASE_STORAGE_NAME}/${VERSION}/manifest.json"
 TEMP_DIR=$(mktemp -d)
 trap 'rm -rf "$TEMP_DIR"' EXIT
 

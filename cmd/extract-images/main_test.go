@@ -21,6 +21,25 @@ ccc333  public.ecr.aws/conductorone/baton-example:0.1.2
 	}
 }
 
+func TestExtractPublicImagesIgnoresLatest(t *testing.T) {
+	images := make(map[string]*pb.Image)
+	foundECR := extractPublicImages([]byte(`
+aaa111  public.ecr.aws/conductorone/baton-example:latest
+bbb222  public.ecr.aws/conductorone/baton-example:0.1.2
+`), "0.1.2", images)
+
+	if !foundECR {
+		t.Fatal("ECR public image was not found")
+	}
+	image := images["ecrPublic"]
+	if image.GetDigest() != "sha256:bbb222" {
+		t.Fatalf("ecrPublic digest = %q", image.GetDigest())
+	}
+	if image.GetTag() != "0.1.2" {
+		t.Fatalf("ecrPublic tag = %q", image.GetTag())
+	}
+}
+
 func TestExtractLambdaImagePreservesECRRef(t *testing.T) {
 	images := make(map[string]*pb.Image)
 	found := extractLambdaImage([]byte(`

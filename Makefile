@@ -14,11 +14,13 @@ test: test-go test-scripts
 
 .PHONY: test-go
 test-go:
-	go test ./cmd/record-release ./cmd/generate-manifest ./cmd/merge-manifests
+	go test ./cmd/extract-images ./cmd/record-release ./cmd/generate-manifest ./cmd/merge-manifests
 
 .PHONY: test-scripts
 test-scripts:
 	bash scripts/test-derive-iam-role-name.sh
+	bash scripts/test-s3-release-uploads.sh
+	bash scripts/test-public-ecr-release-tags.sh
 
 .PHONY: workflow-validate
 workflow-validate:
