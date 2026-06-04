@@ -43,13 +43,15 @@ if [[ -z "$ORG" || -z "$REPO" || "$ORG" == "$ORG_REPO" ]]; then
   exit 1
 fi
 
+RELEASE_TARGET_NAME_REGEX='^[a-z][a-z0-9-]{0,99}$'
 RELEASE_STORAGE_NAME="${3:-$REPO}"
-if [[ "$RELEASE_STORAGE_NAME" == *"/"* || "$RELEASE_STORAGE_NAME" == *".."* || ! "$RELEASE_STORAGE_NAME" =~ ^[a-z0-9][a-z0-9-]*[a-z0-9]$ ]]; then
-  echo "release_storage_name must be one lowercase dash-style path segment, got: $RELEASE_STORAGE_NAME" >&2
+if [[ ! "$RELEASE_STORAGE_NAME" =~ $RELEASE_TARGET_NAME_REGEX ]]; then
+  echo "release_storage_name must match ${RELEASE_TARGET_NAME_REGEX} to align with registry release target validation, got: $RELEASE_STORAGE_NAME" >&2
   exit 1
 fi
 
-MANIFEST_URL="${BASE_URL}/${ORG}/${RELEASE_STORAGE_NAME}/${VERSION}/manifest.json"
+RELEASE_BASE_URL="${BASE_URL}/${ORG}/${RELEASE_STORAGE_NAME}/${VERSION}"
+MANIFEST_URL="${RELEASE_BASE_URL}/manifest.json"
 TEMP_DIR=$(mktemp -d)
 trap 'rm -rf "$TEMP_DIR"' EXIT
 
@@ -221,9 +223,9 @@ fi
 # 5. Validate manifest signature (if present)
 echo ""
 echo "=== Manifest Signature Validation ==="
-MANIFEST_SIG_URL="${BASE_URL}/${ORG_REPO}/${VERSION}/manifest.json.sig"
-MANIFEST_CERT_URL="${BASE_URL}/${ORG_REPO}/${VERSION}/manifest.json.cert"
-MANIFEST_BUNDLE_URL="${BASE_URL}/${ORG_REPO}/${VERSION}/manifest.json.sigstore.json"
+MANIFEST_SIG_URL="${RELEASE_BASE_URL}/manifest.json.sig"
+MANIFEST_CERT_URL="${RELEASE_BASE_URL}/manifest.json.cert"
+MANIFEST_BUNDLE_URL="${RELEASE_BASE_URL}/manifest.json.sigstore.json"
 
 if curl -sfL "$MANIFEST_BUNDLE_URL" -o "$TEMP_DIR/manifest.json.sigstore.json" 2>/dev/null; then
   if cosign verify-blob \
@@ -248,7 +250,7 @@ elif curl -sfL "$MANIFEST_SIG_URL" -o "$TEMP_DIR/manifest.json.sig" 2>/dev/null 
     fail "Manifest signature verification failed"
   fi
 else
-  warn "Manifest signature files not found (may be legacy release)"
+  fail "Manifest signature files not found"
 fi
 
 # Summary

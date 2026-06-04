@@ -75,6 +75,32 @@ normalize_digest() {
   fi
 }
 
+describe_image_digest() {
+  local tag="$1"
+  local describe_err describe_json digest
+  describe_err="$(mktemp)"
+  if describe_json="$("$aws_cli" ecr-public describe-images \
+    --repository-name "$repository_name" \
+    --image-ids "imageTag=${tag}" \
+    --output json 2>"$describe_err")"; then
+    rm -f "$describe_err"
+    digest="$(jq -r '.imageDetails[0].imageDigest // empty' <<<"$describe_json")"
+    if [[ -n "$digest" ]]; then
+      normalize_digest "$digest"
+    fi
+    return 0
+  fi
+
+  if grep -Eq 'ImageNotFound|ImageNotFoundException|RepositoryNotFound|RepositoryNotFoundException' "$describe_err"; then
+    rm -f "$describe_err"
+    return 0
+  fi
+
+  cat "$describe_err" >&2
+  rm -f "$describe_err"
+  return 1
+}
+
 candidate_digest=""
 while read -r digest ref _; do
   if [[ "$ref" == "$candidate_ref" ]]; then
@@ -89,27 +115,13 @@ if [[ -z "$candidate_digest" ]]; then
   exit 1
 fi
 
-existing_digest=""
+existing_digest="$(describe_image_digest "$version_tag")"
 version_tag_exists=false
-describe_err="$(mktemp)"
-trap 'rm -f "$describe_err"' EXIT
-if describe_json="$("$aws_cli" ecr-public describe-images \
-  --repository-name "$repository_name" \
-  --image-ids "imageTag=${version_tag}" \
-  --output json 2>"$describe_err")"; then
-  existing_digest="$(jq -r '.imageDetails[0].imageDigest // empty' <<<"$describe_json")"
-  if [[ -n "$existing_digest" ]]; then
-    version_tag_exists=true
-  fi
-else
-  if ! grep -Eq 'ImageNotFound|ImageNotFoundException|RepositoryNotFound|RepositoryNotFoundException' "$describe_err"; then
-    cat "$describe_err" >&2
-    exit 1
-  fi
+if [[ -n "$existing_digest" ]]; then
+  version_tag_exists=true
 fi
 
 if [[ -n "$existing_digest" ]]; then
-  existing_digest="$(normalize_digest "$existing_digest")"
   if [[ "$existing_digest" != "$candidate_digest" ]]; then
     echo "::error::Public ECR tag ${repository_name}:${version_tag} already points at ${existing_digest}, refusing to replace it with ${candidate_digest}" >&2
     exit 1
@@ -143,6 +155,16 @@ if [[ "$version_tag_exists" == false ]]; then
     --image-tag "$version_tag" >/dev/null
 else
   echo "Skipped Public ECR version tag write because ${repository_name}:${version_tag} already has ${candidate_digest}"
+fi
+
+published_digest="$(describe_image_digest "$version_tag")"
+if [[ -z "$published_digest" ]]; then
+  echo "::error::Public ECR tag ${repository_name}:${version_tag} was not found after publication" >&2
+  exit 1
+fi
+if [[ "$published_digest" != "$candidate_digest" ]]; then
+  echo "::error::Public ECR tag ${repository_name}:${version_tag} points at ${published_digest} after publication, expected ${candidate_digest}" >&2
+  exit 1
 fi
 
 "$aws_cli" ecr-public put-image \

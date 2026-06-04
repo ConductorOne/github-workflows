@@ -16,8 +16,12 @@ case "$1 $2" in
   "ecr-public describe-images")
     case "$AWS_FAKE_MODE" in
       absent)
-        echo "ImageNotFoundException: image not found" >&2
-        exit 254
+        if grep -q -- "put-image .*--image-tag 1.2.3" "$AWS_CALL_LOG"; then
+          printf '{"imageDetails":[{"imageDigest":"sha256:abc123"}]}\n'
+        else
+          echo "ImageNotFoundException: image not found" >&2
+          exit 254
+        fi
         ;;
       same)
         printf '{"imageDetails":[{"imageDigest":"sha256:abc123"}]}\n'
@@ -62,6 +66,11 @@ printf 'abc123  public.ecr.aws/conductorone/bridge-client:release-candidate-123-
 run_publish absent "$digest_file" "$log_file"
 
 grep -q -- "describe-images .*imageTag=1.2.3" "$log_file"
+describe_count=$(grep -c -- "describe-images .*imageTag=1.2.3" "$log_file" || true)
+if [[ "$describe_count" -ne 2 ]]; then
+  echo "version tag should be checked before and after publication" >&2
+  exit 1
+fi
 grep -q -- "put-image .*--image-tag 1.2.3" "$log_file"
 grep -q -- "put-image .*--image-tag latest" "$log_file"
 if grep -q -- "describe-images .*latest" "$log_file"; then

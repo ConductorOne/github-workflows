@@ -76,6 +76,10 @@ env:
 
 permissions: {}
 
+concurrency:
+  group: release-${{ github.repository }}-${{ inputs.tag }}
+  cancel-in-progress: false
+
 jobs:
   validate-inputs:
     runs-on: ubuntu-latest
