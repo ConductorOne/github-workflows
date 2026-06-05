@@ -190,6 +190,7 @@ jobs:
       s3_directory: ${{ steps.s3-directory.outputs.S3_DIRECTORY }}
       binaries_manifest: ${{ steps.generate-binaries-manifest.outputs.binaries_manifest }}
       binaries_checksums: ${{ steps.output-checksums.outputs.checksums }}
+      released_at: ${{ steps.release-meta.outputs.released_at }}
     steps:
       - name: Checkout caller repo
         uses: actions/checkout@v5
@@ -402,6 +403,30 @@ jobs:
           go-version-file: "_workflows/go.mod"
           cache: false
 
+      - name: Fetch release metadata
+        id: release-meta
+        working-directory: _workflows
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          mkdir -p "$GITHUB_WORKSPACE/_release_metadata"
+          RELEASE_JSON="$GITHUB_WORKSPACE/_release_metadata/github-release.json"
+          CHANGELOG_FILE="$GITHUB_WORKSPACE/_release_metadata/binaries-changelog.md"
+          WORKFLOW_TIME="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+
+          if ! gh api "repos/${{ github.repository }}/releases/tags/${{ inputs.tag }}" > "$RELEASE_JSON" 2>/dev/null; then
+            echo '{}' > "$RELEASE_JSON"
+          fi
+
+          go run ./cmd/release-metadata \
+            -repo-dir ../_caller \
+            -tag "${{ inputs.tag }}" \
+            -workflow-time "$WORKFLOW_TIME" \
+            -github-release-json "$RELEASE_JSON" \
+            -changelog-file "$CHANGELOG_FILE" \
+            >> "$GITHUB_OUTPUT"
+
       - name: Generate manifest.json
         id: generate-binaries-manifest
         working-directory: _workflows
@@ -413,6 +438,7 @@ jobs:
             -repo-name "${{ github.event.repository.name }}" \
             -org-name "${{ github.event.repository.owner.login }}" \
             -tag "${{ inputs.tag }}" \
+            -released-at "${{ steps.release-meta.outputs.released_at }}" \
             -base-url "${{ env.CDN_BASE_URL }}/${{ steps.s3-directory.outputs.S3_DIRECTORY }}")
 
           # Debug output
@@ -1293,8 +1319,8 @@ jobs:
   # ================================================================
   record-registry-api:
     # Use !cancelled() so the explicit needs.result check controls skipped-job behavior.
-    if: ${{ !cancelled() && needs.publish-release-manifest.result == 'success' && needs.verify-release.result == 'success' }}
-    needs: [determine-workflows-ref, publish-release-manifest, verify-release]
+    if: ${{ !cancelled() && needs.goreleaser-binaries.result == 'success' && needs.publish-release-manifest.result == 'success' && needs.verify-release.result == 'success' }}
+    needs: [determine-workflows-ref, goreleaser-binaries, publish-release-manifest, verify-release]
     permissions:
       id-token: write
       contents: read
@@ -1362,17 +1388,32 @@ jobs:
 
       - name: Fetch release metadata
         id: release-meta
-        if: steps.registry-oidc.outcome == 'success'
-        continue-on-error: true
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          RELEASE_JSON=$(gh api "repos/${{ github.repository }}/releases/tags/${{ inputs.tag }}" 2>/dev/null || echo '{}')
-          echo "$RELEASE_JSON" | jq -r '.body // empty' > /tmp/changelog.md || true
-          # Prefer publish time; created_at can predate visibility for draft releases
-          # and for normal create-then-publish workflow runs.
-          RELEASED_AT=$(echo "$RELEASE_JSON" | jq -r '.published_at // .created_at // empty')
-          echo "released_at=$RELEASED_AT" >> "$GITHUB_OUTPUT"
+          set -euo pipefail
+          mkdir -p "$GITHUB_WORKSPACE/_release_metadata"
+          RELEASE_JSON="$GITHUB_WORKSPACE/_release_metadata/github-release.json"
+          CHANGELOG_FILE="$GITHUB_WORKSPACE/_release_metadata/changelog.md"
+          WORKFLOW_TIME="${{ needs.goreleaser-binaries.outputs.released_at }}"
+          if [ -z "$WORKFLOW_TIME" ]; then
+            WORKFLOW_TIME="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          fi
+
+          if ! gh api "repos/${{ github.repository }}/releases/tags/${{ inputs.tag }}" > "$RELEASE_JSON" 2>/dev/null; then
+            echo '{}' > "$RELEASE_JSON"
+          fi
+
+          go run ./cmd/release-metadata \
+            -repo-dir ../_connector \
+            -tag "${{ inputs.tag }}" \
+            -workflow-time "$WORKFLOW_TIME" \
+            -github-release-json "$RELEASE_JSON" \
+            -changelog-file "$CHANGELOG_FILE" \
+            >> "$GITHUB_OUTPUT"
+          # Keep the registry timestamp aligned with the signed manifest.
+          echo "released_at=$WORKFLOW_TIME" >> "$GITHUB_OUTPUT"
+          echo "released_at_source=binaries-manifest" >> "$GITHUB_OUTPUT"
 
       - name: Write merged manifest from manifest publication job
         working-directory: _workflows
@@ -1387,6 +1428,7 @@ jobs:
         working-directory: _workflows
         env:
           REGISTRY_API_TOKEN: ${{ steps.registry-oidc.outputs.token }}
+          RELEASED_AT: ${{ needs.goreleaser-binaries.outputs.released_at }}
         run: |
           DOCS_FLAG=""
           if [ "${{ steps.read-docs.outputs.has_docs }}" = "true" ]; then
@@ -1394,8 +1436,8 @@ jobs:
           fi
 
           CHANGELOG_FLAG=""
-          if [ -s /tmp/changelog.md ]; then
-            CHANGELOG_FLAG="-changelog /tmp/changelog.md"
+          if [ -s "${{ steps.release-meta.outputs.changelog_file }}" ]; then
+            CHANGELOG_FLAG="-changelog ${{ steps.release-meta.outputs.changelog_file }}"
           fi
 
           CONFIG_SCHEMA_FLAG=""
@@ -1409,8 +1451,8 @@ jobs:
           fi
 
           RELEASED_AT_FLAG=""
-          if [ -n "${{ steps.release-meta.outputs.released_at }}" ]; then
-            RELEASED_AT_FLAG="-released-at ${{ steps.release-meta.outputs.released_at }}"
+          if [ -n "$RELEASED_AT" ]; then
+            RELEASED_AT_FLAG="-released-at $RELEASED_AT"
           fi
 
           go run ./cmd/record-release \
