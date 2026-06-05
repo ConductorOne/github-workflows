@@ -450,6 +450,8 @@ jobs:
     permissions:
       contents: read
       id-token: write
+    env:
+      WINDOWS_GORELEASER_DIST: ${{ runner.temp }}/go-win-dist
     outputs:
       windows_manifest: ${{ steps.generate-windows-manifest.outputs.windows_manifest }}
     steps:
@@ -561,6 +563,8 @@ jobs:
           RELEASE_TAG: ${{ inputs.tag }}
         run: |
           export BUILD_STARTED_ON=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+          export WINDOWS_GORELEASER_DIST="${WINDOWS_GORELEASER_DIST//\\//}"
+          mkdir -p "$WINDOWS_GORELEASER_DIST"
 
           # Generate GoReleaser config
           envsubst < templates/.goreleaser-windows-template.yaml.tmpl | tee "_generated/.goreleaser.windows.yaml"
@@ -579,18 +583,65 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.RELENG_GITHUB_TOKEN }}
           GORELEASER_KEY: ${{ secrets.GORELEASER_PRO_KEY }}
 
-      - name: Flatten MSI directory structure
+      - name: Stage Windows dist assets
         shell: pwsh
+        env:
+          REPO_NAME: ${{ github.event.repository.name }}
+          RELEASE_TAG: ${{ inputs.tag }}
         run: |
-          # GoReleaser Pro puts MSI files in dist/msi/<name>/ subdirectory
-          # Copy all files to dist root to match binaries job pattern
-          $msiDir = "_caller/dist/msi"
-          if (Test-Path $msiDir) {
-            Get-ChildItem $msiDir -Recurse -File | ForEach-Object {
-              Write-Host "Copying $($_.Name) to dist root"
-              Copy-Item $_.FullName -Destination "_caller/dist/"
+          if (Test-Path "_caller/dist") {
+            Remove-Item "_caller/dist" -Recurse -Force
+          }
+          New-Item -ItemType Directory -Force -Path "_caller/dist"
+
+          $zipName = "${env:REPO_NAME}-${env:RELEASE_TAG}-windows-amd64.zip"
+          $msiName = "${env:REPO_NAME}_${env:RELEASE_TAG}_windows_amd64.msi"
+          $artifacts = @(
+            $zipName,
+            "$zipName.sig",
+            "$zipName.cert",
+            $msiName,
+            "$msiName.sig",
+            "$msiName.cert"
+          )
+
+          $artifacts | ForEach-Object {
+            $artifact = $_
+            $found = Get-ChildItem -Path $env:WINDOWS_GORELEASER_DIST -Recurse -File | Where-Object { $_.Name -eq $artifact }
+            if ($found.Count -ne 1) {
+              Write-Error "Expected exactly one Windows dist output named $artifact, found $($found.Count)"
+              exit 1
             }
-            Write-Host "✅ Flattened MSI directory structure"
+            Write-Host "Copying $artifact to dist root"
+            Copy-Item $found[0].FullName "_caller/dist/$artifact"
+          }
+
+      - name: Generate Windows dist SBOMs
+        shell: pwsh
+        env:
+          REPO_NAME: ${{ github.event.repository.name }}
+          RELEASE_TAG: ${{ inputs.tag }}
+        run: |
+          $artifacts = @(
+            "${env:REPO_NAME}-${env:RELEASE_TAG}-windows-amd64.zip",
+            "${env:REPO_NAME}_${env:RELEASE_TAG}_windows_amd64.msi"
+          )
+          Push-Location "_caller/dist"
+          try {
+            $artifacts | ForEach-Object {
+              $artifact = $_
+              if (!(Test-Path $artifact)) {
+                Write-Error "Expected Windows dist artifact was not generated: $artifact"
+                exit 1
+              }
+              $sbomPath = "$artifact.sbom.json"
+              syft "file:$artifact" -o "spdx-json=$sbomPath"
+              if ($LASTEXITCODE -ne 0) {
+                exit $LASTEXITCODE
+              }
+            }
+          } finally {
+            Pop-Location
           }
 
       - name: Generate SLSA provenance for Windows artifacts
@@ -604,7 +655,7 @@ jobs:
           PROVENANCE_COUNT=0
 
           # Find all downloadable archives (zip and msi files)
-          # MSI files are flattened to dist root by previous step
+          # MSI files are staged to dist root by the previous step
           for artifact in "${CALLER_DIST}"/*.zip "${CALLER_DIST}"/*.msi; do
             [ -f "$artifact" ] || continue
             [[ "$artifact" == *checksums* ]] && continue
@@ -639,7 +690,7 @@ jobs:
           SIGNED_COUNT=0
 
           # Require every Windows release artifact to have an SPDX SBOM.
-          # MSI files are flattened to dist root by the previous step.
+          # MSI files are staged to dist root by the previous step.
           for artifact in "${CALLER_DIST}"/*.zip "${CALLER_DIST}"/*.msi; do
             [ -f "$artifact" ] || continue
             [[ "$artifact" == *checksums* ]] && continue
@@ -698,7 +749,7 @@ jobs:
               --content-type "application/zip"
           }
 
-          # Upload MSI files (flattened to dist root by earlier step)
+          # Upload MSI files staged to dist root by the earlier step
           $msiFiles = Get-ChildItem "_caller/dist/*.msi" -ErrorAction SilentlyContinue
           foreach ($msi in $msiFiles) {
             Write-Host "Uploading $($msi.Name) to S3..."

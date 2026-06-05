@@ -2,6 +2,7 @@
 ## This runs on Windows runner with Wix Toolset
 version: 2
 project_name: "${REPO_NAME}"
+dist: '${WINDOWS_GORELEASER_DIST}'
 builds:
   - binary: "${REPO_NAME}"
     env:
@@ -31,15 +32,6 @@ release:
   disable: true
 checksum:
   disable: true
-sboms:
-  - id: sbom-archive
-    artifacts: archive
-    ids:
-      - windows-archive
-  - id: sbom-msi
-    artifacts: installer
-    ids:
-      - windows-msi
 signs:
   - id: cosign-archives
     output: true
