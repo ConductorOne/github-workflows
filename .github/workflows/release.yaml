@@ -1388,6 +1388,7 @@ jobs:
 
       - name: Fetch release metadata
         id: release-meta
+        working-directory: _workflows
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
