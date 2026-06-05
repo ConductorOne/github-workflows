@@ -17,6 +17,11 @@ on:
       tag:
         required: true
         type: string
+      release_storage_name:
+        required: false
+        type: string
+        default: ""
+        description: "Optional release storage path segment. Defaults to the repository name."
       lambda:
         required: false
         type: boolean
@@ -71,6 +76,10 @@ env:
 
 permissions: {}
 
+concurrency:
+  group: release-${{ github.repository }}-${{ inputs.tag }}
+  cancel-in-progress: false
+
 jobs:
   validate-inputs:
     runs-on: ubuntu-latest
@@ -93,6 +102,16 @@ jobs:
         run: |
           echo "::error::dockerfile_template can only be used when lambda is false"
           exit 1
+
+      - name: Validate release_storage_name has safe path segment
+        if: inputs.release_storage_name != ''
+        env:
+          RELEASE_STORAGE_NAME: ${{ inputs.release_storage_name }}
+        run: |
+          if [[ ! "$RELEASE_STORAGE_NAME" =~ ^[a-z][a-z0-9-]{0,99}$ ]]; then
+            echo "::error::release_storage_name must match ^[a-z][a-z0-9-]{0,99}$ to align with registry release target validation. Got: $RELEASE_STORAGE_NAME"
+            exit 1
+          fi
 
       - name: Validate dockerfile_template has safe path
         if: inputs.dockerfile_template != ''
@@ -229,16 +248,17 @@ jobs:
         run: |
           ORG="${{ github.event.repository.owner.login }}"
           REPO="${{ github.event.repository.name }}"
+          STORAGE_NAME="${{ inputs.release_storage_name }}"
           TAG="${{ inputs.tag }}"
-          echo "S3_DIRECTORY=releases/$ORG/$REPO/$TAG" >> "$GITHUB_OUTPUT"
+          if [ -z "$STORAGE_NAME" ]; then
+            STORAGE_NAME="$REPO"
+          fi
+          echo "S3_DIRECTORY=releases/$ORG/$STORAGE_NAME/$TAG" >> "$GITHUB_OUTPUT"
 
       - name: Generate configs for binaries
         working-directory: _workflows
         env:
           REPO_NAME: ${{ github.event.repository.name }}
-          S3_BUCKET: ${{ env.S3_BUCKET }}
-          S3_REGION: "us-west-2"
-          S3_DIRECTORY: ${{ steps.s3-directory.outputs.S3_DIRECTORY }}
           # For provenance predicate template
           WORKFLOWS_REF: ${{ needs.determine-workflows-ref.outputs.ref }}
           RELEASE_TAG: ${{ inputs.tag }}
@@ -363,34 +383,18 @@ jobs:
           echo "Generated SBOM bundles: ${SIGNED_COUNT}"
           ls "${CALLER_DIST}"/*.sbom.sigstore.json 2>/dev/null || echo "ℹ️ No SBOM bundles generated (GoReleaser may not have generated SBOMs)"
 
-      - name: Upload attestation bundles to S3
+      - name: Upload binary release artifacts to S3
         working-directory: _workflows
         env:
-          CALLER_DIST: ../_caller/dist
+          S3_BUCKET: ${{ env.S3_BUCKET }}
+          S3_DIRECTORY: ${{ steps.s3-directory.outputs.S3_DIRECTORY }}
         shell: bash
         run: |
           set -euo pipefail
-          BUCKET="${{ env.S3_BUCKET }}"
-          DIRECTORY="${{ steps.s3-directory.outputs.S3_DIRECTORY }}"
-
-          UPLOAD_COUNT=0
-
-          # Upload all sigstore bundles (provenance and SBOM)
-          for bundle in "${CALLER_DIST}"/*.sigstore.json; do
-            [ -f "$bundle" ] || continue
-            BASENAME=$(basename "$bundle")
-            echo "Uploading $BASENAME to S3..."
-            aws s3 cp "$bundle" "s3://$BUCKET/$DIRECTORY/$BASENAME" \
-              --cache-control "public,max-age=31536000,immutable" \
-              --content-type "application/json"
-            ((UPLOAD_COUNT++))
-          done
-
-          if [ "$UPLOAD_COUNT" -eq 0 ]; then
-            echo "::error::No attestation bundles found to upload"
-            exit 1
-          fi
-          echo "✅ Uploaded ${UPLOAD_COUNT} attestation bundles to S3"
+          ./scripts/upload-release-artifacts.sh \
+            --bucket "$S3_BUCKET" \
+            --directory "$S3_DIRECTORY" \
+            --base-dir "../_caller/dist"
 
       - name: Set up Go for workflows
         uses: actions/setup-go@v6
@@ -676,72 +680,30 @@ jobs:
 
       - name: Calculate S3 directory
         id: s3-directory
-        shell: pwsh
+        shell: bash
         run: |
-          $org = "${{ github.event.repository.owner.login }}"
-          $repo = "${{ github.event.repository.name }}"
-          $tag = "${{ inputs.tag }}"
-          "S3_DIRECTORY=releases/$org/$repo/$tag" >> $env:GITHUB_OUTPUT
+          ORG="${{ github.event.repository.owner.login }}"
+          REPO="${{ github.event.repository.name }}"
+          STORAGE_NAME="${{ inputs.release_storage_name }}"
+          TAG="${{ inputs.tag }}"
+          if [ -z "$STORAGE_NAME" ]; then
+            STORAGE_NAME="$REPO"
+          fi
+          echo "S3_DIRECTORY=releases/$ORG/$STORAGE_NAME/$TAG" >> "$GITHUB_OUTPUT"
 
       - name: Upload Windows artifacts to S3
-        shell: pwsh
+        working-directory: _workflows
+        shell: bash
         env:
           S3_BUCKET: ${{ env.S3_BUCKET }}
           S3_DIRECTORY: ${{ steps.s3-directory.outputs.S3_DIRECTORY }}
         run: |
-          # Upload zip files
-          $zipFiles = Get-ChildItem "_caller/dist/*.zip" -ErrorAction SilentlyContinue
-          foreach ($zip in $zipFiles) {
-            Write-Host "Uploading $($zip.Name) to S3..."
-            aws s3 cp $zip.FullName "s3://$env:S3_BUCKET/$env:S3_DIRECTORY/$($zip.Name)" `
-              --cache-control "public,max-age=31536000,immutable" `
-              --content-type "application/zip"
-          }
-
-          # Upload MSI files (flattened to dist root by earlier step)
-          $msiFiles = Get-ChildItem "_caller/dist/*.msi" -ErrorAction SilentlyContinue
-          foreach ($msi in $msiFiles) {
-            Write-Host "Uploading $($msi.Name) to S3..."
-            aws s3 cp $msi.FullName "s3://$env:S3_BUCKET/$env:S3_DIRECTORY/$($msi.Name)" `
-              --cache-control "public,max-age=31536000,immutable" `
-              --content-type "application/x-msi"
-          }
-
-          # Upload signatures (.sig files)
-          $sigFiles = Get-ChildItem "_caller/dist/*.sig" -ErrorAction SilentlyContinue
-          foreach ($sig in $sigFiles) {
-            Write-Host "Uploading $($sig.Name) to S3..."
-            aws s3 cp $sig.FullName "s3://$env:S3_BUCKET/$env:S3_DIRECTORY/$($sig.Name)" `
-              --cache-control "public,max-age=31536000,immutable" `
-              --content-type "application/octet-stream"
-          }
-
-          # Upload certificates (.cert files)
-          $certFiles = Get-ChildItem "_caller/dist/*.cert" -ErrorAction SilentlyContinue
-          foreach ($cert in $certFiles) {
-            Write-Host "Uploading $($cert.Name) to S3..."
-            aws s3 cp $cert.FullName "s3://$env:S3_BUCKET/$env:S3_DIRECTORY/$($cert.Name)" `
-              --cache-control "public,max-age=31536000,immutable" `
-              --content-type "application/x-pem-file"
-          }
-
-          # Upload SBOM json files (before attestation signing)
-          $sbomFiles = Get-ChildItem "_caller/dist/*.sbom.json" -ErrorAction SilentlyContinue
-          foreach ($sbom in $sbomFiles) {
-            Write-Host "Uploading $($sbom.Name) to S3..."
-            aws s3 cp $sbom.FullName "s3://$env:S3_BUCKET/$env:S3_DIRECTORY/$($sbom.Name)" `
-              --cache-control "public,max-age=31536000,immutable" `
-              --content-type "application/json"
-          }
-
-          # Upload attestation bundles (provenance and SBOM sigstore bundles)
-          $bundles = Get-ChildItem "_caller/dist/*.sigstore.json" -ErrorAction SilentlyContinue
-          foreach ($bundle in $bundles) {
-            Write-Host "Uploading $($bundle.Name) to S3..."
-            aws s3 cp $bundle.FullName "s3://$env:S3_BUCKET/$env:S3_DIRECTORY/$($bundle.Name)" `
-              --cache-control "public,max-age=31536000,immutable" `
-              --content-type "application/json"
-          }
+          set -euo pipefail
+          ./scripts/upload-release-artifacts.sh \
+            --bucket "$S3_BUCKET" \
+            --directory "$S3_DIRECTORY" \
+            --base-dir "../_caller/dist" \
+            --include-sbom-documents
 
       - name: Set up Go for workflows tools
         uses: actions/setup-go@v6
@@ -849,6 +811,7 @@ jobs:
           REPO_NAME: ${{ github.event.repository.name }}
           DOCKERFILE_PATH: ../_workflows/_generated/Dockerfile
           DIST_DIR: dist/oci
+          PUBLIC_ECR_PUBLISH_TAG: release-candidate-${{ github.run_id }}-${{ github.run_attempt }}
           # For provenance predicate template
           WORKFLOWS_REF: ${{ needs.determine-workflows-ref.outputs.ref }}
           RELEASE_TAG: ${{ inputs.tag }}
@@ -945,6 +908,30 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.RELENG_GITHUB_TOKEN }}
           COSIGN_EXPERIMENTAL: "1"
 
+      - name: Set up Go for Public ECR helper
+        if: inputs.docker == true
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: "_workflows/go.mod"
+          cache: false
+
+      - name: Preflight and publish Public ECR release tags
+        if: inputs.docker == true
+        working-directory: _workflows
+        shell: bash
+        env:
+          REPO_NAME: ${{ github.event.repository.name }}
+          RELEASE_TAG: ${{ inputs.tag }}
+          CANDIDATE_TAG: release-candidate-${{ github.run_id }}-${{ github.run_attempt }}
+        run: |
+          set -euo pipefail
+          VERSION="${RELEASE_TAG#v}"
+          go run ./cmd/publish-public-ecr-release-tags \
+            -repository-name "$REPO_NAME" \
+            -version-tag "$VERSION" \
+            -candidate-tag "$CANDIDATE_TAG" \
+            -digest-file "../_caller/dist/oci/${REPO_NAME}_${VERSION}_digests.txt"
+
       - name: Configure Lambda ECR AWS credentials via OIDC
         if: inputs.lambda == true
         uses: aws-actions/configure-aws-credentials@v5
@@ -955,6 +942,13 @@ jobs:
       - name: Login to Lambda ECR
         if: inputs.lambda == true
         uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Set up Go for caller Lambda release
+        if: inputs.docker == true && inputs.lambda == true
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: "_caller/go.mod"
+          cache: false
 
       - name: Run GoReleaser for Lambda
         if: inputs.lambda == true
@@ -1021,7 +1015,7 @@ jobs:
           # Attest each multi-arch index image (tagged with just version, not version-arch)
           while IFS= read -r line || [ -n "$line" ]; do
             [ -z "$line" ] && continue
-            DIGEST_HEX=$(echo "$line" | awk '{print $1}')
+            DIGEST=$(echo "$line" | awk '{print $1}')
             REF=$(echo "$line" | awk '{print $2}')
 
             # Only attest multi-arch index images (tagged with just version)
@@ -1030,8 +1024,11 @@ jobs:
             fi
 
             # Build the digest-pinned reference
+            if [[ "$DIGEST" != sha256:* ]]; then
+              DIGEST="sha256:${DIGEST}"
+            fi
             IMAGE_BASE="${REF%:*}"
-            URI="${IMAGE_BASE}@sha256:${DIGEST_HEX}"
+            URI="${IMAGE_BASE}@${DIGEST}"
 
             echo "Attesting image: $URI"
             cosign attest \
@@ -1229,18 +1226,20 @@ jobs:
           VERSION_NO_V="${VERSION#v}"
           CHECKSUMS_FILE="${REPO_NAME}_${VERSION_NO_V}_checksums.txt"
 
-          aws s3 cp "./${CHECKSUMS_FILE}" "s3://${BUCKET}/${DIRECTORY}/${CHECKSUMS_FILE}" \
-            --cache-control "public,max-age=31536000,immutable" \
-            --content-type "text/plain"
-          aws s3 cp "./${CHECKSUMS_FILE}.sig" "s3://${BUCKET}/${DIRECTORY}/${CHECKSUMS_FILE}.sig" \
-            --cache-control "public,max-age=31536000,immutable" \
-            --content-type "application/octet-stream"
-          aws s3 cp "./${CHECKSUMS_FILE}.cert" "s3://${BUCKET}/${DIRECTORY}/${CHECKSUMS_FILE}.cert" \
-            --cache-control "public,max-age=31536000,immutable" \
-            --content-type "application/x-pem-file"
-          aws s3 cp "./${CHECKSUMS_FILE}.provenance.sigstore.json" "s3://${BUCKET}/${DIRECTORY}/${CHECKSUMS_FILE}.provenance.sigstore.json" \
-            --cache-control "public,max-age=31536000,immutable" \
-            --content-type "application/json"
+          upload_checksum_file() {
+            local file="$1"
+            local content_type="$2"
+            ../scripts/s3-put-object-if-none-match.sh \
+              --bucket "$BUCKET" \
+              --key "${DIRECTORY}/${file}" \
+              --body "./${file}" \
+              --content-type "$content_type"
+          }
+
+          upload_checksum_file "${CHECKSUMS_FILE}" "text/plain"
+          upload_checksum_file "${CHECKSUMS_FILE}.sig" "application/octet-stream"
+          upload_checksum_file "${CHECKSUMS_FILE}.cert" "application/x-pem-file"
+          upload_checksum_file "${CHECKSUMS_FILE}.provenance.sigstore.json" "application/json"
           echo "✅ Checksums file and signatures uploaded"
 
       - name: Upload manifest.json to S3
@@ -1258,30 +1257,35 @@ jobs:
             echo "::error::manifest.json not found in $(pwd)"
             exit 1
           fi
-          if aws s3 cp "manifest.json" "s3://$BUCKET/$DIRECTORY/manifest.json" \
-            --cache-control "public,max-age=31536000,immutable" \
-            --content-type "application/json"; then
-            MANIFEST_URL="$CDN_BASE/$DIRECTORY/manifest.json"
-            echo "manifest_url=$MANIFEST_URL" >> "$GITHUB_OUTPUT"
-            echo "✅ Manifest uploaded successfully: $MANIFEST_URL"
-          else
-            echo "::error::Failed to upload manifest.json to S3"
-            exit 1
-          fi
+          ../scripts/s3-put-object-if-none-match.sh \
+            --bucket "$BUCKET" \
+            --key "$DIRECTORY/manifest.json" \
+            --body "manifest.json" \
+            --content-type "application/json"
+          MANIFEST_URL="$CDN_BASE/$DIRECTORY/manifest.json"
+          echo "manifest_url=$MANIFEST_URL" >> "$GITHUB_OUTPUT"
+          echo "✅ Manifest uploaded successfully: $MANIFEST_URL"
+
           for required_file in manifest.json.sig manifest.json.cert manifest.json.sigstore.json; do
             if [ ! -f "$required_file" ]; then
               echo "::error::$required_file not found in $(pwd)"
               exit 1
             fi
           done
-          aws s3 cp "manifest.json.sig" "s3://$BUCKET/$DIRECTORY/manifest.json.sig" \
-            --cache-control "public,max-age=31536000,immutable" \
+          ../scripts/s3-put-object-if-none-match.sh \
+            --bucket "$BUCKET" \
+            --key "$DIRECTORY/manifest.json.sig" \
+            --body "manifest.json.sig" \
             --content-type "application/octet-stream"
-          aws s3 cp "manifest.json.cert" "s3://$BUCKET/$DIRECTORY/manifest.json.cert" \
-            --cache-control "public,max-age=31536000,immutable" \
+          ../scripts/s3-put-object-if-none-match.sh \
+            --bucket "$BUCKET" \
+            --key "$DIRECTORY/manifest.json.cert" \
+            --body "manifest.json.cert" \
             --content-type "application/octet-stream"
-          aws s3 cp "manifest.json.sigstore.json" "s3://$BUCKET/$DIRECTORY/manifest.json.sigstore.json" \
-            --cache-control "public,max-age=31536000,immutable" \
+          ../scripts/s3-put-object-if-none-match.sh \
+            --bucket "$BUCKET" \
+            --key "$DIRECTORY/manifest.json.sigstore.json" \
+            --body "manifest.json.sigstore.json" \
             --content-type "application/json"
 
   # ================================================================
@@ -1453,8 +1457,9 @@ jobs:
         env:
           ORG_REPO: ${{ github.event.repository.owner.login }}/${{ github.event.repository.name }}
           VERSION: ${{ inputs.tag }}
+          RELEASE_STORAGE_NAME: ${{ inputs.release_storage_name }}
         run: |
-          ./scripts/validate-release-artifacts.sh "$ORG_REPO" "$VERSION"
+          ./scripts/validate-release-artifacts.sh "$ORG_REPO" "$VERSION" "$RELEASE_STORAGE_NAME"
 
   notify-release-failure:
     needs:

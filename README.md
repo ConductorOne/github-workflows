@@ -70,15 +70,16 @@ jobs:
 
 The release workflow accepts the following input parameters:
 
-| Parameter             | Required | Default | Description                                                                 |
-| --------------------- | -------- | ------- | --------------------------------------------------------------------------- |
-| `tag`                 | Yes      | -       | The release tag (must be valid semver with `v` prefix, e.g., `v1.0.0`)      |
-| `lambda`              | No       | `true`  | Whether to release with Lambda image support                                |
-| `docker`              | No       | `true`  | Whether to release with Docker image support                                |
-| `dockerfile_template` | No       | `""`    | Path to a custom Dockerfile in your repo (only valid when `lambda: false`)  |
-| `docker_extra_files`  | No       | `""`    | Comma-separated list of extra files/dirs to include in Docker build context |
-| `msi`                 | No       | `true`  | Whether to build MSI Windows installers                                     |
-| `msi_wxs_path`        | No       | `""`    | Path to custom WXS template for MSI installer (uses default if not set)     |
+| Parameter | Required | Default | Description |
+|-|-|-|-|
+| `tag` | Yes | - | The release tag (must be valid semver with `v` prefix, e.g., `v1.0.0`) |
+| `release_storage_name` | No | `""` | Optional S3 release path segment matching `^[a-z][a-z0-9-]{0,99}$`; defaults to the repository name |
+| `lambda` | No | `true` | Whether to release with Lambda image support |
+| `docker` | No | `true` | Whether to release with Docker image support |
+| `dockerfile_template` | No | `""` | Path to a custom Dockerfile in your repo (only valid when `lambda: false`) |
+| `docker_extra_files` | No | `""` | Comma-separated list of extra files/dirs to include in Docker build context |
+| `msi` | No | `true` | Whether to build MSI Windows installers |
+| `msi_wxs_path` | No | `""` | Path to custom WXS template for MSI installer (uses default if not set) |
 
 2. Ensure your repository has the following secrets configured:
 

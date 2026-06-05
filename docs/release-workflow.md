@@ -23,6 +23,8 @@ When a tag is pushed to a connector repository, the shared release workflow:
 Validates workflow inputs before proceeding:
 
 - Ensures tag is valid semver starting with 'v' (e.g., `v1.2.3`)
+- Ensures `release_storage_name`, when set, matches
+  `^[a-z][a-z0-9-]{0,99}$`
 - Ensures `dockerfile_template` is only used when `lambda: false`
 - Ensures `docker_extra_files` is only used when `dockerfile_template` is set
 - Ensures `msi_wxs_path` has no path traversal (`..` or absolute paths)
@@ -41,7 +43,7 @@ Builds and signs binary archives for macOS and Linux:
 - Generates SBOMs using Syft
 - Creates SLSA v1 provenance attestations
 - Signs SBOMs as attestation bundles
-- Uploads all artifacts to S3
+- Uploads all artifacts to S3 with no-overwrite writes
 
 **Outputs:** `*.zip` (macOS), `*.tar.gz` (Linux), `*.provenance.sigstore.json`, `*.sbom.sigstore.json`
 
@@ -55,7 +57,7 @@ Builds Windows zip and MSI installer:
 - Deterministic UpgradeCode via UUID v5 from repository name
 - Supports custom WXS templates via `msi_wxs_path` input
 - Generates SBOMs and SLSA v1 provenance attestations
-- Uploads all artifacts to S3
+- Uploads all artifacts to S3 with no-overwrite writes
 
 **Outputs:** `*.zip`, `*.msi`, `*.provenance.sigstore.json`, `*.sbom.sigstore.json`
 
@@ -66,7 +68,9 @@ Builds Windows zip and MSI installer:
 Builds and publishes container images:
 
 - Multi-arch Docker images (amd64/arm64)
-- Pushes to ECR Public (for Lambda deployment)
+- Pushes a candidate image to ECR Public
+- Promotes the candidate digest to the version tag after preflight
+- Updates `latest` as mutable convenience metadata
 - Attaches provenance attestations to images (OCI referrers)
 
 **Outputs:** ECR Public images with attached attestations
@@ -78,7 +82,7 @@ Finalizes distributable release artifacts:
 - Creates unified checksums file (all platforms)
 - Merges binary, Windows, and image manifests
 - Signs `manifest.json` and checksums with Sigstore
-- Uploads manifest and checksums to S3
+- Uploads manifest and checksums to S3 with no-overwrite writes
 - Exposes the final manifest to the registry API recording job
 
 ### record-registry-api
@@ -99,6 +103,22 @@ Post-release validation (non-blocking):
 - Triggers Datadog notification on failure
 
 ## Security Properties
+
+### Immutable S3 Release Objects
+
+Versioned release objects are uploaded through S3 `PutObject` with
+`If-None-Match: *`. Existing objects under
+`releases/{org}/{release_storage_name}/{tag}/...` cause the release to fail
+instead of being overwritten. When `release_storage_name` is not set, the
+workflow uses the repository name, preserving the existing connector path.
+
+### Public ECR Version Tags
+
+Public ECR image publication writes a temporary candidate tag first. The
+workflow compares that candidate digest to any existing version tag before
+publishing the version tag. A matching digest is allowed; a different digest is
+rejected. The `latest` tag is updated after the version check and is not used
+in release identity data.
 
 ### Release Source Identity
 
@@ -195,7 +215,7 @@ $GITHUB_WORKSPACE/
 ## S3 File Structure
 
 ```
-releases/{org}/{repo}/{tag}/
+releases/{org}/{release_storage_name}/{tag}/
 ├── manifest.json
 ├── manifest.json.sig
 ├── manifest.json.cert
