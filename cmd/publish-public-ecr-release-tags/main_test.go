@@ -17,6 +17,8 @@ var (
 	digestB    = "sha256:" + strings.Repeat("b", 64)
 )
 
+const defaultManifest = `{"schemaVersion":2,"mediaType":"application/vnd.oci.image.index.v1+json"}`
+
 func TestPublishPublicECRTagsPublishesAvailableVersion(t *testing.T) {
 	digestFile := writeDigestFile(t, fmt.Sprintf("%s  public.ecr.aws/conductorone/bridge-client:release-candidate-123-1\n", digestAHex))
 	fake := &fakeAWS{
@@ -38,6 +40,15 @@ func TestPublishPublicECRTagsPublishesAvailableVersion(t *testing.T) {
 	}
 	if !fake.calledPutTag("latest") {
 		t.Fatal("latest tag was not published")
+	}
+	if !fake.calledPutTagWithDigest("1.2.3", digestA) {
+		t.Fatal("version tag was not published with the candidate digest guard")
+	}
+	if !fake.calledPutTagWithDigest("latest", digestA) {
+		t.Fatal("latest tag was not published with the candidate digest guard")
+	}
+	if got := fake.putManifestForTag("1.2.3"); got != defaultManifest {
+		t.Fatalf("version tag manifest = %q, want %q", got, defaultManifest)
 	}
 	if fake.countDescribeTag("latest") != 0 {
 		t.Fatal("latest must not be part of the ECR release preflight")
@@ -75,6 +86,9 @@ func TestPublishPublicECRTagsKeepsSameVersionIdempotent(t *testing.T) {
 	if !fake.calledPutTag("latest") {
 		t.Fatal("latest tag should still be refreshed")
 	}
+	if !fake.calledPutTagWithDigest("latest", digestA) {
+		t.Fatal("latest tag should be refreshed with the candidate digest guard")
+	}
 }
 
 func TestPublishPublicECRTagsRejectsDifferentExistingDigest(t *testing.T) {
@@ -82,15 +96,16 @@ func TestPublishPublicECRTagsRejectsDifferentExistingDigest(t *testing.T) {
 	fake := &fakeAWS{
 		describeResults: []describeResult{{digest: digestB}},
 	}
+	fakeDocker := &fakeDocker{}
 
-	_, _, err := runPublishForTest(t, digestFile, fake)
+	_, _, err := runPublishForTestWithDocker(t, digestFile, fake, fakeDocker)
 	if err == nil {
 		t.Fatal("publish succeeded, want failure")
 	}
 	if !strings.Contains(err.Error(), "already points at "+digestB) {
 		t.Fatalf("error = %v", err)
 	}
-	if fake.calledCommand("batch-get-image") {
+	if fakeDocker.calledCommand("imagetools") {
 		t.Fatal("different digest must fail before fetching the candidate manifest")
 	}
 	if fake.calledCommand("put-image") {
@@ -167,6 +182,9 @@ func TestPublishPublicECRTagsRejectsPostWriteDigestMismatch(t *testing.T) {
 	if !fake.calledPutTag("1.2.3") {
 		t.Fatal("version tag should be written before post-write verification")
 	}
+	if !fake.calledPutTagWithDigest("1.2.3", digestA) {
+		t.Fatal("version tag write should include the candidate digest guard")
+	}
 	if fake.calledPutTag("latest") {
 		t.Fatal("latest must not be published after version digest verification fails")
 	}
@@ -177,10 +195,10 @@ func TestPublishPublicECRTagsRejectsMissingManifest(t *testing.T) {
 	emptyManifest := ""
 	fake := &fakeAWS{
 		describeResults: []describeResult{{notFound: true}},
-		manifest:        &emptyManifest,
 	}
+	fakeDocker := &fakeDocker{manifest: &emptyManifest}
 
-	_, _, err := runPublishForTest(t, digestFile, fake)
+	_, _, err := runPublishForTestWithDocker(t, digestFile, fake, fakeDocker)
 	if err == nil {
 		t.Fatal("publish succeeded, want failure")
 	}
@@ -192,22 +210,42 @@ func TestPublishPublicECRTagsRejectsMissingManifest(t *testing.T) {
 	}
 }
 
-func TestPublishPublicECRTagsFailsClosedOnBatchGetImageError(t *testing.T) {
+func TestPublishPublicECRTagsFailsClosedOnManifestInspectError(t *testing.T) {
 	digestFile := writeDigestFile(t, fmt.Sprintf("%s  public.ecr.aws/conductorone/bridge-client:release-candidate-123-1\n", digestA))
 	fake := &fakeAWS{
 		describeResults: []describeResult{{notFound: true}},
-		batchGetErr:     "AccessDeniedException: denied",
 	}
+	fakeDocker := &fakeDocker{inspectErr: "manifest unknown"}
 
-	_, _, err := runPublishForTest(t, digestFile, fake)
+	_, _, err := runPublishForTestWithDocker(t, digestFile, fake, fakeDocker)
 	if err == nil {
 		t.Fatal("publish succeeded, want failure")
 	}
-	if !strings.Contains(err.Error(), "AccessDeniedException") {
+	if !strings.Contains(err.Error(), "manifest unknown") {
 		t.Fatalf("error = %v", err)
 	}
 	if fake.calledCommand("put-image") {
-		t.Fatal("batch-get-image errors must fail before tag publication")
+		t.Fatal("manifest inspect errors must fail before tag publication")
+	}
+}
+
+func TestPublishPublicECRTagsRejectsInvalidManifestJSON(t *testing.T) {
+	digestFile := writeDigestFile(t, fmt.Sprintf("%s  public.ecr.aws/conductorone/bridge-client:release-candidate-123-1\n", digestA))
+	invalidManifest := "not-json"
+	fake := &fakeAWS{
+		describeResults: []describeResult{{notFound: true}},
+	}
+	fakeDocker := &fakeDocker{manifest: &invalidManifest}
+
+	_, _, err := runPublishForTestWithDocker(t, digestFile, fake, fakeDocker)
+	if err == nil {
+		t.Fatal("publish succeeded, want failure")
+	}
+	if !strings.Contains(err.Error(), "not valid JSON") {
+		t.Fatalf("error = %v", err)
+	}
+	if fake.calledCommand("put-image") {
+		t.Fatal("invalid manifest must fail before tag publication")
 	}
 }
 
@@ -255,7 +293,44 @@ func TestPublishPublicECRTagsCandidateCleanupIsBestEffort(t *testing.T) {
 	}
 }
 
+func TestPublishPublicECRTagsRefusesUnsafeCandidateCleanup(t *testing.T) {
+	digestFile := writeDigestFile(t, fmt.Sprintf("%s  public.ecr.aws/conductorone/bridge-client:temporary\n", digestA))
+	fake := &fakeAWS{
+		describeResults: []describeResult{
+			{notFound: true},
+			{digest: digestA},
+		},
+	}
+	cfg := config{
+		repositoryName: "bridge-client",
+		versionTag:     "1.2.3",
+		candidateTag:   "temporary",
+		digestFile:     digestFile,
+		registryURI:    defaultRegistryURI,
+	}
+	var stdout, stderr bytes.Buffer
+
+	err := publish(cfg, fake, &fakeDocker{}, &stdout, &stderr)
+	if err != nil {
+		t.Fatalf("publish: %v", err)
+	}
+	if fake.calledCommand("batch-delete-image") {
+		t.Fatal("unsafe candidate tag must not be sent to BatchDeleteImage")
+	}
+	if !strings.Contains(stderr.String(), `refusing to delete non-candidate Public ECR tag "temporary"`) {
+		t.Fatalf("stderr = %q", stderr.String())
+	}
+	if !strings.Contains(stdout.String(), "Published public.ecr.aws/conductorone/bridge-client:1.2.3") {
+		t.Fatalf("stdout = %q", stdout.String())
+	}
+}
+
 func runPublishForTest(t *testing.T, digestFile string, fake *fakeAWS) (string, string, error) {
+	t.Helper()
+	return runPublishForTestWithDocker(t, digestFile, fake, &fakeDocker{})
+}
+
+func runPublishForTestWithDocker(t *testing.T, digestFile string, fake *fakeAWS, fakeDocker *fakeDocker) (string, string, error) {
 	t.Helper()
 	cfg := config{
 		repositoryName: "bridge-client",
@@ -265,7 +340,7 @@ func runPublishForTest(t *testing.T, digestFile string, fake *fakeAWS) (string, 
 		registryURI:    defaultRegistryURI,
 	}
 	var stdout, stderr bytes.Buffer
-	err := publish(cfg, fake, &stdout, &stderr)
+	err := publish(cfg, fake, fakeDocker, &stdout, &stderr)
 	return stdout.String(), stderr.String(), err
 }
 
@@ -286,8 +361,6 @@ type describeResult struct {
 
 type fakeAWS struct {
 	describeResults []describeResult
-	manifest        *string
-	batchGetErr     string
 	putErr          string
 	deleteErr       string
 	calls           [][]string
@@ -317,18 +390,6 @@ func (f *fakeAWS) Run(args ...string) ([]byte, []byte, error) {
 			"imageDetails": []map[string]string{{"imageDigest": result.digest}},
 		})
 		return stdout, nil, err
-	case "batch-get-image":
-		if f.batchGetErr != "" {
-			return nil, []byte(f.batchGetErr), errors.New("aws failed")
-		}
-		manifest := "manifest-json"
-		if f.manifest != nil {
-			manifest = *f.manifest
-		}
-		stdout, err := json.Marshal(map[string]any{
-			"images": []map[string]string{{"imageManifest": manifest}},
-		})
-		return stdout, nil, err
 	case "put-image":
 		if f.putErr != "" {
 			return nil, []byte(f.putErr), errors.New("aws failed")
@@ -342,6 +403,39 @@ func (f *fakeAWS) Run(args ...string) ([]byte, []byte, error) {
 	default:
 		return nil, []byte("unexpected aws call"), errors.New("aws failed")
 	}
+}
+
+type fakeDocker struct {
+	manifest   *string
+	inspectErr string
+	calls      [][]string
+}
+
+func (f *fakeDocker) Run(args ...string) ([]byte, []byte, error) {
+	f.calls = append(f.calls, append([]string(nil), args...))
+
+	if len(args) < 4 || args[0] != "buildx" || args[1] != "imagetools" || args[2] != "inspect" {
+		return nil, []byte("unexpected docker call"), errors.New("docker failed")
+	}
+	if f.inspectErr != "" {
+		return nil, []byte(f.inspectErr), errors.New("docker failed")
+	}
+	manifest := defaultManifest
+	if f.manifest != nil {
+		manifest = *f.manifest
+	}
+	return []byte(manifest), nil, nil
+}
+
+func (f *fakeDocker) calledCommand(command string) bool {
+	for _, call := range f.calls {
+		for _, arg := range call {
+			if arg == command {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 func (f *fakeAWS) calledCommand(command string) bool {
@@ -360,6 +454,24 @@ func (f *fakeAWS) calledPutTag(tag string) bool {
 		}
 	}
 	return false
+}
+
+func (f *fakeAWS) calledPutTagWithDigest(tag, digest string) bool {
+	for _, call := range f.calls {
+		if len(call) >= 2 && call[1] == "put-image" && argValue(call, "--image-tag") == tag && argValue(call, "--image-digest") == digest {
+			return true
+		}
+	}
+	return false
+}
+
+func (f *fakeAWS) putManifestForTag(tag string) string {
+	for _, call := range f.calls {
+		if len(call) >= 2 && call[1] == "put-image" && argValue(call, "--image-tag") == tag {
+			return argValue(call, "--image-manifest")
+		}
+	}
+	return ""
 }
 
 func (f *fakeAWS) countDescribeTag(tag string) int {
