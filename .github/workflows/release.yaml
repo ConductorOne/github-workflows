@@ -904,6 +904,13 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.RELENG_GITHUB_TOKEN }}
           COSIGN_EXPERIMENTAL: "1"
 
+      - name: Set up Go for Public ECR helper
+        if: inputs.docker == true
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: "_workflows/go.mod"
+          cache: false
+
       - name: Preflight and publish Public ECR release tags
         if: inputs.docker == true
         working-directory: _workflows
@@ -915,11 +922,11 @@ jobs:
         run: |
           set -euo pipefail
           VERSION="${RELEASE_TAG#v}"
-          ./scripts/publish-public-ecr-release-tags.sh \
-            --repository-name "$REPO_NAME" \
-            --version-tag "$VERSION" \
-            --candidate-tag "$CANDIDATE_TAG" \
-            --digest-file "../_caller/dist/oci/${REPO_NAME}_${VERSION}_digests.txt"
+          go run ./cmd/publish-public-ecr-release-tags \
+            -repository-name "$REPO_NAME" \
+            -version-tag "$VERSION" \
+            -candidate-tag "$CANDIDATE_TAG" \
+            -digest-file "../_caller/dist/oci/${REPO_NAME}_${VERSION}_digests.txt"
 
       - name: Configure Lambda ECR AWS credentials via OIDC
         if: inputs.lambda == true
@@ -931,6 +938,13 @@ jobs:
       - name: Login to Lambda ECR
         if: inputs.lambda == true
         uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Set up Go for caller Lambda release
+        if: inputs.docker == true && inputs.lambda == true
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: "_caller/go.mod"
+          cache: false
 
       - name: Run GoReleaser for Lambda
         if: inputs.lambda == true
