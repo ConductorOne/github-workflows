@@ -14,7 +14,10 @@ import (
 
 const defaultRegistryURI = "public.ecr.aws/conductorone"
 
-var sha256DigestPattern = regexp.MustCompile(`^(?:sha256:)?([A-Fa-f0-9]{64})$`)
+var (
+	sha256DigestPattern        = regexp.MustCompile(`^(?:sha256:)?([A-Fa-f0-9]{64})$`)
+	releaseCandidateTagPattern = regexp.MustCompile(`^release-candidate-[0-9]+-[0-9]+$`)
+)
 
 type config struct {
 	repositoryName string
@@ -24,15 +27,15 @@ type config struct {
 	registryURI    string
 }
 
-type awsRunner interface {
+type commandRunner interface {
 	Run(args ...string) ([]byte, []byte, error)
 }
 
-type execAWSRunner struct {
+type execCommandRunner struct {
 	binary string
 }
 
-func (r execAWSRunner) Run(args ...string) ([]byte, []byte, error) {
+func (r execCommandRunner) Run(args ...string) ([]byte, []byte, error) {
 	var stderr bytes.Buffer
 	cmd := exec.Command(r.binary, args...)
 	cmd.Stderr = &stderr
@@ -66,8 +69,12 @@ func main() {
 	if awsCLI == "" {
 		awsCLI = "aws"
 	}
+	dockerCLI := os.Getenv("DOCKER_CLI")
+	if dockerCLI == "" {
+		dockerCLI = "docker"
+	}
 
-	if err := publish(cfg, execAWSRunner{binary: awsCLI}, os.Stdout, os.Stderr); err != nil {
+	if err := publish(cfg, execCommandRunner{binary: awsCLI}, execCommandRunner{binary: dockerCLI}, os.Stdout, os.Stderr); err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}
@@ -96,7 +103,7 @@ func (c config) validate() error {
 	return nil
 }
 
-func publish(cfg config, aws awsRunner, stdout, stderr io.Writer) error {
+func publish(cfg config, aws, docker commandRunner, stdout, stderr io.Writer) error {
 	imageBase := strings.TrimRight(cfg.registryURI, "/") + "/" + cfg.repositoryName
 	candidateRef := imageBase + ":" + cfg.candidateTag
 	versionRef := imageBase + ":" + cfg.versionTag
@@ -121,13 +128,13 @@ func publish(cfg config, aws awsRunner, stdout, stderr io.Writer) error {
 		fmt.Fprintf(stdout, "Public ECR version tag %s:%s is available\n", cfg.repositoryName, cfg.versionTag)
 	}
 
-	manifest, err := imageManifest(aws, cfg.repositoryName, candidateDigest)
+	manifest, err := imageManifest(docker, imageBase, candidateDigest)
 	if err != nil {
 		return err
 	}
 
 	if !versionTagExists {
-		if err := putImageTag(aws, cfg.repositoryName, manifest, cfg.versionTag); err != nil {
+		if err := putImageTag(aws, cfg.repositoryName, manifest, cfg.versionTag, candidateDigest); err != nil {
 			return err
 		}
 	} else {
@@ -145,7 +152,7 @@ func publish(cfg config, aws awsRunner, stdout, stderr io.Writer) error {
 		return fmt.Errorf("::error::Public ECR tag %s:%s points at %s after publication, expected %s", cfg.repositoryName, cfg.versionTag, publishedDigest, candidateDigest)
 	}
 
-	if err := putImageTag(aws, cfg.repositoryName, manifest, "latest"); err != nil {
+	if err := putImageTag(aws, cfg.repositoryName, manifest, "latest", candidateDigest); err != nil {
 		return err
 	}
 
@@ -187,7 +194,7 @@ func candidateDigestFromFile(path, candidateRef string) (string, error) {
 	return "", fmt.Errorf("Could not find candidate ref %s in %s\n%s", candidateRef, path, content)
 }
 
-func describeImageDigest(aws awsRunner, repositoryName, tag string) (string, error) {
+func describeImageDigest(aws commandRunner, repositoryName, tag string) (string, error) {
 	args := []string{
 		"ecr-public", "describe-images",
 		"--repository-name", repositoryName,
@@ -221,43 +228,37 @@ func describeImageDigest(aws awsRunner, repositoryName, tag string) (string, err
 	return digest, nil
 }
 
-func imageManifest(aws awsRunner, repositoryName, digest string) (string, error) {
+func imageManifest(docker commandRunner, imageBase, digest string) (string, error) {
+	ref := imageBase + "@" + digest
+	// The raw manifest bytes must hash to digest; PutImage --image-digest and
+	// the post-write describe check keep this fail-closed if Docker changes.
 	args := []string{
-		"ecr-public", "batch-get-image",
-		"--repository-name", repositoryName,
-		"--image-ids", "imageDigest=" + digest,
-		"--accepted-media-types",
-		"application/vnd.oci.image.index.v1+json",
-		"application/vnd.docker.distribution.manifest.list.v2+json",
-		"application/vnd.oci.image.manifest.v1+json",
-		"application/vnd.docker.distribution.manifest.v2+json",
-		"--output", "json",
+		"buildx", "imagetools", "inspect",
+		"--raw",
+		ref,
 	}
-	stdout, stderr, err := aws.Run(args...)
+	stdout, stderr, err := docker.Run(args...)
 	if err != nil {
-		return "", awsError(args, stderr, err)
+		return "", commandError("docker", args, stderr, err)
 	}
 
-	var response struct {
-		Images []struct {
-			ImageManifest string `json:"imageManifest"`
-		} `json:"images"`
+	manifest := strings.TrimSpace(string(stdout))
+	if manifest == "" {
+		return "", fmt.Errorf("Could not fetch manifest for %s\n%s", ref, stdout)
 	}
-	if err := json.Unmarshal(stdout, &response); err != nil {
-		return "", fmt.Errorf("publish-public-ecr-release-tags: error: parsing batch-get-image response for %s@%s: %w", repositoryName, digest, err)
+	if !json.Valid([]byte(manifest)) {
+		return "", fmt.Errorf("publish-public-ecr-release-tags: error: docker manifest for %s is not valid JSON", ref)
 	}
-	if len(response.Images) == 0 || response.Images[0].ImageManifest == "" {
-		return "", fmt.Errorf("Could not fetch manifest for %s@%s\n%s", repositoryName, digest, stdout)
-	}
-	return response.Images[0].ImageManifest, nil
+	return manifest, nil
 }
 
-func putImageTag(aws awsRunner, repositoryName, manifest, tag string) error {
+func putImageTag(aws commandRunner, repositoryName, manifest, tag, digest string) error {
 	args := []string{
 		"ecr-public", "put-image",
 		"--repository-name", repositoryName,
 		"--image-manifest", manifest,
 		"--image-tag", tag,
+		"--image-digest", digest,
 	}
 	_, stderr, err := aws.Run(args...)
 	if err != nil {
@@ -266,7 +267,11 @@ func putImageTag(aws awsRunner, repositoryName, manifest, tag string) error {
 	return nil
 }
 
-func deleteImageTag(aws awsRunner, repositoryName, tag string) error {
+func deleteImageTag(aws commandRunner, repositoryName, tag string) error {
+	if !releaseCandidateTagPattern.MatchString(tag) {
+		return fmt.Errorf("refusing to delete non-candidate Public ECR tag %q", tag)
+	}
+
 	args := []string{
 		"ecr-public", "batch-delete-image",
 		"--repository-name", repositoryName,
@@ -297,9 +302,13 @@ func isImageNotFound(stderr []byte) bool {
 }
 
 func awsError(args []string, stderr []byte, err error) error {
+	return commandError("aws", args, stderr, err)
+}
+
+func commandError(binary string, args []string, stderr []byte, err error) error {
 	message := strings.TrimSpace(string(stderr))
 	if message == "" {
-		return fmt.Errorf("publish-public-ecr-release-tags: error: aws %s: %w", strings.Join(args, " "), err)
+		return fmt.Errorf("publish-public-ecr-release-tags: error: %s %s: %w", binary, strings.Join(args, " "), err)
 	}
-	return fmt.Errorf("publish-public-ecr-release-tags: error: aws %s: %s: %w", strings.Join(args, " "), message, err)
+	return fmt.Errorf("publish-public-ecr-release-tags: error: %s %s: %s: %w", binary, strings.Join(args, " "), message, err)
 }
