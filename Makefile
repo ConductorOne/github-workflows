@@ -20,6 +20,7 @@ test-go:
 test-scripts:
 	bash scripts/test-derive-iam-role-name.sh
 	bash scripts/test-s3-release-uploads.sh
+	if command -v pwsh >/dev/null 2>&1; then pwsh -NoProfile -File scripts/test-s3-release-uploads.ps1; else echo "pwsh not found; skipping PowerShell S3 release upload tests"; fi
 
 .PHONY: workflow-validate
 workflow-validate:
