@@ -693,17 +693,16 @@ jobs:
 
       - name: Upload Windows artifacts to S3
         working-directory: _workflows
-        shell: bash
+        shell: pwsh
         env:
           S3_BUCKET: ${{ env.S3_BUCKET }}
           S3_DIRECTORY: ${{ steps.s3-directory.outputs.S3_DIRECTORY }}
         run: |
-          set -euo pipefail
-          ./scripts/upload-release-artifacts.sh \
-            --bucket "$S3_BUCKET" \
-            --directory "$S3_DIRECTORY" \
-            --base-dir "../_caller/dist" \
-            --include-sbom-documents
+          ./scripts/upload-release-artifacts.ps1 `
+            -Bucket $env:S3_BUCKET `
+            -Directory $env:S3_DIRECTORY `
+            -BaseDir "../_caller/dist" `
+            -IncludeSbomDocuments
 
       - name: Set up Go for workflows tools
         uses: actions/setup-go@v6
