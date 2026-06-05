@@ -76,7 +76,7 @@ func main() {
 		fmt.Fprintf(os.Stderr, "✅ Added zip asset: windows-amd64 -> %s\n", filename)
 	}
 
-	// Find and process MSI files (flattened to dist root by workflow)
+	// Find and process MSI files staged to dist root by workflow
 	msiFiles, err := filepath.Glob(filepath.Join(distDir, "*.msi"))
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "generate-windows-manifest: error finding MSI files: %v\n", err)
@@ -141,7 +141,7 @@ func buildAsset(filePath, filename, mediaType, baseURL, distDir string) (*pb.Ass
 	sizeBytes := info.Size()
 	href := fmt.Sprintf("%s/%s", baseURL, filename)
 
-	// Check for signature and certificate files (all in dist root after flatten step)
+	// Check for signature and certificate files (all in dist root after staging)
 	var signatureHref, certificateHref *string
 	sigPath := filepath.Join(distDir, filename+".sig")
 	if _, err := os.Stat(sigPath); err == nil {
