@@ -20,17 +20,19 @@ import (
 
 func main() {
 	var (
-		assetDir string
-		repoName string
-		orgName  string
-		tag      string
-		baseURL  string
+		assetDir   string
+		repoName   string
+		orgName    string
+		tag        string
+		baseURL    string
+		releasedAt string
 	)
 	flag.StringVar(&assetDir, "asset-dir", ".", "Directory containing distribution artifacts")
 	flag.StringVar(&repoName, "repo-name", "", "Repository name")
 	flag.StringVar(&orgName, "org-name", "", "Organization name")
 	flag.StringVar(&tag, "tag", "", "Release tag (e.g., v0.0.8)")
 	flag.StringVar(&baseURL, "base-url", "", "Base URL for artifact downloads")
+	flag.StringVar(&releasedAt, "released-at", "", "Release timestamp in RFC3339 format")
 	flag.Parse()
 
 	if repoName == "" || orgName == "" || tag == "" || baseURL == "" {
@@ -38,7 +40,16 @@ func main() {
 		os.Exit(1)
 	}
 
-	now := time.Now().UTC()
+	releaseTime := time.Now().UTC()
+	if strings.TrimSpace(releasedAt) != "" {
+		var err error
+		releaseTime, err = time.Parse(time.RFC3339, strings.TrimSpace(releasedAt))
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "generate-manifest: error: released-at must be RFC3339: %v\n", err)
+			os.Exit(1)
+		}
+		releaseTime = releaseTime.UTC()
+	}
 	assets := make(map[string]*pb.Asset)
 
 	// Asset patterns: platform -> (pattern, mediaType)
@@ -154,7 +165,7 @@ func main() {
 		Name:                &repoName,
 		Org:                 &orgName,
 		Semver:              &tag,
-		ReleasedAt:          timestamppb.New(now),
+		ReleasedAt:          timestamppb.New(releaseTime),
 		Assets:              assets,
 		SignatureHref:       &signatureHref,
 		CertificateHref:     &certificateHref,
