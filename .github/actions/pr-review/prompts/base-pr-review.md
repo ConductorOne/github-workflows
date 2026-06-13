@@ -17,6 +17,8 @@ Read `.github/pr-context.json` — it contains pre-fetched PR data with these fi
 - `last_reviewed_sha`: the SHA from the previous review, used only for deduplication
 - `summary_comment_id`: the existing bot summary comment to update, if one exists
 - `incremental_diff_path`: path to a GitHub API compare diff when incremental review is available
+- `incremental_diff_metadata`: metadata about filtered incremental diff coverage,
+  including dropped vendored/generated/lockfile paths and truncation state
 - `existing_findings`: list of finding lines from previous review summaries
 - `comments`: trusted PR comments with `id`, `user`, `user_type`,
   `author_association`, and `body`.
@@ -42,6 +44,11 @@ Use the `review_mode` field from `.github/pr-context.json`.
   PR diff for security and confident correctness issues.
 - `"full"`: review the full PR diff for all categories.
 
+If `incremental_diff_metadata.partial` is true, explicitly account for the
+listed dropped paths or truncation before giving a no-blocking-issues verdict.
+Do not assume omitted dependency lockfiles, generated source, or vendored source
+are safe solely because they were filtered out of the incremental artifact.
+
 Do not use local git history for incremental review. The local checkout is the current
 PR head tree, not the previous reviewed tree.
 
@@ -66,6 +73,10 @@ as changed source instead.
 If review mode is `"incremental"`, read the file named by `incremental_diff_path` for
 suggestions. Still scan the full PR diff (`gh pr diff <pr_number> --repo <repository>`) for
 security and confident correctness issues.
+If the incremental metadata reports dropped paths or truncation, mention that
+partial coverage in the review summary and use the full diff to check whether
+the omitted paths affect dependency locks, generated source, vendored source,
+or release behavior.
 
 If review mode is `"full"`, review the full PR diff for all categories.
 
