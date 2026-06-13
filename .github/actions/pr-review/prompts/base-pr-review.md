@@ -83,7 +83,10 @@ If review mode is `"full"`, review the full PR diff for all categories.
 Use the local checkout with Read, Glob, Grep, and Task for source-file inspection. Use
 `gh pr view` and `gh api` for extra GitHub metadata when needed.
 
-Exclude vendored code, generated files, and lockfiles from review.
+Exclude bulk content-level review of vendored code, generated files, and
+lockfiles after checking whether those paths affect dependencies, generated or
+vendored source reachability, or release behavior. Do not exclude `go.mod` or
+`go.sum` from dependency review.
 
 ### Step 6 — Validate findings
 
