@@ -12,6 +12,7 @@ Writes structured JSON to .github/pr-context.json.
 import json
 import os
 import re
+import shlex
 import subprocess
 import sys
 import time
@@ -28,6 +29,23 @@ TRUSTED_COMMENT_ASSOCIATIONS = {"OWNER", "MEMBER", "COLLABORATOR"}
 DEFAULT_REVIEW_SUMMARY_HEADING = "### Connector PR Review:"
 LEGACY_REVIEW_SUMMARY_HEADING = "### PR Review:"
 DEFAULT_API_ATTEMPTS = 3
+
+# Incremental-diff hardening. GitHub compare diffs on large vendor-refresh PRs
+# can inline non-UTF-8 bytes (git misclassifies a NUL-free encrypted vendored
+# file as text) and can be pathologically large (100s of MB), so the raw diff is
+# read as bytes, stripped of vendored/generated noise, capped, and decoded
+# losslessly before it is handed to the reviewer.
+DIFF_MAX_BYTES = 20 * 1024 * 1024
+EXCLUDE_PREFIXES = ("vendor/",)
+EXCLUDE_SUFFIXES = (
+    ".pb.go",
+    "_gen.go",
+    "package-lock.json",
+    "yarn.lock",
+)
+DIFF_GIT_SPLIT_PATTERN = re.compile(rb"(?m)^(?=diff --git )")
+DIFF_GIT_PATH_PATTERN = re.compile(r"^diff --git (a/.*) b/(.*)$")
+DIFF_DROPPED_PATH_LIMIT = 200
 
 
 def review_comment_heading(comment: dict, summary_heading: str) -> Optional[str]:
@@ -106,6 +124,199 @@ def gh_api(args: list[str], *, attempts: int = DEFAULT_API_ATTEMPTS) -> subproce
     raise last_error
 
 
+def gh_api_bytes(args: list[str], *, attempts: int = DEFAULT_API_ATTEMPTS) -> bytes:
+    """Run gh api like gh_api but return raw stdout bytes without UTF-8 decoding.
+
+    The compare diff for a large vendor-refresh PR can contain a non-UTF-8 byte,
+    so a strict text decode of the whole response (what text=True does) raises
+    UnicodeDecodeError and kills the review job. Reading raw bytes here lets the
+    caller decode leniently. The retry policy mirrors gh_api exactly; stderr and
+    stdout are decoded leniently only to build human-readable error messages.
+    """
+    last_error = None
+    for attempt in range(1, attempts + 1):
+        try:
+            return subprocess.run(
+                ["gh", "api", *args],
+                capture_output=True,
+                check=True,
+            ).stdout
+        except subprocess.CalledProcessError as e:
+            if isinstance(e.stderr, bytes):
+                e.stderr = e.stderr.decode("utf-8", "backslashreplace")
+            if isinstance(e.stdout, bytes):
+                e.stdout = e.stdout.decode("utf-8", "backslashreplace")
+            last_error = e
+            retry_limit = retry_limit_for_error(e, attempts)
+            e.retry_limit = retry_limit
+            if attempt >= retry_limit:
+                break
+            print(
+                "::warning::GitHub API request failed; "
+                f"retrying ({attempt}/{retry_limit}): gh api {' '.join(args)}: "
+                f"{command_error_summary(e)}",
+                file=sys.stderr,
+            )
+            time.sleep(attempt)
+    raise last_error
+
+
+def _split_git_header_paths(header: bytes) -> list[str]:
+    text = header.decode("utf-8", "backslashreplace")
+    match = DIFF_GIT_PATH_PATTERN.match(text)
+    if match:
+        return [match.group(1), f"b/{match.group(2)}"]
+    try:
+        parts = shlex.split(text)
+    except ValueError:
+        return []
+    if len(parts) < 4 or parts[:2] != ["diff", "--git"]:
+        return []
+    return parts[2:4]
+
+
+def _strip_diff_prefix(path: str) -> str:
+    if path == "/dev/null":
+        return ""
+    if path.startswith(("a/", "b/")):
+        return path[2:]
+    return path
+
+
+def _decode_diff_path(raw: bytes) -> str:
+    return _strip_diff_prefix(raw.decode("utf-8", "backslashreplace"))
+
+
+def _diff_paths(header: bytes) -> list[str]:
+    """Extract old and new paths from a 'diff --git ...' header."""
+    return [
+        path
+        for path in (_strip_diff_prefix(path) for path in _split_git_header_paths(header))
+        if path
+    ]
+
+
+def _diff_path(header: bytes) -> str:
+    """Extract the a-side file path from a 'diff --git ...' header."""
+    paths = _diff_paths(header)
+    if not paths:
+        return ""
+    return paths[0]
+
+
+def _section_paths(section: bytes) -> list[str]:
+    paths = []
+    for index, line in enumerate(section.splitlines()):
+        path = ""
+        if index == 0:
+            paths.extend(_diff_paths(line))
+            continue
+        for prefix in (b"--- ", b"+++ "):
+            if line.startswith(prefix):
+                path = _decode_diff_path(line[len(prefix) :])
+                break
+        for prefix in (b"rename from ", b"rename to ", b"copy from ", b"copy to "):
+            if line.startswith(prefix):
+                path = _decode_diff_path(line[len(prefix) :])
+                break
+        if path:
+            paths.append(path)
+    return list(dict.fromkeys(paths))
+
+
+def _is_excluded(path: str) -> bool:
+    """Report whether a diff path is vendored or a known generated/lockfile."""
+    if not path:
+        return False
+    if any(path.startswith(prefix) for prefix in EXCLUDE_PREFIXES):
+        return True
+    return any(path.endswith(suffix) for suffix in EXCLUDE_SUFFIXES)
+
+
+def filter_and_decode_diff(raw: bytes) -> tuple[str, dict]:
+    """Strip vendored/generated noise from a raw diff, cap it, and decode it.
+
+    Splits ``raw`` into per-file ``diff --git`` sections, drops vendored and
+    generated/lockfile sections, retains sections up to ``DIFF_MAX_BYTES``, and
+    decodes the kept bytes with errors="backslashreplace" so a stray non-UTF-8
+    byte is preserved losslessly instead of raising. Returns the decoded text and
+    metadata: ``dropped_sections`` (count), ``dropped_paths`` (bounded list),
+    ``truncated`` (bool), ``kept_bytes``.
+    """
+    sections = DIFF_GIT_SPLIT_PATTERN.split(raw)
+    kept_chunks: list[bytes] = []
+    dropped_sections = 0
+    dropped_paths: list[str] = []
+    dropped_paths_omitted = 0
+    kept_bytes = 0
+    truncated = False
+    for section in sections:
+        if not section:
+            continue
+        if not section.startswith(b"diff --git "):
+            # Leading preamble before the first file header (rare); keep verbatim.
+            if section.strip():
+                kept_chunks.append(section)
+                kept_bytes += len(section)
+            continue
+        paths = _section_paths(section)
+        if paths and all(_is_excluded(path) for path in paths):
+            dropped_sections += 1
+            for path in paths:
+                if len(dropped_paths) < DIFF_DROPPED_PATH_LIMIT:
+                    dropped_paths.append(path)
+                else:
+                    dropped_paths_omitted += 1
+            continue
+        if kept_bytes + len(section) > DIFF_MAX_BYTES:
+            truncated = True
+            break
+        kept_chunks.append(section)
+        kept_bytes += len(section)
+
+    text = b"".join(kept_chunks).decode("utf-8", "backslashreplace")
+    if truncated:
+        text += f"\n[diff truncated to {DIFF_MAX_BYTES} bytes for review context]\n"
+    return text, {
+        "dropped_sections": dropped_sections,
+        "dropped_paths": dropped_paths,
+        "dropped_paths_omitted": dropped_paths_omitted,
+        "truncated": truncated,
+        "kept_bytes": kept_bytes,
+        "partial": bool(dropped_sections or truncated),
+    }
+
+
+def empty_incremental_diff_metadata() -> dict:
+    return {
+        "dropped_sections": 0,
+        "dropped_paths": [],
+        "dropped_paths_omitted": 0,
+        "truncated": False,
+        "kept_bytes": 0,
+        "partial": False,
+    }
+
+
+def incremental_diff_notice(meta: dict) -> str:
+    lines = [
+        "[incremental diff partial coverage]",
+        (
+            f"Dropped {meta['dropped_sections']} vendored/generated/lockfile "
+            f"section(s); kept {meta['kept_bytes']} bytes."
+        ),
+    ]
+    if meta["dropped_paths"]:
+        lines.append("Dropped paths:")
+        lines.extend(f"- {path}" for path in meta["dropped_paths"])
+    if meta["dropped_paths_omitted"]:
+        lines.append(f"- ... {meta['dropped_paths_omitted']} more path(s)")
+    if meta["truncated"]:
+        lines.append(f"Diff truncated to {DIFF_MAX_BYTES} bytes.")
+    lines.append("Scan the full PR diff before issuing a no-blocking-issues verdict.")
+    return "\n".join(lines) + "\n\n"
+
+
 def gh_api_paginate(endpoint: str) -> list[dict]:
     """Fetch all pages from a gh api endpoint."""
     result = gh_api(
@@ -140,9 +351,10 @@ def parse_paginated_json(output: str) -> list[dict]:
     return entries
 
 
-def fetch_compare_diff(head_repo: str, base_sha: str, head_sha: str) -> Optional[str]:
+def fetch_compare_diff(head_repo: str, base_sha: str, head_sha: str) -> tuple[Optional[str], dict]:
     """Fetch a compare diff from the PR head repo for incremental review."""
     endpoint = f"repos/{head_repo}/compare/{base_sha}...{head_sha}"
+    meta = empty_incremental_diff_metadata()
     try:
         metadata = gh_api([endpoint])
         compare = json.loads(metadata.stdout)
@@ -152,17 +364,35 @@ def fetch_compare_diff(head_repo: str, base_sha: str, head_sha: str) -> Optional
                 f"Compare status is {status!r}, using full review mode",
                 file=sys.stderr,
             )
-            return None
-        result = gh_api(["-H", "Accept: application/vnd.github.diff", endpoint])
+            return None, meta
+        raw = gh_api_bytes(["-H", "Accept: application/vnd.github.diff", endpoint])
     except subprocess.CalledProcessError as e:
         print(
             f"Could not fetch incremental diff from {head_repo}: {e.stderr}",
             file=sys.stderr,
         )
-        return None
-    if not result.stdout.strip():
-        return None
-    return result.stdout
+        return None, meta
+    if not raw.strip():
+        return None, meta
+    diff_text, meta = filter_and_decode_diff(raw)
+    if meta["truncated"] and meta["kept_bytes"] == 0:
+        print(
+            "Incremental diff truncated before retaining reviewable content, "
+            "using full review mode",
+            file=sys.stderr,
+        )
+        return None, meta
+    if not diff_text.strip():
+        return None, meta
+    if meta["partial"]:
+        diff_text = incremental_diff_notice(meta) + diff_text
+    print(
+        f"Incremental diff: dropped {meta['dropped_sections']} vendored/generated "
+        f"section(s), kept {meta['kept_bytes']} bytes"
+        f"{', truncated' if meta['truncated'] else ''}",
+        file=sys.stderr,
+    )
+    return diff_text, meta
 
 
 def current_checkout_sha() -> Optional[str]:
@@ -309,6 +539,7 @@ def main():
     # provide a compact incremental artifact.
     review_mode = "full"
     incremental_diff_path = None
+    incremental_diff_metadata = empty_incremental_diff_metadata()
     if not last_reviewed_sha:
         print("No previous review state found, using full review mode")
     elif last_review_base_sha != current_base_sha:
@@ -318,7 +549,11 @@ def main():
         print("PR head repository is unavailable, using full review mode")
         last_reviewed_sha = None
     else:
-        incremental_diff = fetch_compare_diff(head_repo, last_reviewed_sha, current_sha)
+        incremental_diff, incremental_diff_metadata = fetch_compare_diff(
+            head_repo,
+            last_reviewed_sha,
+            current_sha,
+        )
         if incremental_diff:
             incremental_diff_path = os.path.join(".github", "incremental.diff")
             os.makedirs(os.path.dirname(incremental_diff_path), exist_ok=True)
@@ -355,6 +590,7 @@ def main():
         "last_review_base_sha": last_review_base_sha,
         "summary_comment_id": summary_comment_id,
         "incremental_diff_path": incremental_diff_path,
+        "incremental_diff_metadata": incremental_diff_metadata,
         "existing_findings": existing_findings,
         "comments": trusted_context_comments,
     }
