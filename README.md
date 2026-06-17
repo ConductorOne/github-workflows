@@ -27,15 +27,17 @@ Keep broadly shared connector criteria in the connector mixin. Use repo-local
 
 ### Custom Review Criteria
 
-Repos can extend the review with project-specific criteria by adding a skill file:
+Repos can extend the review with project-specific criteria by adding a markdown file:
 
 ```
 .claude/skills/ci-review.md
 ```
 
-If this file exists in the checked-out PR head, the reviewer will invoke it and
-incorporate the results alongside the selected prompt profile. Automatic review only
-runs for same-repository PRs.
+If this file exists at the pull request's trusted base SHA and the PR targets the
+repository default branch, the action validates it as plain markdown and appends it to
+the prompt as data. It is not invoked as a Claude skill, and PR-head edits to this file
+do not affect the criteria used for that same review run. Automatic review only runs for
+same-repository PRs.
 
 ## Release Workflow
 

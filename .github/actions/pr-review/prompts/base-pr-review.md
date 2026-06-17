@@ -102,8 +102,10 @@ source, vendored source, or release behavior.
 
 If review mode is `"full"`, review the full PR diff for all categories.
 
-Use the local checkout with Read, Glob, and Grep for source-file inspection. Use
-`gh pr view` and `gh api` for extra GitHub metadata when needed.
+Use the local checkout with Read, Glob, Grep, and Task for source-file inspection.
+Task subagents are for read-only review analysis only; do not ask them to post comments,
+change files, run tests, or execute build commands. Use `gh pr view` for extra GitHub
+metadata when needed. Do not call `gh api` directly.
 
 Dependency manifests are always in scope. If `go.mod` or `go.sum` changed, you MUST
 review them: confirm added, updated, or removed modules match the code changes; flag
@@ -137,18 +139,19 @@ Do not re-flag issues on unchanged code that were pre-resolved (see step 3).
 
 ### Step 7 — Post results (new findings only)
 
-Before posting any comment or review, re-fetch the PR with `gh api` and confirm the current
-head SHA still equals `current_sha` from `.github/pr-context.json`. If it changed, stop without
-posting a summary, inline comments, or review verdict.
+Use only the helper scripts in `.github/pr-review-bin` for posting. They re-fetch the PR
+and stop without posting if the current head SHA no longer equals `current_sha` from
+`.github/pr-context.json`. Do not call `gh api`, `gh pr review`, or any other GitHub write
+command directly.
 
-**Inline comments:** Post on specific lines using `mcp__github_inline_comment__create_inline_comment`.
-Prefix: `🔴 Security:` / `🟠 Bug:` / `🟡 Suggestion:`. Keep to 2-3 sentences.
+**Inline comments:** Post on specific lines with
+`.github/pr-review-bin/post-inline-comment <path> <line> [RIGHT|LEFT]`, passing the comment
+body on stdin. Prefix: `🔴 Security:` / `🟠 Bug:` / `🟡 Suggestion:`. Keep to 2-3 sentences.
 
-**Summary comment:** If `summary_comment_id` is set, update that issue comment with
-`gh api -X PATCH repos/<repository>/issues/comments/<summary_comment_id> -f body=...`.
-If it is not set, create one with
-`gh api repos/<repository>/issues/<pr_number>/comments -f body=...`.
-Do not delete existing summary comments before the new review has been posted.
+**Summary comment:** Write the full summary body to
+`.github/pr-review-bin/post-summary` on stdin. It updates the existing workflow-owned summary
+when `summary_comment_id` is set and creates one otherwise. Do not delete existing summary
+comments before the new review has been posted.
 
 Use this template for the summary body. The heading must be exactly the `summary_heading`
 value from `.github/pr-context.json`.
@@ -228,8 +231,8 @@ Each entry should name the file, the line range, and describe both the problem a
 specific fix in plain English. If there are no findings, omit this section entirely.
 
 **Verdict:**
-- Any blocking findings → `gh pr review --request-changes -b "Blocking issues found — see review comments."`
-- Otherwise → `gh pr review --comment -b "No blocking issues found."`
+- Any blocking findings → `.github/pr-review-bin/post-verdict request-changes "Blocking issues found — see review comments."`
+- Otherwise → `.github/pr-review-bin/post-verdict comment "No blocking issues found."`
 
 ## Review Criteria
 

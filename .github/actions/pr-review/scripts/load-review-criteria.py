@@ -16,7 +16,7 @@ DEFAULT_PROMPT_OUTPUT_PATH = os.path.join(".github", "review-criteria.md")
 DEFAULT_STATUS_OUTPUT_PATH = os.path.join(".github", "review-criteria.json")
 MAX_CRITERIA_BYTES = 128 * 1024
 
-BLOCKED_FRONTMATTER_KEYS = ("allowed-tools", "hooks", "context", "agent")
+BLOCKED_MARKDOWN_KEYS = ("allowed-tools", "hooks")
 BLOCKED_HTML_TAGS = ("script", "iframe", "object", "embed")
 
 
@@ -101,8 +101,8 @@ def first_nonempty_line(text: str) -> str:
 
 
 def blocked_key_pattern() -> re.Pattern:
-    keys = "|".join(re.escape(key) for key in BLOCKED_FRONTMATTER_KEYS)
-    return re.compile(rf"^(?:[-*]\s*)?(?:{keys})\s*:", re.IGNORECASE)
+    keys = "|".join(re.escape(key) for key in BLOCKED_MARKDOWN_KEYS)
+    return re.compile(rf"^(?:{keys})\s*:", re.IGNORECASE)
 
 
 def validate_criteria(text: str) -> Optional[str]:

@@ -36,10 +36,17 @@ class ValidateCriteriaTest(unittest.TestCase):
         reason = lrc.validate_criteria("---\nallowed-tools: Read\n---\n# Criteria\n")
         self.assertIn("frontmatter", reason)
 
-    def test_rejects_skill_keys(self):
-        for key in ("allowed-tools", "hooks", "context", "agent"):
+    def test_rejects_executable_markdown_keys(self):
+        for key in ("allowed-tools", "hooks"):
             reason = lrc.validate_criteria(f"## Criteria\n\n{key}: value\n")
             self.assertIn("not allowed", reason)
+
+    def test_accepts_context_and_agent_as_plain_labels(self):
+        self.assertIsNone(
+            lrc.validate_criteria(
+                "## Criteria\n\nContext: verify pagination.\n\n- agent: confirm auth flows.\n"
+            )
+        )
 
     def test_rejects_shell_directives(self):
         reason = lrc.validate_criteria("## Criteria\n\n! gh pr diff\n")
