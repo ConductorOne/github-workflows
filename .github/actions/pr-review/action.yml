@@ -87,7 +87,6 @@ runs:
         echo "${DELIM}"
       } >> "${GITHUB_ENV}"
   - name: Run Claude PR Review
-    id: claude-review
     uses: anthropics/claude-code-action@661a6fefbd0569ef35809da16775508ab1937862
     with:
       anthropic_api_key: ${{ inputs.anthropic_api_key }}
@@ -95,19 +94,8 @@ runs:
       include_fix_links: true
       use_sticky_comment: true
       allowed_bots: "*"
-      claude_args: >-
-        --model claude-opus-4-8
-        --max-turns 100
-        --allowedTools "Read,Glob,Grep,Task,Skill,Bash(gh pr diff:*),Bash(gh pr view:*)"
-        --disallowedTools "Edit,MultiEdit,Write,NotebookEditCell,mcp__github_comment__update_claude_comment,mcp__github_inline_comment__create_inline_comment,mcp__github_file_ops__commit_files,mcp__github_file_ops__delete_files,Bash(git:*),Bash(gh api:*),Bash(gh pr review:*)"
-        --json-schema '{"type":"object","additionalProperties":false,"required":["review_summary","security_issues","correctness_issues","suggestions"],"properties":{"review_summary":{"type":"string"},"security_issues":{"type":"array","items":{"$ref":"#/definitions/finding"}},"correctness_issues":{"type":"array","items":{"$ref":"#/definitions/finding"}},"suggestions":{"type":"array","items":{"$ref":"#/definitions/finding"}}},"definitions":{"finding":{"type":"object","additionalProperties":false,"required":["path","line","confidence","summary","details"],"properties":{"path":{"type":"string"},"line":{"type":"integer","minimum":1},"confidence":{"type":"string","enum":["high","medium","low"]},"summary":{"type":"string"},"details":{"type":"string"}}}}'
+      claude_args: --model claude-opus-4-8 --max-turns 100 --allowedTools "Read,Glob,Grep,Skill,Task,mcp__github_inline_comment__create_inline_comment,mcp__github_comment__update_claude_comment,Bash(gh pr diff:*),Bash(gh pr view:*),Bash(gh pr review:*),Bash(gh api:*)"
       prompt: ${{ env.REVIEW_PROMPT }}
-  - name: Publish review output
-    shell: bash
-    env:
-      GH_TOKEN: ${{ inputs.github_token }}
-      CLAUDE_REVIEW_OUTPUT: ${{ steps.claude-review.outputs.structured_output }}
-    run: python3 ${{ github.action_path }}/scripts/publish-review-output.py
   - name: Upload review context artifacts
     if: always()
     uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
@@ -119,5 +107,4 @@ runs:
         .github/incremental.diff
         .github/review-criteria.md
         .github/review-criteria.json
-        .github/review-output.json
       retention-days: 7
