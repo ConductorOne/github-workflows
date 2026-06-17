@@ -3,6 +3,7 @@
 import importlib.util
 import json
 import os
+import subprocess
 import unittest
 from unittest import mock
 
@@ -70,6 +71,50 @@ class PublishReviewOutputTest(unittest.TestCase):
         command = gh.call_args.args[0]
         self.assertIn("--comment", command)
         self.assertNotIn("--approve", command)
+
+    def test_verify_head_stops_before_posting_when_stale(self):
+        context = {
+            "repository": "ConductorOne/example",
+            "pr_number": 42,
+            "current_sha": "old-sha",
+        }
+        result = subprocess.CompletedProcess(
+            ["gh"],
+            0,
+            stdout=json.dumps({"head": {"sha": "new-sha"}}),
+            stderr="",
+        )
+        with mock.patch.object(pro, "gh", return_value=result):
+            with self.assertRaises(SystemExit) as exit_info:
+                pro.verify_head(context)
+
+        self.assertEqual(exit_info.exception.code, 3)
+
+    def test_post_inline_comment_uses_fixed_pull_comment_endpoint(self):
+        context = {
+            "repository": "ConductorOne/example",
+            "pr_number": 42,
+            "current_sha": "head-sha",
+        }
+        entry = {
+            "path": "internal/foo.go",
+            "line": 7,
+            "confidence": "high",
+            "summary": "Summary.",
+            "details": "Details.",
+        }
+        with mock.patch.object(pro, "gh") as gh:
+            pro.post_inline_comment(context, entry, "🟠 Bug:")
+
+        command = gh.call_args.args[0]
+        self.assertEqual(
+            command[:2],
+            ["api", "repos/ConductorOne/example/pulls/42/comments"],
+        )
+        self.assertIn("-f", command)
+        self.assertIn("commit_id=head-sha", command)
+        self.assertIn("path=internal/foo.go", command)
+        self.assertIn("side=RIGHT", command)
 
     def test_load_review_output_requires_json_object(self):
         with mock.patch.dict(os.environ, {"CLAUDE_REVIEW_OUTPUT": json.dumps([])}):
