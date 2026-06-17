@@ -56,13 +56,21 @@ class ValidateCriteriaTest(unittest.TestCase):
 
 
 class LoadCriteriaTest(unittest.TestCase):
-    def write_context(self, directory, base_sha="abcdef1234567890"):
+    def write_context(
+        self,
+        directory,
+        base_sha="abcdef1234567890",
+        base_ref="main",
+        base_default_branch="main",
+    ):
         path = os.path.join(directory, "context.json")
         with open(path, "w") as f:
             json.dump(
                 {
                     "repository": "ConductorOne/example",
                     "current_base_sha": base_sha,
+                    "current_base_ref": base_ref,
+                    "base_default_branch": base_default_branch,
                 },
                 f,
             )
@@ -99,6 +107,20 @@ class LoadCriteriaTest(unittest.TestCase):
 
         self.assertEqual(result.status, "missing")
         self.assertIn("none loaded", result.message)
+
+    def test_non_default_base_ref_is_not_trusted(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            context_path = self.write_context(
+                tmpdir,
+                base_ref="review-config-experiment",
+                base_default_branch="main",
+            )
+            with mock.patch.object(lrc, "gh_api_json") as gh_api_json:
+                result = lrc.load_result(context_path, ".claude/skills/ci-review.md")
+
+        self.assertEqual(result.status, "unavailable")
+        self.assertIn("is not the default branch", result.message)
+        gh_api_json.assert_not_called()
 
     def test_invalid_criteria_is_advisory(self):
         with tempfile.TemporaryDirectory() as tmpdir:

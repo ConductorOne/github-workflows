@@ -144,14 +144,28 @@ def load_result(context_path: str, criteria_path: str) -> CriteriaResult:
 
     repo = str(context.get("repository") or "")
     base_sha = str(context.get("current_base_sha") or "")
+    base_ref = str(context.get("current_base_ref") or "")
+    base_default_branch = str(context.get("base_default_branch") or "")
     short_base = short_sha(base_sha)
 
-    if not repo or not base_sha:
+    if not repo or not base_sha or not base_ref or not base_default_branch:
         return CriteriaResult(
             status="unavailable",
             message=(
-                f"none loaded - could not determine repository or trusted base SHA "
+                f"none loaded - could not determine repository, trusted base SHA, "
+                f"base ref, or default branch "
                 f"for `{criteria_path}`"
+            ),
+            criteria_path=criteria_path,
+            base_sha=base_sha,
+        )
+
+    if base_ref != base_default_branch:
+        return CriteriaResult(
+            status="unavailable",
+            message=(
+                f"none loaded - base ref `{base_ref}` is not the default branch "
+                f"`{base_default_branch}` for `{criteria_path}`"
             ),
             criteria_path=criteria_path,
             base_sha=base_sha,
