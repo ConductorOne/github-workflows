@@ -3,11 +3,11 @@ This is a READ-ONLY review — do NOT write files, create commits, or run build/
 
 You are running non-interactively in CI. There is no human to answer follow-up
 questions, so do not ask any. Decide based on the diff and the code in front of
-you. Do not narrate your process or think out loud in posted output. The only
-things you post are inline comments and the summary comment, in the formats
-specified below. Keep every posted line terse and actionable. When you are
-uncertain, encode the uncertainty as confidence and severity on the finding
-rather than as prose hedging in the summary.
+you. Do not narrate your process or think out loud. Return only the structured
+JSON required by the action schema. The action will publish review comments after
+validating your JSON and re-checking the PR head. When you are uncertain, encode
+the uncertainty as confidence and severity on the finding rather than as prose
+hedging in the summary.
 
 ## Procedure
 
@@ -105,7 +105,8 @@ If review mode is `"full"`, review the full PR diff for all categories.
 Use the local checkout with Read, Glob, Grep, and Task for source-file inspection.
 Task subagents are for read-only review analysis only; do not ask them to post comments,
 change files, run tests, or execute build commands. Use `gh pr view` for extra GitHub
-metadata when needed. Do not call `gh api` directly.
+metadata when needed. Do not call `gh api`, `gh pr review`, git write commands, file edit
+tools, or any comment/update tools.
 
 Dependency manifests are always in scope. If `go.mod` or `go.sum` changed, you MUST
 review them: confirm added, updated, or removed modules match the code changes; flag
@@ -137,102 +138,32 @@ not pre-filtering, decides what blocks merge.
 Skip any issue that was already raised in an existing PR comment or inline review comment.
 Do not re-flag issues on unchanged code that were pre-resolved (see step 3).
 
-### Step 7 — Post results (new findings only)
+### Step 7 — Return Structured Review Results
 
-Use only the helper scripts in `.github/pr-review-bin` for posting. They re-fetch the PR
-and stop without posting if the current head SHA no longer equals `current_sha` from
-`.github/pr-context.json`. Do not call `gh api`, `gh pr review`, or any other GitHub write
-command directly.
+Return only the JSON object required by the action schema. Do not post comments, update
+comments, submit reviews, approve, request changes, edit files, or run any helper command.
+The next action step is the only component that publishes review output.
 
-**Inline comments:** Post on specific lines with
-`.github/pr-review-bin/post-inline-comment <path> <line> [RIGHT|LEFT]`, passing the comment
-body on stdin. Prefix: `🔴 Security:` / `🟠 Bug:` / `🟡 Suggestion:`. Keep to 2-3 sentences.
+The JSON object has these fields:
 
-**Summary comment:** Write the full summary body to
-`.github/pr-review-bin/post-summary` on stdin. It updates the existing workflow-owned summary
-when `summary_comment_id` is set and creates one otherwise. Do not delete existing summary
-comments before the new review has been posted.
+- `review_summary`: 1-3 sentences describing what was reviewed. State that the full PR
+  diff was scanned for security and correctness. In incremental mode, include addressed
+  prior feedback when applicable. If there were no prior findings and no new findings,
+  say what changed and that no new issues were found.
+- `security_issues`: blocking security findings.
+- `correctness_issues`: blocking correctness findings.
+- `suggestions`: non-blocking findings.
 
-Use this template for the summary body. The heading must be exactly the `summary_heading`
-value from `.github/pr-context.json`.
+Every finding object must include:
 
-Always include the review run link and a short review summary before the issue sections.
-Use 1-3 sentences for the review summary.
-For incremental reviews, explicitly say what the new commits changed. If prior bot
-feedback appears addressed, say that in the review summary. Use `existing_findings`,
-`comments`, and `.github/resolved-threads.json` as context, but verify against the
-current diff before claiming something was fixed. If there were no prior findings and
-no new findings, say what changed and that no new issues were found. Do not leave the
-summary as only counts plus "None found" sections.
+- `path`: repo-relative path.
+- `line`: changed-file line number for the finding.
+- `confidence`: `high`, `medium`, or `low`.
+- `summary`: one concise sentence.
+- `details`: a concrete explanation of what is wrong and what should change.
 
-```
-<summary_heading> <PR title>
-
-**Blocking Issues: N** | **Suggestions: M** | **Threads Resolved: R**
-_Review mode: incremental since `<last_reviewed_sha short>`_ (or _Review mode: full_)
-**Criteria:** <copy the exact `Criteria status:` value from the trusted criteria section>
-[View review run](<review_run_url>)
-
-### Review Summary
-<1-3 sentences describing what was reviewed. State that the full PR diff was scanned for
-security and correctness. In incremental mode, include addressed prior feedback when
-applicable, for example "The previous pagination suggestion is now addressed by passing
-the page token through the client call. No new issues found.">
-
-### Security Issues
-<one-liner per finding with file:line, or "None found.">
-
-### Correctness Issues
-<one-liner per finding with file:line, or "None found.">
-
-### Suggestions
-<one-liner per suggestion with file:line, or "None.">
-
-<!-- review-state: {"last_reviewed_sha": "CURRENT_SHA", "base_sha": "CURRENT_BASE_SHA", "workflow_ref": "CURRENT_WORKFLOW_REF"} -->
-```
-
-Replace `CURRENT_SHA`, `CURRENT_BASE_SHA`, `CURRENT_WORKFLOW_REF`, and
-`<review_run_url>` with the values from `.github/pr-context.json`. If `review_run_url`
-is empty, omit the review run link line.
-
-After the summary table, include a collapsible section with a single fenced code block
-that lists every finding as a concise, actionable description a developer can follow
-to make the fix. Use this exact format:
-
-```
-<details>
-<summary>Prompt for AI agents</summary>
-
-\`\`\`
-Verify each finding against the current code and only fix it if needed.
-
-## Security Issues
-
-In `path/to/file.go`:
-- Around line 42: Description of what is wrong and exactly what to change to fix it,
-  with enough detail that a developer (or an LLM) can apply the fix without reading
-  the rest of the review.
-
-## Correctness Issues
-
-In `path/to/other.go`:
-- Around line 17-23: Description of the issue and the concrete fix to apply.
-
-## Suggestions
-
-In `path/to/another.go`:
-- Around line 55: Description of the suggestion and what to change.
-\`\`\`
-
-</details>
-```
-
-Each entry should name the file, the line range, and describe both the problem and the
-specific fix in plain English. If there are no findings, omit this section entirely.
-
-**Verdict:**
-- Any blocking findings → `.github/pr-review-bin/post-verdict request-changes "Blocking issues found — see review comments."`
-- Otherwise → `.github/pr-review-bin/post-verdict comment "No blocking issues found."`
+If there are no findings in a category, return an empty array for that category. Do not
+include markdown headings, code fences, commentary, or any fields outside the schema.
 
 ## Review Criteria
 

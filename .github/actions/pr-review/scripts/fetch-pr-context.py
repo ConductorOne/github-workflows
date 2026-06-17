@@ -584,6 +584,7 @@ def main():
     context = {
         "repository": repo,
         "pr_number": pr_number,
+        "pr_title": pr.get("title") or "",
         "current_sha": current_sha,
         "current_base_sha": current_base_sha,
         "current_base_ref": current_base_ref,
