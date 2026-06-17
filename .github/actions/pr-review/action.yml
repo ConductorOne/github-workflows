@@ -56,6 +56,12 @@ runs:
       GH_TOKEN: ${{ inputs.github_token }}
       PR_NUMBER: ${{ inputs.pr_number }}
     run: python3 ${{ github.action_path }}/scripts/resolve-outdated-threads.py
+  - name: Load repo-local review criteria
+    shell: bash
+    env:
+      GH_TOKEN: ${{ inputs.github_token }}
+      REVIEW_CRITERIA_PATH: .claude/skills/ci-review.md
+    run: python3 ${{ github.action_path }}/scripts/load-review-criteria.py
   - name: Load review prompt
     id: prompt
     shell: bash
@@ -74,6 +80,10 @@ runs:
             cat "${PROMPT_DIR}/mixins/${mixin}.md"
           done
         fi
+        if [ -f ".github/review-criteria.md" ]; then
+          echo
+          cat ".github/review-criteria.md"
+        fi
         echo "${DELIM}"
       } >> "${GITHUB_ENV}"
   - name: Run Claude PR Review
@@ -82,8 +92,9 @@ runs:
       anthropic_api_key: ${{ inputs.anthropic_api_key }}
       github_token: ${{ inputs.github_token }}
       include_fix_links: true
+      use_sticky_comment: true
       allowed_bots: "*"
-      claude_args: --model claude-opus-4-8 --max-turns 100 --allowedTools "Read,Glob,Grep,Skill,Task,mcp__github_inline_comment__create_inline_comment,Bash(gh pr diff:*),Bash(gh pr view:*),Bash(gh pr review:*),Bash(gh api:*)"
+      claude_args: --model claude-opus-4-8 --max-turns 100 --allowedTools "Read,Glob,Grep,mcp__github_inline_comment__create_inline_comment,Bash(gh pr diff:*),Bash(gh pr view:*),Bash(gh pr review:*),Bash(gh api:*)"
       prompt: ${{ env.REVIEW_PROMPT }}
   - name: Upload review context artifacts
     if: always()
@@ -94,4 +105,6 @@ runs:
         .github/pr-context.json
         .github/resolved-threads.json
         .github/incremental.diff
+        .github/review-criteria.md
+        .github/review-criteria.json
       retention-days: 7
