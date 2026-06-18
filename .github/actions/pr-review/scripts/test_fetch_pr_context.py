@@ -247,7 +247,11 @@ class MainContextTest(unittest.TestCase):
                 "sha": "head-sha",
                 "repo": {"full_name": "ConductorOne/example"},
             },
-            "base": {"sha": "base-sha"},
+            "base": {
+                "sha": "base-sha",
+                "ref": "main",
+                "repo": {"default_branch": "main"},
+            },
         }
 
         old_cwd = os.getcwd()
@@ -287,6 +291,8 @@ class MainContextTest(unittest.TestCase):
                 self.assertEqual(context["review_mode"], "incremental")
                 self.assertEqual(context["incremental_diff_path"], ".github/incremental.diff")
                 self.assertEqual(context["incremental_diff_metadata"], metadata)
+                self.assertEqual(context["current_base_ref"], "main")
+                self.assertEqual(context["base_default_branch"], "main")
             finally:
                 os.chdir(old_cwd)
 

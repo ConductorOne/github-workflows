@@ -4,8 +4,10 @@ Apply these extra criteria when reviewing Baton connector implementation reposit
 Baton connectors are Go projects that sync identity data from SaaS APIs into ConductorOne.
 
 When provisioning files change, inspect the full file content from the local checkout if the
-diff does not contain enough context. Exclude `vendor/`, `conf.gen.go`, generated files, and
-lockfiles from connector-specific review.
+diff does not contain enough context. Exclude `vendor/`, `conf.gen.go`, and generated files
+from connector-specific content review. Do NOT exclude `go.mod` or `go.sum`: if they
+changed, apply the Dependency Checks section below. They are dependency manifests, not
+excluded lockfiles.
 
 ### File Context
 
@@ -166,8 +168,12 @@ Do not flag these patterns without clear repo-specific evidence:
 
 ### Dependency Checks
 
-- Dependency changes should match the code changes.
-- New dependencies should be justified by the changed code.
-- Removed dependencies should not still be needed.
-- Check whether the connector is on a recent enough baton-sdk version for the behavior it relies on.
-- SDK version changes should not unintentionally widen or narrow connector behavior.
+If `go.mod` or `go.sum` changed, you must run these checks against the manifest diff from
+the full `gh pr diff`, not only the incremental artifact:
+
+- Every added, updated, or removed module matches the code changes; flag unexplained or
+  unrelated additions.
+- New dependencies are justified by the changed code; removed dependencies are no longer needed.
+- The connector is on a recent enough baton-sdk version for the behavior it relies on.
+- SDK version bumps do not unintentionally widen or narrow connector behavior; treat
+  behavior-changing bumps as a correctness finding, not a silent pass.

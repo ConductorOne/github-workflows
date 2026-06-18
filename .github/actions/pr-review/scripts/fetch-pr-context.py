@@ -530,9 +530,13 @@ def main():
 
     current_sha = expected_head_sha or live_head_sha
     current_base_sha = pr["base"]["sha"]
+    current_base_ref = pr["base"].get("ref")
+    base_default_branch = (pr["base"].get("repo") or {}).get("default_branch")
     head_repo = (pr["head"].get("repo") or {}).get("full_name")
     print(f"Current PR head: {current_sha[:12]}")
     print(f"Current PR base: {current_base_sha[:12]}")
+    if current_base_ref:
+        print(f"Current PR base ref: {current_base_ref}")
 
     # Review runs only for same-repo PRs with PR head checked out. GitHub
     # compare diffs are used only to select incremental/full review mode and to
@@ -580,8 +584,11 @@ def main():
     context = {
         "repository": repo,
         "pr_number": pr_number,
+        "pr_title": pr.get("title") or "",
         "current_sha": current_sha,
         "current_base_sha": current_base_sha,
+        "current_base_ref": current_base_ref,
+        "base_default_branch": base_default_branch,
         "workflow_ref": workflow_ref,
         "review_run_url": review_run_url,
         "summary_heading": summary_heading,
