@@ -11,7 +11,7 @@ builds:
     goos:
       - windows
     goarch:
-      - amd64
+      - amd64${WINDOWS_BUILD_SIGN_HOOK}
 archives:
   - id: windows-archive
     builds:
@@ -40,7 +40,7 @@ sboms:
     artifacts: installer
     ids:
       - windows-msi
-signs:
+signs:${WINDOWS_AUTHENTICODE_MSI_SIGN}
   - id: cosign-archives
     output: true
     cmd: cosign

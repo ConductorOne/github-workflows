@@ -82,6 +82,10 @@ The release workflow accepts the following input parameters:
 | `docker_extra_files` | No | `""` | Comma-separated list of extra files/dirs to include in Docker build context |
 | `msi` | No | `true` | Whether to build MSI Windows installers |
 | `msi_wxs_path` | No | `""` | Path to custom WXS template for MSI installer (uses default if not set) |
+| `windows_authenticode_signing` | No | `false` | Authenticode-sign Windows `.exe` and `.msi` via Azure Trusted Signing (requires the `trusted_signing_*` inputs and `AZURE_*` secrets) |
+| `trusted_signing_endpoint` | No | `""` | Azure Trusted Signing region endpoint (e.g. `https://wus2.codesigning.azure.net/`); required when `windows_authenticode_signing: true` |
+| `trusted_signing_account_name` | No | `""` | Azure Trusted Signing account name; required when `windows_authenticode_signing: true` |
+| `trusted_signing_certificate_profile` | No | `""` | Azure Trusted Signing certificate profile name; required when `windows_authenticode_signing: true` |
 
 2. Ensure your repository has the following secrets configured:
 
@@ -92,6 +96,7 @@ The release workflow accepts the following input parameters:
    - `AC_PROVIDER`: Apple Connect provider
    - `DATADOG_API_KEY`: Datadog API key for monitoring releases
    - `GORELEASER_PRO_KEY`: GoReleaser Pro license key (required when `msi: true`, the default)
+   - `AZURE_CLIENT_ID` / `AZURE_TENANT_ID` / `AZURE_SUBSCRIPTION_ID`: Azure OIDC identity for Trusted Signing (required only when `windows_authenticode_signing: true`)
 
 3. Remove all GoReleaser, gon files, Dockerfile, and Dockerfile.lambda files from your connector repository, if they were previously created there.
 
@@ -174,6 +179,37 @@ To disable MSI builds entirely (e.g., for connectors that don't need Windows ins
 ```
 
 When `msi: false`, the `GORELEASER_PRO_KEY` secret is not required.
+
+### Windows Authenticode Signing
+
+Sigstore (cosign) signatures prove provenance but do not satisfy Windows
+SmartScreen. To eliminate SmartScreen warnings on the `.exe` and `.msi`, enable
+Authenticode signing via [Azure Trusted Signing](https://learn.microsoft.com/azure/trusted-signing/):
+
+```yaml
+jobs:
+  release:
+    uses: ConductorOne/github-workflows/.github/workflows/release.yaml@v4
+    with:
+      tag: ${{ github.ref_name }}
+      windows_authenticode_signing: true
+      trusted_signing_endpoint: https://wus2.codesigning.azure.net/
+      trusted_signing_account_name: conductorone-signing
+      trusted_signing_certificate_profile: conductorone
+    secrets:
+      # ... existing secrets ...
+      AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+      AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+      AZURE_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+```
+
+This is **opt-in** (default `false`) so connectors keep releasing unchanged
+until the Azure Trusted Signing account is provisioned. Authentication uses
+GitHub Actions OIDC — no signing certificate is stored in repository secrets.
+The `.exe` is signed before it is packaged, so both the standalone binary (in
+the `.zip`) and the copy inside the `.msi` carry the signature. See the
+[release workflow docs](docs/release-workflow.md#windows-authenticode-signing-azure-trusted-signing)
+for Azure setup and verification details.
 
 ## Verify Workflow
 
