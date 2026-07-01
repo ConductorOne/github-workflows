@@ -96,5 +96,17 @@
     "valid": false,
     "errorContains": "dangerous URL scheme",
     "content": "[link](java&#x73;cript:alert(1))\n"
+  },
+  {
+    "name": "reject markdown embedded image",
+    "valid": false,
+    "errorContains": "must not embed images",
+    "content": "![diagram](./images/diagram.png)\n"
+  },
+  {
+    "name": "reject markdown image reference",
+    "valid": false,
+    "errorContains": "must not embed images",
+    "content": "![diagram][ref]\n\n[ref]: ./images/diagram.png\n"
   }
 ]
