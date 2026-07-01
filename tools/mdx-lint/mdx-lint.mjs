@@ -175,8 +175,12 @@ function validateTree(tree) {
       case "html":
         fail(node, "contains raw HTML");
         break;
-      case "link":
+      // Embedded images make the registry's MDX renderer emit a <link rel=preload>, which its HTML validator rejects.
       case "image":
+      case "imageReference":
+        fail(node, "contains an embedded image; connector docs must not embed images");
+        break;
+      case "link":
       case "definition":
         validateUrlNode(node);
         break;
