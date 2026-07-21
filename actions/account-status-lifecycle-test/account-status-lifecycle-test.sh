@@ -45,14 +45,16 @@ source "${SCRIPT_DIR}/../_helpers/sleep.sh"
 # Status can live in one of two places depending on the baton-sdk version the
 # connector was built with:
 #   * Resource-level: .resource.status.status, using the Status_ResourceStatus
-#     enum (e.g. "RESOURCE_STATUS_ENABLED"). This is where newer SDKs put it.
+#     enum (e.g. "RESOURCE_STATUS_ENABLED"). baton-sdk v0.19.0 moved status here
+#     from the trait (ConductorOne/baton-sdk#996) and deprecated the trait field.
 #   * Deprecated trait-level: the UserTrait annotation's .status.status, using
-#     the UserTrait_Status_Status enum (e.g. "STATUS_ENABLED").
+#     the UserTrait_Status_Status enum (e.g. "STATUS_ENABLED"). Used by
+#     connectors built against baton-sdk < v0.19.0.
 #
 # We read both and prefer the resource-level value, normalizing it to the
 # trait-form ("RESOURCE_STATUS_ENABLED" -> "STATUS_ENABLED") so the rest of the
-# script keeps comparing against STATUS_ENABLED/STATUS_DISABLED. Newer SDKs
-# default the deprecated trait status to STATUS_ENABLED when it isn't set
+# script keeps comparing against STATUS_ENABLED/STATUS_DISABLED. On v0.19.0+ the
+# deprecated trait status defaults to STATUS_ENABLED when it isn't set
 # explicitly, so the trait value alone is unreliable and is only used as a
 # fallback when no resource-level status is present.
 get_user_status() {
