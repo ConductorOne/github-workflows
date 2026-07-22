@@ -41,20 +41,43 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "${SCRIPT_DIR}/../_helpers/sleep.sh"
 
 # Function to get user status (enabled/disabled)
+#
+# Status can live in one of two places depending on the baton-sdk version the
+# connector was built with:
+#   * Resource-level: .resource.status.status, using the Status_ResourceStatus
+#     enum (e.g. "RESOURCE_STATUS_ENABLED"). baton-sdk v0.19.0 moved status here
+#     from the trait (ConductorOne/baton-sdk#996) and deprecated the trait field.
+#   * Deprecated trait-level: the UserTrait annotation's .status.status, using
+#     the UserTrait_Status_Status enum (e.g. "STATUS_ENABLED"). Used by
+#     connectors built against baton-sdk < v0.19.0.
+#
+# We read both and prefer the resource-level value, normalizing it to the
+# trait-form ("RESOURCE_STATUS_ENABLED" -> "STATUS_ENABLED") so the rest of the
+# script keeps comparing against STATUS_ENABLED/STATUS_DISABLED. On v0.19.0+ the
+# deprecated trait status defaults to STATUS_ENABLED when it isn't set
+# explicitly, so the trait value alone is unreliable and is only used as a
+# fallback when no resource-level status is present.
 get_user_status() {
   local user_id="$1"
-  local status=$(baton resources -t "user" --output-format=json \
+  baton resources -t "user" --output-format=json \
     | jq -r --arg user_id "$user_id" \
-         '(.resources // [])[] |
-          select(.resource.id.resource == $user_id) |
-          (.resource.annotations[]? | select(."@type" == "type.googleapis.com/c1.connector.v2.UserTrait")) as $trait |
-          if $trait != null and $trait.status != null then
-            $trait.status
-          else
-            "unknown"
-          end')
-  # Extract just the status value if it's JSON, otherwise return as-is
-  echo "$status" | jq -r '.status // empty' 2>/dev/null || echo "$status"
+         '(.resources // [])[]
+          | select(.resource.id.resource == $user_id)
+          | .resource as $r
+          # Resource-level status (newer baton-sdk): Status_ResourceStatus enum.
+          | ($r.status.status // null) as $resStatus
+          # Deprecated trait-level status: UserTrait_Status_Status enum.
+          | ((
+              $r.annotations[]?
+              | select(."@type" == "type.googleapis.com/c1.connector.v2.UserTrait")
+              | .status.status
+            ) // null) as $traitStatus
+          # Normalize "RESOURCE_STATUS_*" to the trait-form "STATUS_*".
+          | (if $resStatus == null then null else ($resStatus | sub("^RESOURCE_"; "")) end) as $resNorm
+          | if   ($resNorm    != null and $resNorm    != "STATUS_UNSPECIFIED") then $resNorm
+            elif ($traitStatus != null and $traitStatus != "STATUS_UNSPECIFIED") then $traitStatus
+            else "unknown"
+            end'
 }
 
 # Function to check if user is enabled

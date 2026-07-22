@@ -117,8 +117,11 @@ The action performs account status tests based on the selected `test-flow`:
 ## Status Detection
 
 The action checks for account status using the following logic:
-- Extracts status from the UserTrait annotation
-- Checks if status equals `STATUS_ENABLED` (the only enabled status in baton-sdk)
+- Reads status from both places it can live, depending on the connector's baton-sdk version:
+  - Resource-level `resource.status.status` (`Status_ResourceStatus` enum, e.g. `RESOURCE_STATUS_ENABLED`) — used by connectors built against baton-sdk **v0.19.0+**, which moved status from the trait to the resource ([ConductorOne/baton-sdk#996](https://github.com/ConductorOne/baton-sdk/pull/996)).
+  - The deprecated UserTrait annotation's `status.status` (`UserTrait_Status_Status` enum, e.g. `STATUS_ENABLED`) — used by connectors built against baton-sdk **< v0.19.0**.
+- Prefers the resource-level value (normalized to the trait form) and falls back to the trait value. On v0.19.0+ the deprecated trait status defaults to `STATUS_ENABLED` when it isn't set explicitly, so the trait value alone is unreliable and is only used when no resource-level status is present.
+- Checks if the resulting status equals `STATUS_ENABLED` (the only enabled status in baton-sdk)
 - Any other status value is considered disabled:
   - `STATUS_DISABLED` - Account is disabled
   - `STATUS_DELETED` - Account is deleted
