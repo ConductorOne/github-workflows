@@ -150,12 +150,14 @@ Prefix: `🔴 Security:` / `🟠 Bug:` / `🟡 Suggestion:`. Keep to 2-3 sentenc
 **Summary comment:** Pass the body via stdin with a heredoc, using `-F body=@-` — NOT
 `-f body=...`. `-f` is a raw string field and does not support `@filename`/`@-` stdin
 magic, so `-f body=@-` would literally set the comment body to the two characters `@-`.
-`-F` is the typed field flag that does support it. If `summary_comment_id` is set, update
+`-F` is the typed field flag that does support it. Use an unusual heredoc terminator —
+never a plain word like `EOF` — so a line of ordinary review body text can never
+collide with it and truncate the body early. If `summary_comment_id` is set, update
 that issue comment with:
 ```
-gh api -X PATCH repos/<repository>/issues/comments/<summary_comment_id> -F body=@- <<'BODY_EOF'
+gh api -X PATCH repos/<repository>/issues/comments/<summary_comment_id> -F body=@- <<'GH_PR_REVIEW_BODY_EOF__'
 ...
-BODY_EOF
+GH_PR_REVIEW_BODY_EOF__
 ```
 If it is not set, create one the same way against
 `repos/<repository>/issues/<pr_number>/comments`.
