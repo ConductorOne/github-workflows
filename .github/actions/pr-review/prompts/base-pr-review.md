@@ -147,10 +147,20 @@ posting a summary, inline comments, or review verdict.
 **Inline comments:** Post on specific lines using `mcp__github_inline_comment__create_inline_comment`.
 Prefix: `🔴 Security:` / `🟠 Bug:` / `🟡 Suggestion:`. Keep to 2-3 sentences.
 
-**Summary comment:** If `summary_comment_id` is set, update that issue comment with
-`gh api -X PATCH repos/<repository>/issues/comments/<summary_comment_id> -f body=...`.
-If it is not set, create one with
-`gh api repos/<repository>/issues/<pr_number>/comments -f body=...`.
+**Summary comment:** Pass the body via stdin with a heredoc, using `-F body=@-` — NOT
+`-f body=...`. `-f` is a raw string field and does not support `@filename`/`@-` stdin
+magic, so `-f body=@-` would literally set the comment body to the two characters `@-`.
+`-F` is the typed field flag that does support it. Use an unusual heredoc terminator —
+never a plain word like `EOF` — so a line of ordinary review body text can never
+collide with it and truncate the body early. If `summary_comment_id` is set, update
+that issue comment with:
+```
+gh api -X PATCH repos/<repository>/issues/comments/<summary_comment_id> -F body=@- <<'GH_PR_REVIEW_BODY_EOF__'
+...
+GH_PR_REVIEW_BODY_EOF__
+```
+If it is not set, create one the same way against
+`repos/<repository>/issues/<pr_number>/comments`.
 Do not delete existing summary comments before the new review has been posted.
 
 Use this template for the summary body. The heading must be exactly the `summary_heading`
