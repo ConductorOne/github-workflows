@@ -48,4 +48,5 @@ jobs:
           pr_number: ${{ github.event.pull_request.number }}
           head_sha: ${{ github.event.pull_request.head.sha }}
           review_prompt: ${{ inputs.review_prompt || 'connector' }}
-    timeout-minutes: 15
+          marketplace_token: ${{ secrets.CLAUDE_MARKETPLACE_TOKEN }}
+    timeout-minutes: 30
