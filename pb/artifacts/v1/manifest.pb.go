@@ -423,20 +423,21 @@ func (b0 Manifest_builder) Build() *Manifest {
 
 // Asset represents metadata for a single binary artifact.
 type Asset struct {
-	state                      protoimpl.MessageState    `protogen:"opaque.v1"`
-	xxx_hidden_Filename        *string                   `protobuf:"bytes,1,opt,name=filename"`
-	xxx_hidden_MediaType       *string                   `protobuf:"bytes,2,opt,name=media_type,json=mediaType"`
-	xxx_hidden_SizeBytes       int64                     `protobuf:"varint,3,opt,name=size_bytes,json=sizeBytes"`
-	xxx_hidden_Sha256          *string                   `protobuf:"bytes,4,opt,name=sha256"`
-	xxx_hidden_Href            *string                   `protobuf:"bytes,5,opt,name=href"`
-	xxx_hidden_SignatureHref   *string                   `protobuf:"bytes,6,opt,name=signature_href,json=signatureHref"`
-	xxx_hidden_CertificateHref *string                   `protobuf:"bytes,7,opt,name=certificate_href,json=certificateHref"`
-	xxx_hidden_SbomHref        *string                   `protobuf:"bytes,8,opt,name=sbom_href,json=sbomHref"`
-	xxx_hidden_Attestations    *[]*AttestationDescriptor `protobuf:"bytes,9,rep,name=attestations"`
-	XXX_raceDetectHookData     protoimpl.RaceDetectHookData
-	XXX_presence               [1]uint32
-	unknownFields              protoimpl.UnknownFields
-	sizeCache                  protoimpl.SizeCache
+	state                       protoimpl.MessageState    `protogen:"opaque.v1"`
+	xxx_hidden_Filename         *string                   `protobuf:"bytes,1,opt,name=filename"`
+	xxx_hidden_MediaType        *string                   `protobuf:"bytes,2,opt,name=media_type,json=mediaType"`
+	xxx_hidden_SizeBytes        int64                     `protobuf:"varint,3,opt,name=size_bytes,json=sizeBytes"`
+	xxx_hidden_Sha256           *string                   `protobuf:"bytes,4,opt,name=sha256"`
+	xxx_hidden_Href             *string                   `protobuf:"bytes,5,opt,name=href"`
+	xxx_hidden_SignatureHref    *string                   `protobuf:"bytes,6,opt,name=signature_href,json=signatureHref"`
+	xxx_hidden_CertificateHref  *string                   `protobuf:"bytes,7,opt,name=certificate_href,json=certificateHref"`
+	xxx_hidden_SbomHref         *string                   `protobuf:"bytes,8,opt,name=sbom_href,json=sbomHref"`
+	xxx_hidden_Attestations     *[]*AttestationDescriptor `protobuf:"bytes,9,rep,name=attestations"`
+	xxx_hidden_UpdaterSignature *string                   `protobuf:"bytes,10,opt,name=updater_signature,json=updaterSignature"`
+	XXX_raceDetectHookData      protoimpl.RaceDetectHookData
+	XXX_presence                [1]uint32
+	unknownFields               protoimpl.UnknownFields
+	sizeCache                   protoimpl.SizeCache
 }
 
 func (x *Asset) Reset() {
@@ -551,49 +552,64 @@ func (x *Asset) GetAttestations() []*AttestationDescriptor {
 	return nil
 }
 
+func (x *Asset) GetUpdaterSignature() string {
+	if x != nil {
+		if x.xxx_hidden_UpdaterSignature != nil {
+			return *x.xxx_hidden_UpdaterSignature
+		}
+		return ""
+	}
+	return ""
+}
+
 func (x *Asset) SetFilename(v string) {
 	x.xxx_hidden_Filename = &v
-	protoimpl.X.SetPresent(&(x.XXX_presence[0]), 0, 9)
+	protoimpl.X.SetPresent(&(x.XXX_presence[0]), 0, 10)
 }
 
 func (x *Asset) SetMediaType(v string) {
 	x.xxx_hidden_MediaType = &v
-	protoimpl.X.SetPresent(&(x.XXX_presence[0]), 1, 9)
+	protoimpl.X.SetPresent(&(x.XXX_presence[0]), 1, 10)
 }
 
 func (x *Asset) SetSizeBytes(v int64) {
 	x.xxx_hidden_SizeBytes = v
-	protoimpl.X.SetPresent(&(x.XXX_presence[0]), 2, 9)
+	protoimpl.X.SetPresent(&(x.XXX_presence[0]), 2, 10)
 }
 
 func (x *Asset) SetSha256(v string) {
 	x.xxx_hidden_Sha256 = &v
-	protoimpl.X.SetPresent(&(x.XXX_presence[0]), 3, 9)
+	protoimpl.X.SetPresent(&(x.XXX_presence[0]), 3, 10)
 }
 
 func (x *Asset) SetHref(v string) {
 	x.xxx_hidden_Href = &v
-	protoimpl.X.SetPresent(&(x.XXX_presence[0]), 4, 9)
+	protoimpl.X.SetPresent(&(x.XXX_presence[0]), 4, 10)
 }
 
 func (x *Asset) SetSignatureHref(v string) {
 	x.xxx_hidden_SignatureHref = &v
-	protoimpl.X.SetPresent(&(x.XXX_presence[0]), 5, 9)
+	protoimpl.X.SetPresent(&(x.XXX_presence[0]), 5, 10)
 }
 
 func (x *Asset) SetCertificateHref(v string) {
 	x.xxx_hidden_CertificateHref = &v
-	protoimpl.X.SetPresent(&(x.XXX_presence[0]), 6, 9)
+	protoimpl.X.SetPresent(&(x.XXX_presence[0]), 6, 10)
 }
 
 // Deprecated: Marked as deprecated in artifacts/v1/manifest.proto.
 func (x *Asset) SetSbomHref(v string) {
 	x.xxx_hidden_SbomHref = &v
-	protoimpl.X.SetPresent(&(x.XXX_presence[0]), 7, 9)
+	protoimpl.X.SetPresent(&(x.XXX_presence[0]), 7, 10)
 }
 
 func (x *Asset) SetAttestations(v []*AttestationDescriptor) {
 	x.xxx_hidden_Attestations = &v
+}
+
+func (x *Asset) SetUpdaterSignature(v string) {
+	x.xxx_hidden_UpdaterSignature = &v
+	protoimpl.X.SetPresent(&(x.XXX_presence[0]), 9, 10)
 }
 
 func (x *Asset) HasFilename() bool {
@@ -653,6 +669,13 @@ func (x *Asset) HasSbomHref() bool {
 	return protoimpl.X.Present(&(x.XXX_presence[0]), 7)
 }
 
+func (x *Asset) HasUpdaterSignature() bool {
+	if x == nil {
+		return false
+	}
+	return protoimpl.X.Present(&(x.XXX_presence[0]), 9)
+}
+
 func (x *Asset) ClearFilename() {
 	protoimpl.X.ClearPresent(&(x.XXX_presence[0]), 0)
 	x.xxx_hidden_Filename = nil
@@ -694,6 +717,11 @@ func (x *Asset) ClearSbomHref() {
 	x.xxx_hidden_SbomHref = nil
 }
 
+func (x *Asset) ClearUpdaterSignature() {
+	protoimpl.X.ClearPresent(&(x.XXX_presence[0]), 9)
+	x.xxx_hidden_UpdaterSignature = nil
+}
+
 type Asset_builder struct {
 	_ [0]func() // Prevents comparability and use of unkeyed literals for the builder.
 
@@ -720,6 +748,13 @@ type Asset_builder struct {
 	// For your customer flow (verify one OS artifact at a time), this is the recommended place to link
 	// per-artifact provenance and/or SBOM attestations stored in S3.
 	Attestations []*AttestationDescriptor
+	// updater_signature is the base64-encoded minisign signature for a Tauri
+	// in-app auto-update bundle. Only set on updater-bundle assets
+	// ({platform}-updater); empty for all other assets. The value is forwarded to
+	// the connector registry as per-asset metadata under the well-known key
+	// "updater.signature".
+	// JSON key: "updaterSignature".
+	UpdaterSignature *string
 }
 
 func (b0 Asset_builder) Build() *Asset {
@@ -727,38 +762,42 @@ func (b0 Asset_builder) Build() *Asset {
 	b, x := &b0, m0
 	_, _ = b, x
 	if b.Filename != nil {
-		protoimpl.X.SetPresentNonAtomic(&(x.XXX_presence[0]), 0, 9)
+		protoimpl.X.SetPresentNonAtomic(&(x.XXX_presence[0]), 0, 10)
 		x.xxx_hidden_Filename = b.Filename
 	}
 	if b.MediaType != nil {
-		protoimpl.X.SetPresentNonAtomic(&(x.XXX_presence[0]), 1, 9)
+		protoimpl.X.SetPresentNonAtomic(&(x.XXX_presence[0]), 1, 10)
 		x.xxx_hidden_MediaType = b.MediaType
 	}
 	if b.SizeBytes != nil {
-		protoimpl.X.SetPresentNonAtomic(&(x.XXX_presence[0]), 2, 9)
+		protoimpl.X.SetPresentNonAtomic(&(x.XXX_presence[0]), 2, 10)
 		x.xxx_hidden_SizeBytes = *b.SizeBytes
 	}
 	if b.Sha256 != nil {
-		protoimpl.X.SetPresentNonAtomic(&(x.XXX_presence[0]), 3, 9)
+		protoimpl.X.SetPresentNonAtomic(&(x.XXX_presence[0]), 3, 10)
 		x.xxx_hidden_Sha256 = b.Sha256
 	}
 	if b.Href != nil {
-		protoimpl.X.SetPresentNonAtomic(&(x.XXX_presence[0]), 4, 9)
+		protoimpl.X.SetPresentNonAtomic(&(x.XXX_presence[0]), 4, 10)
 		x.xxx_hidden_Href = b.Href
 	}
 	if b.SignatureHref != nil {
-		protoimpl.X.SetPresentNonAtomic(&(x.XXX_presence[0]), 5, 9)
+		protoimpl.X.SetPresentNonAtomic(&(x.XXX_presence[0]), 5, 10)
 		x.xxx_hidden_SignatureHref = b.SignatureHref
 	}
 	if b.CertificateHref != nil {
-		protoimpl.X.SetPresentNonAtomic(&(x.XXX_presence[0]), 6, 9)
+		protoimpl.X.SetPresentNonAtomic(&(x.XXX_presence[0]), 6, 10)
 		x.xxx_hidden_CertificateHref = b.CertificateHref
 	}
 	if b.SbomHref != nil {
-		protoimpl.X.SetPresentNonAtomic(&(x.XXX_presence[0]), 7, 9)
+		protoimpl.X.SetPresentNonAtomic(&(x.XXX_presence[0]), 7, 10)
 		x.xxx_hidden_SbomHref = b.SbomHref
 	}
 	x.xxx_hidden_Attestations = &b.Attestations
+	if b.UpdaterSignature != nil {
+		protoimpl.X.SetPresentNonAtomic(&(x.XXX_presence[0]), 9, 10)
+		x.xxx_hidden_UpdaterSignature = b.UpdaterSignature
+	}
 	return m0
 }
 
@@ -1158,7 +1197,7 @@ const file_artifacts_v1_manifest_proto_rawDesc = "" +
 	"\x05value\x18\x02 \x01(\v2\x13.artifacts.v1.AssetR\x05value:\x028\x01\x1aN\n" +
 	"\vImagesEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12)\n" +
-	"\x05value\x18\x02 \x01(\v2\x13.artifacts.v1.ImageR\x05value:\x028\x01\"\xc9\x02\n" +
+	"\x05value\x18\x02 \x01(\v2\x13.artifacts.v1.ImageR\x05value:\x028\x01\"\xf6\x02\n" +
 	"\x05Asset\x12\x1a\n" +
 	"\bfilename\x18\x01 \x01(\tR\bfilename\x12\x1d\n" +
 	"\n" +
@@ -1170,7 +1209,9 @@ const file_artifacts_v1_manifest_proto_rawDesc = "" +
 	"\x0esignature_href\x18\x06 \x01(\tR\rsignatureHref\x12)\n" +
 	"\x10certificate_href\x18\a \x01(\tR\x0fcertificateHref\x12\x1f\n" +
 	"\tsbom_href\x18\b \x01(\tB\x02\x18\x01R\bsbomHref\x12G\n" +
-	"\fattestations\x18\t \x03(\v2#.artifacts.v1.AttestationDescriptorR\fattestations\"p\n" +
+	"\fattestations\x18\t \x03(\v2#.artifacts.v1.AttestationDescriptorR\fattestations\x12+\n" +
+	"\x11updater_signature\x18\n" +
+	" \x01(\tR\x10updaterSignature\"p\n" +
 	"\x05Image\x12\x10\n" +
 	"\x03ref\x18\x01 \x01(\tR\x03ref\x12\x16\n" +
 	"\x06digest\x18\x02 \x01(\tR\x06digest\x12\x10\n" +

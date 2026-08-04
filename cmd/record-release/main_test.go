@@ -3,6 +3,7 @@ package main
 import (
 	"encoding/json"
 	"reflect"
+	"strings"
 	"testing"
 
 	pb "github.com/ConductorOne/github-workflows/pb/artifacts/v1"
@@ -40,6 +41,54 @@ func TestTransformAssetsPreservesAssetAttestations(t *testing.T) {
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("attestations = %#v, want %#v", got, want)
+	}
+}
+
+func TestTransformAssetsMapsUpdaterSignatureToMetadata(t *testing.T) {
+	manifest := pb.Manifest_builder{
+		Assets: map[string]*pb.Asset{
+			// The macOS updater bundle carries the minisign signature.
+			"darwin-universal-updater": pb.Asset_builder{
+				Filename:         strPtr("baton-example-v1.2.3-darwin-universal.app.tar.gz"),
+				MediaType:        strPtr("application/gzip"),
+				Href:             strPtr("https://dist.example.com/updater.app.tar.gz"),
+				UpdaterSignature: strPtr("dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduCg=="),
+			}.Build(),
+			// A regular asset must not gain any metadata.
+			"linux-amd64": pb.Asset_builder{
+				Filename:  strPtr("baton-example-v1.2.3-linux-amd64.tar.gz"),
+				MediaType: strPtr("application/gzip"),
+				Href:      strPtr("https://dist.example.com/asset.tar.gz"),
+			}.Build(),
+		},
+	}.Build()
+
+	assets := transformAssets(manifest)
+
+	updater := assets["darwin-universal-updater"]
+	wantMeta := map[string]string{"updater.signature": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduCg=="}
+	if !reflect.DeepEqual(updater.Metadata, wantMeta) {
+		t.Fatalf("updater metadata = %#v, want %#v", updater.Metadata, wantMeta)
+	}
+
+	if plain := assets["linux-amd64"]; plain.Metadata != nil {
+		t.Fatalf("non-updater asset metadata = %#v, want nil", plain.Metadata)
+	}
+
+	// Metadata is omitted from JSON when nil, present when set.
+	plainBody, err := json.Marshal(assets["linux-amd64"])
+	if err != nil {
+		t.Fatalf("marshal plain asset: %v", err)
+	}
+	if strings.Contains(string(plainBody), "\"metadata\"") {
+		t.Fatalf("plain asset JSON unexpectedly contains metadata: %s", plainBody)
+	}
+	updaterBody, err := json.Marshal(updater)
+	if err != nil {
+		t.Fatalf("marshal updater asset: %v", err)
+	}
+	if !strings.Contains(string(updaterBody), "\"updater.signature\"") {
+		t.Fatalf("updater asset JSON missing metadata signature: %s", updaterBody)
 	}
 }
 

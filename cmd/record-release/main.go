@@ -50,7 +50,17 @@ type ReleaseAsset struct {
 	CertificateURL string                `json:"certificateUrl,omitempty"`
 	SbomURL        string                `json:"sbomUrl,omitempty"`
 	Attestations   []*ReleaseAttestation `json:"attestations,omitempty"`
+	// Metadata carries free-form, per-asset key/value pairs that the registry
+	// stores on registry.v1.Asset.metadata. Currently used to forward the Tauri
+	// updater bundle's minisign signature under updaterSignatureMetadataKey.
+	// Left nil (and omitted from JSON) for assets without any metadata.
+	Metadata map[string]string `json:"metadata,omitempty"`
 }
+
+// updaterSignatureMetadataKey is the well-known registry metadata key under
+// which a Tauri auto-update bundle's base64 minisign signature is stored
+// (registry.v1.Asset.metadata["updater.signature"]).
+const updaterSignatureMetadataKey = "updater.signature"
 
 // ReleaseImage is the transformed image for the registry API.
 type ReleaseImage struct {
@@ -316,7 +326,7 @@ func main() {
 func transformAssets(manifest *pb.Manifest) map[string]*ReleaseAsset {
 	assets := make(map[string]*ReleaseAsset)
 	for platform, asset := range manifest.GetAssets() {
-		assets[platform] = &ReleaseAsset{
+		ra := &ReleaseAsset{
 			Platform:       platform,
 			Filename:       asset.GetFilename(),
 			MediaType:      asset.GetMediaType(),
@@ -328,6 +338,13 @@ func transformAssets(manifest *pb.Manifest) map[string]*ReleaseAsset {
 			SbomURL:        asset.GetSbomHref(),
 			Attestations:   transformAttestations(asset.GetAttestations()),
 		}
+		// The Tauri updater bundle carries a base64 minisign signature that must
+		// reach the registry as per-asset metadata. Only the updater asset sets
+		// updaterSignature; every other asset leaves Metadata nil/omitted.
+		if sig := asset.GetUpdaterSignature(); sig != "" {
+			ra.Metadata = map[string]string{updaterSignatureMetadataKey: sig}
+		}
+		assets[platform] = ra
 	}
 
 	return assets
