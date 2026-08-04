@@ -748,10 +748,11 @@ type Asset_builder struct {
 	// For your customer flow (verify one OS artifact at a time), this is the recommended place to link
 	// per-artifact provenance and/or SBOM attestations stored in S3.
 	Attestations []*AttestationDescriptor
-	// updater_signature is the base64-encoded minisign signature for the Tauri
-	// in-app auto-update bundle. Only set on the macOS updater asset; empty for
-	// all other assets. The value is forwarded to the connector registry as
-	// per-asset metadata under the well-known key "updater.signature".
+	// updater_signature is the base64-encoded minisign signature for a Tauri
+	// in-app auto-update bundle. Only set on updater-bundle assets
+	// ({platform}-updater); empty for all other assets. The value is forwarded to
+	// the connector registry as per-asset metadata under the well-known key
+	// "updater.signature".
 	// JSON key: "updaterSignature".
 	UpdaterSignature *string
 }

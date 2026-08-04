@@ -58,8 +58,8 @@ type ReleaseAsset struct {
 }
 
 // updaterSignatureMetadataKey is the well-known registry metadata key under
-// which the macOS Tauri auto-update bundle's base64 minisign signature is
-// stored (registry.v1.Asset.metadata["updater.signature"]).
+// which a Tauri auto-update bundle's base64 minisign signature is stored
+// (registry.v1.Asset.metadata["updater.signature"]).
 const updaterSignatureMetadataKey = "updater.signature"
 
 // ReleaseImage is the transformed image for the registry API.
