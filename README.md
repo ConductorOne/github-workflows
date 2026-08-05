@@ -21,9 +21,33 @@ Prompt layers are additive:
    `mixins/connector.md`; `review_prompt: general` adds no built-in mixin.
 3. A repo-local `.claude/skills/ci-review.md` can add project-specific rules on top
    of the selected profile.
+4. For the `connector` profile only, layer review skills from the
+   `agentic-connector-development` plugin add depth on top of the mixin checklists.
 
 Keep broadly shared connector criteria in the connector mixin. Use repo-local
 `ci-review.md` only for rules that are specific to one repo or a small set of repos.
+
+### Connector Layer Review Skills
+
+Connector reviews load the `agentic-connector-development` plugin from the private
+`ConductorOne/claude-marketplace` repo and invoke its layer review skills
+(`review-config-layer`, `review-client-layer`, `review-connector-layer`,
+`review-actions-layer`) on the paths a PR actually changed. The skills run under the same
+read-only contract as the rest of the review: no file edits, no build or test commands, no
+network fetches, and no posting. Their output is analysis the reviewer must validate against
+the code before it becomes a comment.
+
+The runner's automatic `GITHUB_TOKEN` is scoped to the repository running the workflow, so
+it cannot read `claude-marketplace`. Loading the skills requires a `CLAUDE_MARKETPLACE_TOKEN`
+secret — a fine-grained PAT or GitHub App token with `contents: read` on
+`ConductorOne/claude-marketplace` and nothing else. Configure it as an organization secret so
+connector repos inherit it.
+
+Skill loading degrades rather than failing: if the secret is absent or the marketplace
+checkout does not land, the step logs a warning and the review continues with the base prompt
+and mixins. Every review summary reports which happened on its `**Skills:**` line, so a
+missing secret is visible on the PR rather than silent. The `general` profile never loads
+skills and needs no token.
 
 ### Custom Review Criteria
 

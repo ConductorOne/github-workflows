@@ -18,6 +18,12 @@ inputs:
     description: "Review prompt profile to use: connector or general"
     required: false
     default: connector
+  marketplace_token:
+    description: >
+      Token with contents:read on ConductorOne/claude-marketplace, used to load the
+      connector layer review skills. Only used by the connector profile. When omitted,
+      the review still runs without those skills.
+    required: false
 
 runs:
   using: composite
@@ -32,10 +38,12 @@ runs:
         ""|"connector")
           echo "built_in_mixins=connector" >> "${GITHUB_OUTPUT}"
           echo "summary_heading=### Connector PR Review:" >> "${GITHUB_OUTPUT}"
+          echo "skills_requested=true" >> "${GITHUB_OUTPUT}"
           ;;
         "general")
           echo "built_in_mixins=" >> "${GITHUB_OUTPUT}"
           echo "summary_heading=### General PR Review:" >> "${GITHUB_OUTPUT}"
+          echo "skills_requested=false" >> "${GITHUB_OUTPUT}"
           ;;
         *)
           echo "::error::review_prompt must be 'connector' or 'general'"
@@ -62,11 +70,74 @@ runs:
       GH_TOKEN: ${{ inputs.github_token }}
       REVIEW_CRITERIA_PATH: .claude/skills/ci-review.md
     run: python3 ${{ github.action_path }}/scripts/load-review-criteria.py
+  - name: Decide review skills loading
+    id: skills-plan
+    shell: bash
+    env:
+      SKILLS_REQUESTED: ${{ steps.review-config.outputs.skills_requested }}
+      MARKETPLACE_TOKEN_PRESENT: ${{ inputs.marketplace_token != '' }}
+    run: |
+      if [ "${SKILLS_REQUESTED}" != "true" ]; then
+        echo "checkout=false" >> "${GITHUB_OUTPUT}"
+        echo "reason=not requested by this review profile" >> "${GITHUB_OUTPUT}"
+        exit 0
+      fi
+      if [ "${MARKETPLACE_TOKEN_PRESENT}" != "true" ]; then
+        echo "::warning::marketplace_token was not supplied; connector layer review skills will not be loaded."
+        echo "checkout=false" >> "${GITHUB_OUTPUT}"
+        echo "reason=marketplace_token was not supplied to the pr-review action" >> "${GITHUB_OUTPUT}"
+        exit 0
+      fi
+      echo "checkout=true" >> "${GITHUB_OUTPUT}"
+      echo "reason=" >> "${GITHUB_OUTPUT}"
+  - name: Checkout review skills marketplace
+    if: steps.skills-plan.outputs.checkout == 'true'
+    shell: bash
+    env:
+      MARKETPLACE_TOKEN: ${{ inputs.marketplace_token }}
+      MARKETPLACE_PATH: ${{ github.workspace }}/_marketplace
+    run: |
+      # Cloned rather than checked out with actions/checkout because composite action steps
+      # do not support continue-on-error, and a missing or expired token must degrade the
+      # review to no-skills instead of failing it.
+      rm -rf "${MARKETPLACE_PATH}"
+      if git clone --depth 1 --quiet \
+        "https://x-access-token:${MARKETPLACE_TOKEN}@github.com/ConductorOne/claude-marketplace.git" \
+        "${MARKETPLACE_PATH}"; then
+        # The clone URL embeds the token in .git/config, and the reviewer has Read and Grep
+        # over the workspace. Only the plugin files are needed, so drop the git metadata.
+        rm -rf "${MARKETPLACE_PATH}/.git"
+      else
+        echo "::warning::Could not clone ConductorOne/claude-marketplace; review skills will not be loaded."
+        rm -rf "${MARKETPLACE_PATH}"
+      fi
+  - name: Resolve review skills availability
+    id: skills
+    shell: bash
+    env:
+      SKILLS_CHECKOUT: ${{ steps.skills-plan.outputs.checkout }}
+      SKILLS_REASON: ${{ steps.skills-plan.outputs.reason }}
+      MARKETPLACE_PATH: ${{ github.workspace }}/_marketplace
+    run: |
+      if [ "${SKILLS_CHECKOUT}" != "true" ]; then
+        echo "status=none loaded (${SKILLS_REASON})" >> "${GITHUB_OUTPUT}"
+        exit 0
+      fi
+      if [ ! -f "${MARKETPLACE_PATH}/.claude-plugin/marketplace.json" ]; then
+        echo "::warning::claude-marketplace checkout is missing or incomplete; review skills will not be loaded."
+        echo "status=none loaded (marketplace checkout failed or was incomplete)" >> "${GITHUB_OUTPUT}"
+        exit 0
+      fi
+      echo "marketplace_path=${MARKETPLACE_PATH}" >> "${GITHUB_OUTPUT}"
+      echo "plugins=agentic-connector-development@c1-engineering" >> "${GITHUB_OUTPUT}"
+      echo "status=loaded (agentic-connector-development@c1-engineering)" >> "${GITHUB_OUTPUT}"
   - name: Load review prompt
     id: prompt
     shell: bash
     env:
       BUILT_IN_MIXINS: ${{ steps.review-config.outputs.built_in_mixins }}
+      SKILLS_STATUS: ${{ steps.skills.outputs.status }}
+      SKILLS_AVAILABLE: ${{ steps.skills.outputs.marketplace_path != '' }}
     run: |
       DELIM="PROMPT_EOF_$(openssl rand -hex 8)"
       PROMPT_DIR="${GITHUB_ACTION_PATH}/prompts"
@@ -80,10 +151,18 @@ runs:
             cat "${PROMPT_DIR}/mixins/${mixin}.md"
           done
         fi
+        if [ "${SKILLS_AVAILABLE}" = "true" ]; then
+          echo
+          cat "${PROMPT_DIR}/mixins/connector-skills.md"
+        fi
         if [ -f ".github/review-criteria.md" ]; then
           echo
           cat ".github/review-criteria.md"
         fi
+        echo
+        echo "## Review Skills Status"
+        echo
+        echo "Skills status: ${SKILLS_STATUS}"
         echo "${DELIM}"
       } >> "${GITHUB_ENV}"
   - name: Run Claude PR Review
@@ -94,7 +173,9 @@ runs:
       include_fix_links: true
       use_sticky_comment: true
       allowed_bots: "*"
-      claude_args: --model claude-opus-4-8 --max-turns 100 --allowedTools "Read,Glob,Grep,Skill,Task,mcp__github_inline_comment__create_inline_comment,mcp__github_comment__update_claude_comment,Bash(gh pr diff:*),Bash(gh pr view:*),Bash(gh pr review:*),Bash(gh api:*)"
+      plugin_marketplaces: ${{ steps.skills.outputs.marketplace_path }}
+      plugins: ${{ steps.skills.outputs.plugins }}
+      claude_args: --model claude-opus-4-8 --max-turns 150 --allowedTools "Read,Glob,Grep,Skill,Task,mcp__github_inline_comment__create_inline_comment,mcp__github_comment__update_claude_comment,Bash(gh pr diff:*),Bash(gh pr view:*),Bash(gh pr review:*),Bash(gh api:*)"
       prompt: ${{ env.REVIEW_PROMPT }}
   - name: Upload review context artifacts
     if: always()
