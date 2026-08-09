@@ -93,7 +93,10 @@ func main() {
 		}
 
 		// MSI uses key "windows-amd64-msi"
-		// MSI has cosign signatures and attestations; Azure Trusted Signing (Windows code signing) planned for Stage 2
+		// MSI always has cosign signatures and attestations; Windows Authenticode
+		// signing (Azure Trusted Signing) is applied in-place earlier in the
+		// pipeline when windows_authenticode_signing is enabled, so the hash here
+		// covers the Authenticode-signed bytes.
 		assets["windows-amd64-msi"] = asset
 		fmt.Fprintf(os.Stderr, "✅ Added MSI asset: windows-amd64-msi -> %s\n", filename)
 	}

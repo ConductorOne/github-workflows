@@ -52,6 +52,26 @@ on:
         type: string
         default: ""
         description: "Path to a custom WXS file in the caller repo for MSI generation (relative to repo root). If not provided, uses default template."
+      windows_authenticode_signing:
+        required: false
+        type: boolean
+        default: false
+        description: "Whether to Authenticode-sign Windows .exe and .msi artifacts with Azure Trusted Signing. When true, the AZURE_CLIENT_ID/AZURE_TENANT_ID/AZURE_SUBSCRIPTION_ID secrets and the trusted_signing_* inputs are required."
+      trusted_signing_endpoint:
+        required: false
+        type: string
+        default: ""
+        description: "Azure Trusted Signing region endpoint (e.g. https://wus2.codesigning.azure.net/). Required when windows_authenticode_signing is true."
+      trusted_signing_account_name:
+        required: false
+        type: string
+        default: ""
+        description: "Azure Trusted Signing account name. Required when windows_authenticode_signing is true."
+      trusted_signing_certificate_profile:
+        required: false
+        type: string
+        default: ""
+        description: "Azure Trusted Signing certificate profile name. Required when windows_authenticode_signing is true."
     secrets:
       RELENG_GITHUB_TOKEN:
         required: true
@@ -68,6 +88,15 @@ on:
       GORELEASER_PRO_KEY:
         required: false
         description: "GoReleaser Pro license key for MSI builds. Required when msi is true."
+      AZURE_CLIENT_ID:
+        required: false
+        description: "Client ID of the Azure AD app used for Trusted Signing OIDC login. Required when windows_authenticode_signing is true."
+      AZURE_TENANT_ID:
+        required: false
+        description: "Azure AD tenant ID for Trusted Signing OIDC login. Required when windows_authenticode_signing is true."
+      AZURE_SUBSCRIPTION_ID:
+        required: false
+        description: "Azure subscription ID hosting the Trusted Signing account. Required when windows_authenticode_signing is true."
 
 env:
   CDN_BASE_URL: "https://dist.conductorone.com"
@@ -163,6 +192,53 @@ jobs:
             echo "::error::GORELEASER_PRO_KEY secret is required when msi is true"
             exit 1
           fi
+
+      - name: Validate Authenticode signing configuration
+        if: inputs.windows_authenticode_signing == true
+        env:
+          HAS_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID != '' }}
+          HAS_TENANT_ID: ${{ secrets.AZURE_TENANT_ID != '' }}
+          HAS_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID != '' }}
+          TS_ENDPOINT: ${{ inputs.trusted_signing_endpoint }}
+          TS_ACCOUNT: ${{ inputs.trusted_signing_account_name }}
+          TS_PROFILE: ${{ inputs.trusted_signing_certificate_profile }}
+          MSI_ENABLED: ${{ inputs.msi }}
+        run: |
+          if [ "$MSI_ENABLED" != "true" ]; then
+            echo "::error::windows_authenticode_signing requires msi to be true (the Windows build job is gated on msi)"
+            exit 1
+          fi
+
+          missing=0
+          require_secret() {
+            if [ "$2" != "true" ]; then
+              echo "::error::$1 secret is required when windows_authenticode_signing is true"
+              missing=1
+            fi
+          }
+          require_input() {
+            if [ -z "$2" ]; then
+              echo "::error::$1 input is required when windows_authenticode_signing is true"
+              missing=1
+            fi
+          }
+
+          require_secret "AZURE_CLIENT_ID" "$HAS_CLIENT_ID"
+          require_secret "AZURE_TENANT_ID" "$HAS_TENANT_ID"
+          require_secret "AZURE_SUBSCRIPTION_ID" "$HAS_SUBSCRIPTION_ID"
+          require_input "trusted_signing_endpoint" "$TS_ENDPOINT"
+          require_input "trusted_signing_account_name" "$TS_ACCOUNT"
+          require_input "trusted_signing_certificate_profile" "$TS_PROFILE"
+
+          if [ -n "$TS_ENDPOINT" ] && [[ ! "$TS_ENDPOINT" =~ ^https://[A-Za-z0-9.-]+/?$ ]]; then
+            echo "::error::trusted_signing_endpoint must be an https URL (e.g. https://wus2.codesigning.azure.net/). Got: $TS_ENDPOINT"
+            missing=1
+          fi
+
+          if [ "$missing" -ne 0 ]; then
+            exit 1
+          fi
+          echo "✅ Authenticode signing configuration valid"
 
   determine-workflows-ref:
     needs: validate-inputs
@@ -589,14 +665,53 @@ jobs:
           WXS_PATH: ${{ steps.wxs.outputs.wxs_path }}
           WORKFLOWS_REF: ${{ needs.determine-workflows-ref.outputs.ref }}
           RELEASE_TAG: ${{ inputs.tag }}
+          AUTHENTICODE: ${{ inputs.windows_authenticode_signing }}
         run: |
           export BUILD_STARTED_ON=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+
+          # Authenticode signing is opt-in. When enabled, inject two blocks into
+          # the GoReleaser config (same envsubst block pattern used for Docker
+          # extra_files), so the template stays valid YAML when signing is off:
+          #   - WINDOWS_BUILD_SIGN_HOOK: a build post-hook that signs the raw
+          #     .exe BEFORE it is packaged into the zip and the MSI.
+          #   - WINDOWS_AUTHENTICODE_MSI_SIGN: a `signs` entry that signs the
+          #     .msi in place, ordered ahead of the cosign signature so the
+          #     Sigstore bundle covers the Authenticode-signed bytes.
+          export WINDOWS_BUILD_SIGN_HOOK=""
+          export WINDOWS_AUTHENTICODE_MSI_SIGN=""
+          if [ "${AUTHENTICODE}" = "true" ]; then
+            echo "Authenticode signing enabled: injecting signing config"
+            SIGN_SCRIPT="../_workflows/scripts/sign-windows-authenticode.ps1"
+
+            WINDOWS_BUILD_SIGN_HOOK=$(printf '\n    hooks:\n      post:\n        - cmd: pwsh -NoProfile -File %s -Path "{{ .Path }}"\n          output: true' "$SIGN_SCRIPT")
+
+            WINDOWS_AUTHENTICODE_MSI_SIGN=$(printf '\n  - id: authenticode-msi\n    cmd: pwsh\n    artifacts: installer\n    ids:\n      - windows-msi\n    signature: "{{ .Env.artifact }}.authenticode.json"\n    output: true\n    args:\n      - "-NoProfile"\n      - "-File"\n      - "%s"\n      - "-Path"\n      - "{{ .Env.artifact }}"\n      - "-EmitMarker"' "$SIGN_SCRIPT")
+          fi
 
           # Generate GoReleaser config
           envsubst < templates/.goreleaser-windows-template.yaml.tmpl | tee "_generated/.goreleaser.windows.yaml"
 
           # Generate provenance predicate
           envsubst < templates/.slsa-provenance-predicate-template.json.tmpl | tee "_generated/predicate.json"
+
+      - name: Azure login for Trusted Signing (OIDC)
+        if: inputs.windows_authenticode_signing == true
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Install Microsoft sign tool
+        if: inputs.windows_authenticode_signing == true
+        shell: pwsh
+        run: |
+          # The `sign` tool currently ships pre-release only. Pin a specific
+          # version here once validated against the provisioned Trusted Signing
+          # account for reproducible, supply-chain-stable signing.
+          dotnet tool install --global sign --prerelease
+          # Surface the global tools directory for subsequent steps / hooks.
+          "$env:USERPROFILE\.dotnet\tools" | Out-File -FilePath $env:GITHUB_PATH -Append -Encoding utf8
 
       - name: Run GoReleaser for Windows
         uses: goreleaser/goreleaser-action@v6
@@ -608,6 +723,11 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.RELENG_GITHUB_TOKEN }}
           GORELEASER_KEY: ${{ secrets.GORELEASER_PRO_KEY }}
+          # Consumed by scripts/sign-windows-authenticode.ps1 (invoked from the
+          # build post-hook and the MSI signs entry). Empty when signing is off.
+          TRUSTED_SIGNING_ENDPOINT: ${{ inputs.trusted_signing_endpoint }}
+          TRUSTED_SIGNING_ACCOUNT_NAME: ${{ inputs.trusted_signing_account_name }}
+          TRUSTED_SIGNING_CERTIFICATE_PROFILE: ${{ inputs.trusted_signing_certificate_profile }}
 
       - name: Flatten MSI directory structure
         shell: pwsh

@@ -56,6 +56,8 @@ Builds Windows zip and MSI installer:
 - MSI built using WiX Toolset with GoReleaser Pro
 - Deterministic UpgradeCode via UUID v5 from repository name
 - Supports custom WXS templates via `msi_wxs_path` input
+- Optionally Authenticode-signs the `.exe` and `.msi` with Azure Trusted Signing
+  (opt-in via `windows_authenticode_signing`; see Security Properties)
 - Generates SBOMs and SLSA v1 provenance attestations
 - Uploads all artifacts to S3 with no-overwrite writes
 
@@ -167,7 +169,55 @@ Both Windows zip and MSI have:
 - SLSA provenance attestations
 - SBOM attestations
 
-**Note:** Windows code signing via Azure Trusted Signing is planned for Stage 2.
+### Windows Authenticode Signing (Azure Trusted Signing)
+
+Sigstore signatures prove supply-chain provenance but are not recognized by
+Windows SmartScreen. To remove SmartScreen warnings, the workflow can also
+Authenticode-sign Windows artifacts with **Azure Trusted Signing**. This is
+**opt-in** via the `windows_authenticode_signing` input (default `false`), so
+releases continue to work unchanged until the Azure account is provisioned.
+
+When enabled, the `goreleaser-windows` job:
+
+1. Logs in to Azure via GitHub Actions OIDC (`azure/login`) — no long-lived
+   certificate material is stored in secrets.
+2. Installs the Microsoft [`sign`](https://github.com/dotnet/sign) CLI.
+3. Signs the raw `.exe` in a GoReleaser **build post-hook**, before it is
+   packaged — so the binary inside both the `.zip` and the `.msi` is signed.
+4. Signs the `.msi` in place via a GoReleaser `signs` entry that is ordered
+   **ahead of** the cosign signature, so the Sigstore `.sig`/`.cert` and all
+   downstream hashes/attestations cover the Authenticode-signed bytes.
+
+All signing is delegated to `scripts/sign-windows-authenticode.ps1`, which calls
+`sign code trusted-signing` and then verifies the result with
+`Get-AuthenticodeSignature`.
+
+Because Azure Trusted Signing issues short-lived certificates chained to a
+Microsoft-managed root, SmartScreen reputation is immediate — unlike standard OV
+certificates, which must accrue reputation through download volume.
+
+**Required configuration when `windows_authenticode_signing: true`:**
+
+| Kind | Name | Description |
+|-|-|-|
+| input | `trusted_signing_endpoint` | Region endpoint, e.g. `https://wus2.codesigning.azure.net/` |
+| input | `trusted_signing_account_name` | Trusted Signing account name |
+| input | `trusted_signing_certificate_profile` | Certificate profile name |
+| secret | `AZURE_CLIENT_ID` | App registration (federated credential) client ID |
+| secret | `AZURE_TENANT_ID` | Azure AD tenant ID |
+| secret | `AZURE_SUBSCRIPTION_ID` | Subscription hosting the Trusted Signing account |
+
+The federated credential on the Azure AD app must trust the connector
+repository's GitHub OIDC subject, and the identity must hold the **Trusted
+Signing Certificate Profile Signer** role on the account.
+
+**Verification** (on a Windows machine):
+
+```powershell
+Get-AuthenticodeSignature .\baton-foo_v1.0.0_windows_amd64.msi | Format-List
+# Status should be 'Valid'; SignerCertificate should chain to the Microsoft root.
+signtool verify /pa /v .\baton-foo_v1.0.0_windows_amd64.msi
+```
 
 ### Verification
 
@@ -335,19 +385,23 @@ Test the MSI installer on an actual Windows machine:
 
 ## Future Work
 
-### Stage 2: Windows Code Signing
+### Windows Code Signing (implemented, opt-in)
 
-Currently MSI installers have Sigstore signatures (cosign) but not Windows Authenticode signatures. Stage 2 will add:
+Windows Authenticode signing via **Azure Trusted Signing** is implemented and
+gated behind the `windows_authenticode_signing` input (see
+[Windows Authenticode Signing](#windows-authenticode-signing-azure-trusted-signing)).
+It remains off by default pending Azure Trusted Signing account provisioning
+(tracked in CE-178). To roll it out:
 
-- **Azure Trusted Signing** integration for Authenticode signatures
-- MSI files will be signed with Microsoft-trusted certificate
-- Windows SmartScreen warnings will be eliminated
-- Users can verify publisher identity in Windows UAC prompts
-
-This requires:
-- Azure Trusted Signing account setup
-- GitHub Actions OIDC integration with Azure
-- Workflow updates to sign MSI after build
+1. Provision an Azure Trusted Signing account and certificate profile.
+2. Create an Azure AD app with a federated credential trusting the connector
+   repos' GitHub OIDC subjects, and grant it the **Trusted Signing Certificate
+   Profile Signer** role.
+3. Add the `AZURE_CLIENT_ID` / `AZURE_TENANT_ID` / `AZURE_SUBSCRIPTION_ID`
+   secrets and set `windows_authenticode_signing: true` plus the
+   `trusted_signing_*` inputs in each connector's release workflow.
+4. Validate on a test connector per [Testing Changes](#testing-changes) and
+   confirm `Get-AuthenticodeSignature` reports `Valid`.
 
 ### Other Potential Improvements
 
