@@ -52,6 +52,11 @@ on:
         type: string
         default: ""
         description: "Path to a custom WXS file in the caller repo for MSI generation (relative to repo root). If not provided, uses default template."
+      brew:
+        required: false
+        type: boolean
+        default: true
+        description: "Whether to publish a Homebrew formula to the public conductorone/homebrew-baton tap."
     secrets:
       RELENG_GITHUB_TOKEN:
         required: true
@@ -260,6 +265,7 @@ jobs:
         working-directory: _workflows
         env:
           REPO_NAME: ${{ github.event.repository.name }}
+          BREW_SKIP_UPLOAD: ${{ inputs.brew != true }}
           # For provenance predicate template
           WORKFLOWS_REF: ${{ needs.determine-workflows-ref.outputs.ref }}
           RELEASE_TAG: ${{ inputs.tag }}
