@@ -82,6 +82,7 @@ The release workflow accepts the following input parameters:
 | `docker_extra_files` | No | `""` | Comma-separated list of extra files/dirs to include in Docker build context |
 | `msi` | No | `true` | Whether to build MSI Windows installers |
 | `msi_wxs_path` | No | `""` | Path to custom WXS template for MSI installer (uses default if not set) |
+| `brew` | No | `true` | Whether to publish a Homebrew formula to the public `conductorone/homebrew-baton` tap |
 
 2. Ensure your repository has the following secrets configured:
 

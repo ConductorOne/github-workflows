@@ -92,6 +92,7 @@ brews:
       owner: conductorone
       name: homebrew-baton
     directory: Formula
+    skip_upload: "${BREW_SKIP_UPLOAD}"
     homepage: https://conductorone.com
     test: |
       system "#{bin}/${REPO_NAME} -v"
