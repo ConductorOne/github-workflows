@@ -256,6 +256,8 @@ You can then use the baton command in your workflow.
 
 The sync-test action tests syncing, granting, and revoking for a baton connector.
 
+Before the grant/revoke cycle it also syncs once with deliberately invalid credentials and asserts the connector exits with gRPC `Unauthenticated` (16) or `PermissionDenied` (7). That mapping requires `exit.LogExit` from baton-sdk v0.25.0+; connectors that still `os.Exit(1)` skip this check. Dummy values default to `invalid` for credential-like `BATON_*` env vars (tokens, passwords, secrets, keys). Override with `bad-credentials` when the value must parse as JWT, PEM, JSON, or similar before the connector will attempt authentication.
+
 ```yaml
 - name: Test Connector Sync
   uses: ConductorOne/github-workflows/actions/sync-test@v4
@@ -265,6 +267,9 @@ The sync-test action tests syncing, granting, and revoking for a baton connector
     baton-principal: "user123"
     baton-principal-type: "user"
     sleep: 2 # optional, wait 2 seconds after each write operation
+    # optional, only needed when dummy credentials must be well-formed:
+    # bad-credentials: |
+    #   BATON_PRIVATE_KEY=-----BEGIN PRIVATE KEY----- invalid -----END PRIVATE KEY-----
 ```
 
 ### Account Provisioning Test
