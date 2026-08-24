@@ -29,12 +29,32 @@ inputs:
       Example:
         required-secrets: BATON_NETLIFY_ACCESS_TOKEN
     required: false
+  bad-credentials:
+    description: |
+      Env-file of invalid credentials for the unauthenticated sync check.
+      Each line is NAME=value. When omitted, credential-like BATON_* env vars
+      (and names listed in required-secrets) are set to "invalid". Override
+      when dummy credentials must be well-formed (JWT, PEM, JSON key, etc.).
+
+      Example:
+        bad-credentials: |
+          BATON_TOKEN=invalid
+          BATON_PRIVATE_KEY=-----BEGIN PRIVATE KEY----- invalid -----END PRIVATE KEY-----
+    required: false
 
 runs:
   using: "composite"
   steps:
     - name: Download Baton
       uses: ConductorOne/github-workflows/actions/get-baton@v4
+
+    - name: Auth Error
+      env:
+        BATON_CONNECTOR: ${{ inputs.connector }}
+        REQUIRED_SECRETS: ${{ inputs.required-secrets }}
+        BAD_CREDENTIALS: ${{ inputs.bad-credentials }}
+      run: ${{ github.action_path }}/auth-error.sh
+      shell: bash
 
     - name: Grant Revoke
       env:
