@@ -425,6 +425,7 @@ jobs:
           args: release --clean --config ../_workflows/_generated/.goreleaser.binaries.yaml
         env:
           GITHUB_TOKEN: ${{ secrets.RELENG_GITHUB_TOKEN }}
+          GORELEASER_CURRENT_TAG: ${{ inputs.tag }}
           AC_PASSWORD: ${{ secrets.AC_PASSWORD }}
           AC_PROVIDER: ${{ secrets.AC_PROVIDER }}
 
@@ -751,6 +752,7 @@ jobs:
           args: release --clean --skip=publish --config ../_workflows/_generated/.goreleaser.windows.yaml
         env:
           GITHUB_TOKEN: ${{ secrets.RELENG_GITHUB_TOKEN }}
+          GORELEASER_CURRENT_TAG: ${{ inputs.tag }}
           GORELEASER_KEY: ${{ secrets.GORELEASER_PRO_KEY }}
 
       - name: Flatten MSI directory structure
@@ -1077,6 +1079,7 @@ jobs:
           args: release --clean --config ../_workflows/_generated/.goreleaser.docker.yaml
         env:
           GITHUB_TOKEN: ${{ secrets.RELENG_GITHUB_TOKEN }}
+          GORELEASER_CURRENT_TAG: ${{ inputs.tag }}
           COSIGN_EXPERIMENTAL: "1"
 
       - name: Set up Go for Public ECR helper
@@ -1130,6 +1133,7 @@ jobs:
           args: release --clean --config ../_workflows/_generated/.goreleaser.lambda.yaml
         env:
           GITHUB_TOKEN: ${{ secrets.RELENG_GITHUB_TOKEN }}
+          GORELEASER_CURRENT_TAG: ${{ inputs.tag }}
 
       - name: Set up Go for workflows
         if: inputs.docker == true || inputs.lambda == true
