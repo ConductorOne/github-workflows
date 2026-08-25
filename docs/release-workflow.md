@@ -34,6 +34,15 @@ Validates workflow inputs before proceeding:
 
 Resolves the exact SHA of the shared workflow, then uses the pinned workflow source to normalize `go_main_package` and `brew_tap`. An omitted main package becomes `./cmd/<repository-name>`; a root package uses `./`. The workflow rejects non-relative package paths and tap values containing a path separator. The pinned reference is embedded in all provenance attestations, ensuring verifiability.
 
+### release-preflight
+
+Runs opted-in source integrity checks against the exact tagged caller source before any build job:
+
+- `go_source_hygiene` runs `go generate ./...` and `go mod tidy`, then rejects a changed tree.
+- `go_vulnerability_scan` runs `govulncheck` for Linux, macOS, and Windows.
+
+`verify_module_version` checks a generated binary after GoReleaser and before provenance or artifact upload. It requires the embedded Go module version to equal the release tag.
+
 ### goreleaser-binaries (macOS)
 
 Builds and signs binary archives for macOS and Linux:

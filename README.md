@@ -78,6 +78,9 @@ The release workflow accepts the following input parameters:
 | `release_storage_name` | No | `""` | Optional S3 release path segment matching `^[a-z][a-z0-9-]{0,99}$`; defaults to the repository name |
 | `go_main_package` | No | `""` | Relative Go main package. Defaults to `./cmd/<repository-name>`; use `./` for a root command package. |
 | `brew_tap` | No | `homebrew-baton` | ConductorOne Homebrew tap repository name. Must not contain a path separator. |
+| `go_source_hygiene` | No | `false` | Run `go generate ./...` and `go mod tidy`; fail if either changes the tagged source tree. |
+| `go_vulnerability_scan` | No | `false` | Run `govulncheck` for Linux, macOS, and Windows before release. |
+| `verify_module_version` | No | `false` | Require a generated binary to embed the release tag as its Go module version. |
 | `lambda` | No | `true` | Whether to release with Lambda image support |
 | `docker` | No | `true` | Whether to release with Docker image support |
 | `dockerfile_template` | No | `""` | Path to a custom Dockerfile in your repo (only valid when `lambda: false`) |

@@ -32,6 +32,21 @@ on:
         type: string
         default: "homebrew-baton"
         description: "ConductorOne Homebrew tap repository name."
+      go_source_hygiene:
+        required: false
+        type: boolean
+        default: false
+        description: "Run go generate and go mod tidy, then require a clean source tree."
+      go_vulnerability_scan:
+        required: false
+        type: boolean
+        default: false
+        description: "Run govulncheck for Linux, macOS, and Windows before release."
+      verify_module_version:
+        required: false
+        type: boolean
+        default: false
+        description: "Require generated binaries to embed the release tag as their module version."
       lambda:
         required: false
         type: boolean
@@ -221,8 +236,73 @@ jobs:
             "$GO_MAIN_PACKAGE_INPUT" \
             "$BREW_TAP_INPUT" >> "$GITHUB_OUTPUT"
 
-  goreleaser-binaries:
+  release-preflight:
     needs: determine-workflows-ref
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout caller repo
+        if: inputs.go_source_hygiene == true || inputs.go_vulnerability_scan == true
+        uses: actions/checkout@v5
+        with:
+          path: _caller
+          repository: ${{ github.event.repository.full_name }}
+          ref: refs/tags/${{ inputs.tag }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Verify caller checkout matches release tag
+        if: inputs.go_source_hygiene == true || inputs.go_vulnerability_scan == true
+        working-directory: _caller
+        shell: bash
+        env:
+          RELEASE_TAG: ${{ inputs.tag }}
+        run: |
+          set -euo pipefail
+          tag_commit="$(git rev-list -n 1 "refs/tags/$RELEASE_TAG")"
+          head_commit="$(git rev-parse HEAD)"
+          if [ "$head_commit" != "$tag_commit" ]; then
+            echo "::error::Checked out $head_commit but refs/tags/$RELEASE_TAG resolves to $tag_commit"
+            exit 1
+          fi
+
+      - name: Set up Go for caller
+        if: inputs.go_source_hygiene == true || inputs.go_vulnerability_scan == true
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: "_caller/go.mod"
+          cache: false
+
+      - name: Verify generated source and module hygiene
+        if: inputs.go_source_hygiene == true
+        working-directory: _caller
+        shell: bash
+        run: |
+          set -euo pipefail
+          go generate ./...
+          go mod tidy
+          if [ -n "$(git status --porcelain)" ]; then
+            echo "::error::go generate or go mod tidy modified the release source tree"
+            git status --porcelain
+            exit 1
+          fi
+
+      - name: Check for known vulnerabilities
+        if: inputs.go_vulnerability_scan == true
+        working-directory: _caller
+        shell: bash
+        env:
+          GOTOOLCHAIN: auto
+        run: |
+          set -euo pipefail
+          go install golang.org/x/vuln/cmd/govulncheck@v1.7.0
+          for goos in linux darwin windows; do
+            GOOS="$goos" govulncheck ./...
+          done
+
+  goreleaser-binaries:
+    needs: [determine-workflows-ref, release-preflight]
     runs-on: macos-latest
     permissions:
       contents: read
@@ -348,6 +428,25 @@ jobs:
           AC_PASSWORD: ${{ secrets.AC_PASSWORD }}
           AC_PROVIDER: ${{ secrets.AC_PROVIDER }}
 
+      - name: Verify binary module version
+        if: inputs.verify_module_version == true
+        working-directory: _caller
+        shell: bash
+        env:
+          RELEASE_TAG: ${{ inputs.tag }}
+          REPOSITORY_NAME: ${{ github.event.repository.name }}
+        run: |
+          set -euo pipefail
+          binary="$(find dist -type f -name "$REPOSITORY_NAME" -print -quit)"
+          if [ -z "$binary" ]; then
+            echo "::error::No generated $REPOSITORY_NAME binary found for module version verification"
+            exit 1
+          fi
+          module_version="$(go version -m "$binary" | awk '$1 == "mod" { print $3; exit }')"
+          if [ "$module_version" != "$RELEASE_TAG" ]; then
+            echo "::error::Generated binary module version is '$module_version', expected '$RELEASE_TAG'"
+            exit 1
+          fi
       - name: Generate SLSA provenance for archives
         working-directory: _workflows
         env:
@@ -519,7 +618,7 @@ jobs:
 
   goreleaser-windows:
     if: inputs.msi == true
-    needs: determine-workflows-ref
+    needs: [determine-workflows-ref, release-preflight]
     runs-on: windows-latest
     permissions:
       contents: read
@@ -804,7 +903,7 @@ jobs:
 
   goreleaser-docker:
     if: inputs.docker == true || inputs.lambda == true
-    needs: determine-workflows-ref
+    needs: [determine-workflows-ref, release-preflight]
     permissions:
       id-token: write
       contents: read
