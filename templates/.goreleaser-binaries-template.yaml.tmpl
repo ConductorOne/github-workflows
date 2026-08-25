@@ -6,7 +6,7 @@ builds:
     env:
       - CGO_ENABLED=0
     id: linux
-    main: ./cmd/${REPO_NAME}
+    main: "${GO_MAIN_PACKAGE}"
     goos:
       - linux
     goarch:
@@ -17,7 +17,7 @@ builds:
     env:
       - CGO_ENABLED=0
     id: macos-amd64
-    main: ./cmd/${REPO_NAME}
+    main: "${GO_MAIN_PACKAGE}"
     goos:
       - darwin
     goarch:
@@ -29,7 +29,7 @@ builds:
     env:
       - CGO_ENABLED=0
     id: macos-arm64
-    main: ./cmd/${REPO_NAME}
+    main: "${GO_MAIN_PACKAGE}"
     goos:
       - darwin
     goarch:
@@ -90,7 +90,7 @@ signs:
 brews:
   - repository:
       owner: conductorone
-      name: homebrew-baton
+      name: "${BREW_TAP}"
     directory: Formula
     skip_upload: "${BREW_SKIP_UPLOAD}"
     homepage: https://conductorone.com
