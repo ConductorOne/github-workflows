@@ -32,7 +32,7 @@ Validates workflow inputs before proceeding:
 
 ### determine-workflows-ref
 
-Resolves the exact SHA of the shared workflow being used. This pinned reference is embedded in all provenance attestations, ensuring verifiability.
+Resolves the exact SHA of the shared workflow, then uses the pinned workflow source to normalize `go_main_package` and `brew_tap`. An omitted main package becomes `./cmd/<repository-name>`; a root package uses `./`. The workflow rejects non-relative package paths and tap values containing a path separator. The pinned reference is embedded in all provenance attestations, ensuring verifiability.
 
 ### goreleaser-binaries (macOS)
 

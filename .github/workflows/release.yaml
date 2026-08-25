@@ -22,6 +22,16 @@ on:
         type: string
         default: ""
         description: "Optional release storage path segment. Defaults to the repository name."
+      go_main_package:
+        required: false
+        type: string
+        default: ""
+        description: "Optional relative Go main package. Defaults to ./cmd/<repository-name>."
+      brew_tap:
+        required: false
+        type: string
+        default: "homebrew-baton"
+        description: "ConductorOne Homebrew tap repository name."
       lambda:
         required: false
         type: boolean
@@ -88,6 +98,7 @@ concurrency:
 jobs:
   validate-inputs:
     runs-on: ubuntu-latest
+
     steps:
       - name: Validate tag format
         env:
@@ -174,8 +185,11 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       actions: read
+      contents: read
     outputs:
       ref: ${{ steps.workflow-version.outputs.sha }}
+      go_main_package: ${{ steps.release-options.outputs.go_main_package }}
+      brew_tap: ${{ steps.release-options.outputs.brew_tap }}
     steps:
       - name: Determine workflows ref
         id: workflow-version
@@ -184,6 +198,28 @@ jobs:
           repository-name: "ConductorOne/github-workflows"
           file-name: "release.yaml"
           github-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Checkout pinned connector workflows
+        uses: actions/checkout@v5
+        with:
+          path: _workflows
+          repository: ConductorOne/github-workflows
+          ref: ${{ steps.workflow-version.outputs.sha }}
+          persist-credentials: false
+
+      - name: Normalize release options
+        id: release-options
+        working-directory: _workflows
+        shell: bash
+        env:
+          GO_MAIN_PACKAGE_INPUT: ${{ inputs.go_main_package }}
+          BREW_TAP_INPUT: ${{ inputs.brew_tap }}
+          REPOSITORY_NAME: ${{ github.event.repository.name }}
+        run: |
+          ./scripts/normalize-release-options.sh \
+            "$REPOSITORY_NAME" \
+            "$GO_MAIN_PACKAGE_INPUT" \
+            "$BREW_TAP_INPUT" >> "$GITHUB_OUTPUT"
 
   goreleaser-binaries:
     needs: determine-workflows-ref
@@ -265,6 +301,8 @@ jobs:
         working-directory: _workflows
         env:
           REPO_NAME: ${{ github.event.repository.name }}
+          GO_MAIN_PACKAGE: ${{ needs.determine-workflows-ref.outputs.go_main_package }}
+          BREW_TAP: ${{ needs.determine-workflows-ref.outputs.brew_tap }}
           BREW_SKIP_UPLOAD: ${{ inputs.brew != true }}
           # For provenance predicate template
           WORKFLOWS_REF: ${{ needs.determine-workflows-ref.outputs.ref }}
@@ -592,6 +630,7 @@ jobs:
         shell: bash
         env:
           REPO_NAME: ${{ github.event.repository.name }}
+          GO_MAIN_PACKAGE: ${{ needs.determine-workflows-ref.outputs.go_main_package }}
           WXS_PATH: ${{ steps.wxs.outputs.wxs_path }}
           WORKFLOWS_REF: ${{ needs.determine-workflows-ref.outputs.ref }}
           RELEASE_TAG: ${{ inputs.tag }}
@@ -840,6 +879,7 @@ jobs:
         working-directory: _workflows
         env:
           REPO_NAME: ${{ github.event.repository.name }}
+          GO_MAIN_PACKAGE: ${{ needs.determine-workflows-ref.outputs.go_main_package }}
           DOCKERFILE_PATH: ../_workflows/_generated/Dockerfile
           DIST_DIR: dist/oci
           PUBLIC_ECR_PUBLISH_TAG: release-candidate-${{ github.run_id }}-${{ github.run_attempt }}
@@ -898,6 +938,7 @@ jobs:
         working-directory: _workflows
         env:
           REPO_NAME: ${{ github.event.repository.name }}
+          GO_MAIN_PACKAGE: ${{ needs.determine-workflows-ref.outputs.go_main_package }}
           DOCKERFILE_LAMBDA_PATH: ../_workflows/_generated/Dockerfile.lambda
           DIST_DIR: dist/lambda
         run: |
