@@ -136,6 +136,8 @@ checked-out commit matches the tag target before building artifacts or recording
 registry metadata. This prevents a release run from publishing artifacts for one
 commit while labeling them as a different tag.
 
+Every GoReleaser invocation receives `GORELEASER_CURRENT_TAG` from the workflow input. This pins archive names, release metadata, and image digest files to the requested tag when multiple tags identify the same commit.
+
 ### Keyless Signing
 
 All signatures use Sigstore's keyless signing:
