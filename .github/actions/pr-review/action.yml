@@ -18,6 +18,13 @@ inputs:
     description: "Review prompt profile to use: connector or general"
     required: false
     default: connector
+  doc_fetch_domains:
+    description: >-
+      Comma-separated bare hostnames the reviewer may fetch vendor API documentation from,
+      e.g. "developer.okta.com,docs.okta.com". Empty (the default) means WebFetch is not
+      granted at all. Only honored for the connector profile.
+    required: false
+    default: ""
 
 runs:
   using: composite
@@ -27,25 +34,54 @@ runs:
     shell: bash
     env:
       REVIEW_PROMPT: ${{ inputs.review_prompt }}
+      DOC_FETCH_DOMAINS: ${{ inputs.doc_fetch_domains }}
     run: |
       case "${REVIEW_PROMPT}" in
         ""|"connector")
           echo "built_in_mixins=connector" >> "${GITHUB_OUTPUT}"
           echo "summary_heading=### Connector PR Review:" >> "${GITHUB_OUTPUT}"
-          # WebFetch is granted only here: the connector mixin's Endpoint Verification
-          # section reads vendor API docs for changed endpoints. No other profile needs it.
-          echo "extra_tools=,WebFetch" >> "${GITHUB_OUTPUT}"
+          ALLOW_DOC_FETCH=1
           ;;
         "general")
           echo "built_in_mixins=" >> "${GITHUB_OUTPUT}"
           echo "summary_heading=### General PR Review:" >> "${GITHUB_OUTPUT}"
-          echo "extra_tools=" >> "${GITHUB_OUTPUT}"
+          ALLOW_DOC_FETCH=0
           ;;
         *)
           echo "::error::review_prompt must be 'connector' or 'general'"
           exit 1
           ;;
       esac
+
+      # WebFetch is granted only to the connector profile, and only for the domains the
+      # calling repo explicitly allowlists. Empty doc_fetch_domains means no WebFetch at
+      # all: this fails closed, so a repo that has not opted in reviews exactly as before.
+      EXTRA_TOOLS=""
+      if [ "${ALLOW_DOC_FETCH}" = "1" ] && [ -n "${DOC_FETCH_DOMAINS}" ]; then
+        IFS=',' read -ra DOC_DOMAINS <<< "${DOC_FETCH_DOMAINS}"
+        for domain in "${DOC_DOMAINS[@]}"; do
+          domain="$(printf '%s' "${domain}" | tr -d '[:space:]')"
+          if [ -z "${domain}" ]; then
+            continue
+          fi
+          # Bare hostnames only. This value is interpolated into the --allowedTools string,
+          # so reject anything carrying quotes, spaces, schemes, paths, or globs.
+          if ! printf '%s' "${domain}" | grep -qE '^[A-Za-z0-9]([A-Za-z0-9.-]*[A-Za-z0-9])?$'; then
+            echo "::error::doc_fetch_domains entry is not a bare hostname: ${domain}"
+            exit 1
+          fi
+          EXTRA_TOOLS="${EXTRA_TOOLS},WebFetch(domain:${domain})"
+        done
+      elif [ "${ALLOW_DOC_FETCH}" != "1" ] && [ -n "${DOC_FETCH_DOMAINS}" ]; then
+        echo "::notice::doc_fetch_domains is ignored for the '${REVIEW_PROMPT}' profile."
+      fi
+      echo "extra_tools=${EXTRA_TOOLS}" >> "${GITHUB_OUTPUT}"
+
+      if [ -n "${EXTRA_TOOLS}" ]; then
+        echo "Vendor doc fetching enabled for: ${DOC_FETCH_DOMAINS}"
+      else
+        echo "Vendor doc fetching disabled: no doc_fetch_domains configured."
+      fi
   - name: Fetch PR context
     shell: bash
     env:

@@ -8,6 +8,14 @@ on:
         required: false
         default: connector
         type: string
+      doc_fetch_domains:
+        description: >-
+          Comma-separated bare hostnames the reviewer may fetch vendor API documentation
+          from, e.g. "developer.okta.com,docs.okta.com". Empty (the default) means WebFetch
+          is not granted at all.
+        required: false
+        default: ""
+        type: string
 concurrency:
   group: pr-review-${{ github.workflow_ref }}-${{ github.event.pull_request.number || github.run_id }}
   cancel-in-progress: true
@@ -48,4 +56,5 @@ jobs:
           pr_number: ${{ github.event.pull_request.number }}
           head_sha: ${{ github.event.pull_request.head.sha }}
           review_prompt: ${{ inputs.review_prompt || 'connector' }}
+          doc_fetch_domains: ${{ inputs.doc_fetch_domains || '' }}
     timeout-minutes: 30
