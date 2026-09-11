@@ -1,0 +1,60 @@
+## Linux binary template for signed artifacts, pushes to public registry (S3 bucket).
+## Split out of the binaries template so linux targets compile on an ubuntu runner in
+## parallel with the macOS (darwin) job instead of contending for its 3 vCPUs.
+## Invoked with --skip=publish: the darwin job owns the GitHub release.
+version: 2
+project_name: "${REPO_NAME}"
+builds:
+  - binary: "${REPO_NAME}"
+    env:
+      - CGO_ENABLED=0
+    id: linux
+    main: "${GO_MAIN_PACKAGE}"
+    goos:
+      - linux
+    goarch:
+      - amd64
+      - arm64
+archives:
+  - id: linux-archive
+    builds:
+      - linux
+    format: tar.gz
+    name_template: "{{ .ProjectName }}-v{{ .Version }}-{{ .Os }}-{{ .Arch }}"
+    files:
+      - none*
+release:
+  ids:
+    - linux-archive
+snapshot:
+  version_template: "{{ incpatch .Version }}-dev"
+checksum:
+  # Note: checksums are NOT uploaded here - they're merged with the darwin and Windows
+  # hashes and uploaded by the publish-release-manifest job.
+  ids:
+    - linux-archive
+sboms:
+  - artifacts: archive
+signs:
+  - id: cosign-archives
+    output: true
+    cmd: cosign
+    artifacts: archive
+    ids:
+      - linux-archive
+    certificate: "{{ .Env.artifact }}.cert"
+    args:
+      - "sign-blob"
+      - "--yes"
+      - "--output-signature={{ .Env.signature }}"
+      - "--output-certificate={{ .Env.certificate }}"
+      - "{{ .Env.artifact }}"
+    env:
+      - COSIGN_EXPERIMENTAL=1
+changelog:
+  filters:
+    exclude:
+      - "^docs:"
+      - typo
+      - lint
+      - Merge pull request

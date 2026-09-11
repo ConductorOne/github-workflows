@@ -17,6 +17,7 @@ assert_tag_pin() {
 }
 
 assert_tag_pin goreleaser-binaries "Run GoReleaser"
+assert_tag_pin goreleaser-linux "Run GoReleaser for linux"
 assert_tag_pin goreleaser-windows "Run GoReleaser for Windows"
 assert_tag_pin goreleaser-docker "Run GoReleaser for Docker OCI"
 assert_tag_pin goreleaser-docker "Run GoReleaser for Lambda"

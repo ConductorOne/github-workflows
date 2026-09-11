@@ -21,10 +21,12 @@ const (
 func main() {
 	var (
 		binariesManifest string
+		linuxManifest    string
 		imagesManifest   string
 		windowsManifest  string
 	)
 	flag.StringVar(&binariesManifest, "binaries-manifest", "", "JSON string of binaries manifest")
+	flag.StringVar(&linuxManifest, "linux-manifest", "", "JSON string of linux manifest (optional)")
 	flag.StringVar(&imagesManifest, "images-manifest", "", "JSON string of images manifest (optional)")
 	flag.StringVar(&windowsManifest, "windows-manifest", "", "JSON string of Windows assets manifest (optional)")
 	flag.Parse()
@@ -49,6 +51,46 @@ func main() {
 	if manifest.GetVersion() == "" {
 		fmt.Fprintf(os.Stderr, "merge-manifests: ::error::Binaries manifest is empty\n")
 		os.Exit(1)
+	}
+
+	// Merge linux assets if present.
+	// The linux job runs the same generate-manifest tool, so this is a full manifest rather
+	// than the bare asset map the Windows job emits. Only its assets are merged; the
+	// top-level fields (version, semver, hrefs) already come from the binaries manifest.
+	if linuxManifest != "" && linuxManifest != "{}" {
+		linuxParsed := &pb.Manifest{}
+		if err := opts.Unmarshal([]byte(linuxManifest), linuxParsed); err != nil {
+			fmt.Fprintf(os.Stderr, "merge-manifests: ::error::Invalid JSON in linux_manifest output\n")
+			fmt.Fprintf(os.Stderr, "merge-manifests: Raw content:\n%s\n", linuxManifest)
+			fmt.Fprintf(os.Stderr, "merge-manifests: Error: %v\n", err)
+			os.Exit(1)
+		}
+
+		assets := manifest.GetAssets()
+		if assets == nil {
+			assets = make(map[string]*pb.Asset)
+			manifest.SetAssets(assets)
+		}
+
+		added := 0
+		for key, asset := range linuxParsed.GetAssets() {
+			// Each build job generates a partial checksums file covering only its own
+			// archives. publish-release-manifest concatenates them and rewrites this
+			// entry, so the linux job's copy would only overwrite it with a partial hash.
+			if key == "checksums" {
+				continue
+			}
+			assets[key] = asset
+			added++
+		}
+
+		if added == 0 {
+			fmt.Fprintf(os.Stderr, "merge-manifests: ::error::linux_manifest contained no assets\n")
+			os.Exit(1)
+		}
+		fmt.Fprintf(os.Stderr, "✅ Added %d linux assets to manifest\n", added)
+	} else {
+		fmt.Fprintln(os.Stderr, "ℹ️  No linux assets to add to manifest")
 	}
 
 	// Marshal options with frontend consumption in mind. Ensures all fields are present for predictable structure.
