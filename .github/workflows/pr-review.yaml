@@ -8,14 +8,13 @@ on:
         required: false
         default: connector
         type: string
-      doc_fetch_domains:
+      doc_fetch:
         description: >-
-          Comma-separated bare hostnames the reviewer may fetch vendor API documentation
-          from, e.g. "developer.okta.com,docs.okta.com". Empty (the default) means WebFetch
-          is not granted at all.
+          Let the reviewer fetch vendor API documentation for changed endpoints.
+          Off by default, so WebFetch is not granted unless a repo opts in.
         required: false
-        default: ""
-        type: string
+        default: false
+        type: boolean
 concurrency:
   group: pr-review-${{ github.workflow_ref }}-${{ github.event.pull_request.number || github.run_id }}
   cancel-in-progress: true
@@ -56,5 +55,5 @@ jobs:
           pr_number: ${{ github.event.pull_request.number }}
           head_sha: ${{ github.event.pull_request.head.sha }}
           review_prompt: ${{ inputs.review_prompt || 'connector' }}
-          doc_fetch_domains: ${{ inputs.doc_fetch_domains || '' }}
+          doc_fetch: ${{ inputs.doc_fetch || false }}
     timeout-minutes: 30
