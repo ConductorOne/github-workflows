@@ -88,6 +88,7 @@ The release workflow accepts the following input parameters:
 | `msi` | No | `true` | Whether to build MSI Windows installers |
 | `msi_wxs_path` | No | `""` | Path to custom WXS template for MSI installer (uses default if not set) |
 | `brew` | No | `true` | Whether to publish a Homebrew formula to the selected public `conductorone` tap |
+| `macos_runner` | No | `macos-latest-xlarge` | Runner label for the macOS binaries job. Restricted to GitHub-hosted Apple Silicon labels (`macos-latest`, `macos-latest-xlarge`, `macos-14/15/26-xlarge`). |
 
 2. Ensure your repository has the following secrets configured:
 
