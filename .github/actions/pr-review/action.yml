@@ -32,10 +32,14 @@ runs:
         ""|"connector")
           echo "built_in_mixins=connector" >> "${GITHUB_OUTPUT}"
           echo "summary_heading=### Connector PR Review:" >> "${GITHUB_OUTPUT}"
+          # WebFetch is granted only here: the connector mixin's Endpoint Verification
+          # section reads vendor API docs for changed endpoints. No other profile needs it.
+          echo "extra_tools=,WebFetch" >> "${GITHUB_OUTPUT}"
           ;;
         "general")
           echo "built_in_mixins=" >> "${GITHUB_OUTPUT}"
           echo "summary_heading=### General PR Review:" >> "${GITHUB_OUTPUT}"
+          echo "extra_tools=" >> "${GITHUB_OUTPUT}"
           ;;
         *)
           echo "::error::review_prompt must be 'connector' or 'general'"
@@ -94,7 +98,7 @@ runs:
       include_fix_links: true
       use_sticky_comment: true
       allowed_bots: "*"
-      claude_args: --model claude-opus-5 --max-turns 100 --allowedTools "Read,Glob,Grep,Skill,Task,mcp__github_inline_comment__create_inline_comment,mcp__github_comment__update_claude_comment,Bash(gh pr diff:*),Bash(gh pr view:*),Bash(gh pr review:*),Bash(gh api:*),WebFetch"
+      claude_args: --model claude-opus-5 --max-turns 100 --allowedTools "Read,Glob,Grep,Skill,Task,mcp__github_inline_comment__create_inline_comment,mcp__github_comment__update_claude_comment,Bash(gh pr diff:*),Bash(gh pr view:*),Bash(gh pr review:*),Bash(gh api:*)${{ steps.review-config.outputs.extra_tools }}"
       prompt: ${{ env.REVIEW_PROMPT }}
   - name: Upload review context artifacts
     if: always()
