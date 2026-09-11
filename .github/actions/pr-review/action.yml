@@ -18,13 +18,13 @@ inputs:
     description: "Review prompt profile to use: connector or general"
     required: false
     default: connector
-  doc_fetch:
+  doc_fetch_domains:
     description: >-
-      Set to "true" to let the reviewer fetch vendor API documentation for changed endpoints.
-      Off by default, so WebFetch is not granted unless a repo opts in. Only the connector
-      prompt asks for it; the general prompt never does.
+      Comma-separated domains the reviewer may fetch vendor API documentation from,
+      e.g. "developer.okta.com,docs.okta.com". Empty (the default) means WebFetch is not
+      granted at all. Only the connector prompt asks for it.
     required: false
-    default: "false"
+    default: ""
 
 runs:
   using: composite
@@ -34,7 +34,7 @@ runs:
     shell: bash
     env:
       REVIEW_PROMPT: ${{ inputs.review_prompt }}
-      DOC_FETCH: ${{ inputs.doc_fetch }}
+      DOC_FETCH_DOMAINS: ${{ inputs.doc_fetch_domains }}
     run: |
       case "${REVIEW_PROMPT}" in
         ""|"connector")
@@ -51,15 +51,19 @@ runs:
           ;;
       esac
 
-      # Opt-in per repo. Off by default, so a repo that has not asked for doc fetching
-      # gets exactly the tool allowlist it had before.
-      if [ "${DOC_FETCH}" = "true" ]; then
-        echo "extra_tools=,WebFetch" >> "${GITHUB_OUTPUT}"
-        echo "Vendor doc fetching enabled."
+      # Opt-in per repo. Empty means no WebFetch grant at all, so a repo that has not
+      # asked for doc fetching gets exactly the tool allowlist it had before.
+      EXTRA_TOOLS=""
+      if [ -n "${DOC_FETCH_DOMAINS}" ]; then
+        IFS=',' read -ra DOC_DOMAINS <<< "${DOC_FETCH_DOMAINS}"
+        for domain in "${DOC_DOMAINS[@]}"; do
+          EXTRA_TOOLS="${EXTRA_TOOLS},WebFetch(domain:${domain})"
+        done
+        echo "Vendor doc fetching enabled for: ${DOC_FETCH_DOMAINS}"
       else
-        echo "extra_tools=" >> "${GITHUB_OUTPUT}"
         echo "Vendor doc fetching disabled."
       fi
+      echo "extra_tools=${EXTRA_TOOLS}" >> "${GITHUB_OUTPUT}"
   - name: Fetch PR context
     shell: bash
     env:
