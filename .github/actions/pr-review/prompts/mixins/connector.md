@@ -107,6 +107,19 @@ Criteria:
 - B7: New required OAuth scopes
 - B8: New endpoints added to existing sync paths can be breaking when they require new scopes or permissions
 - B9: Safe changes: display name changes, adding new resource types, adding trait options, adding pagination
+- B10: API spec drift. Trigger this rule only when the diff changes or adds an API endpoint
+  (endpoint constants, request paths, base URL, or the request/response structs bound to a call).
+  Do not raise it for unrelated changes.
+  - Endpoint changed: compare the new request and response shape against the checked-in
+    `spec/openapi.json`. If the schema differs — path or version changed, fields added,
+    removed, renamed, or retyped, ID field changed, or pagination style changed — report it as
+    a `blocking-correctness` breaking change. If `spec/openapi.json` was not updated in this
+    PR, it is now stale: report that as well, at `suggestion` severity when the schema looks
+    unchanged. In every changed-endpoint case, tell the author to regenerate
+    `spec/openapi.json` by running the `build-openapi-spec.md` skill. If no
+    `spec/openapi.json` exists, treat it as the added-endpoint case below.
+  - Endpoint added: not a breaking change. Report a `suggestion` asking the author to run the
+    `build-openapi-spec.md` skill so `spec/openapi.json` covers the new endpoint.
 
 Breaking connector changes should be gated behind opt-in config where possible, called out in
 the PR description, and paired with documentation updates.
