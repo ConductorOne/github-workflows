@@ -32,6 +32,11 @@ on:
         type: string
         default: "homebrew-baton"
         description: "ConductorOne Homebrew tap repository name."
+      macos_runner:
+        required: false
+        type: string
+        default: "macos-latest-xlarge"
+        description: "Runner label for the macOS binaries job. Must be an Apple Silicon label; Intel runners would change the Homebrew prefix and the codesigning host."
       go_source_hygiene:
         required: false
         type: boolean
@@ -185,6 +190,23 @@ jobs:
             exit 1
           fi
 
+      - name: Validate macOS runner label
+        env:
+          MACOS_RUNNER: ${{ inputs.macos_runner }}
+        run: |
+          # This job holds the Apple signing certificate and assumes the artifacts AWS role,
+          # so the runner it lands on is a trust decision, not a preference. Allow only
+          # GitHub-hosted Apple Silicon labels.
+          case "$MACOS_RUNNER" in
+            macos-latest|macos-latest-xlarge|macos-14-xlarge|macos-15-xlarge|macos-26-xlarge)
+              echo "Using macOS runner: $MACOS_RUNNER"
+              ;;
+            *)
+              echo "::error::macos_runner must be a GitHub-hosted Apple Silicon label, got: $MACOS_RUNNER"
+              exit 1
+              ;;
+          esac
+
       - name: Validate GORELEASER_PRO_KEY when msi enabled
         if: inputs.msi == true
         env:
@@ -303,7 +325,9 @@ jobs:
 
   goreleaser-binaries:
     needs: [determine-workflows-ref, release-preflight]
-    runs-on: macos-latest
+    # macos-latest has 3 vCPUs and GoReleaser builds one target per core, so the fourth
+    # target queues behind the first three. See the PR description for the measurements.
+    runs-on: ${{ inputs.macos_runner }}
     permissions:
       contents: read
       id-token: write # <-- needed for cosign keyless (OIDC)
