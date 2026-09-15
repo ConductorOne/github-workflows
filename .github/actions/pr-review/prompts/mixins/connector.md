@@ -111,13 +111,15 @@ Criteria:
   (endpoint constants, request paths, base URL, or the request/response structs bound to a call).
   Do not raise it for unrelated changes.
   - Endpoint changed: compare the new request and response shape against the checked-in
-    `api.yaml` if one is present. If the schema differs — path or version changed, fields
-    added, removed, renamed, or retyped, ID field changed, or pagination style changed — report
-    it as `blocking-correctness` breaking change, and tell the author to regenerate the spec
-    by running the `build-openapi-spec.md` skill. If no `api.yaml` is present, treat it as the
-    added-endpoint case below.
+    `spec/openapi.json`. If the schema differs — path or version changed, fields added,
+    removed, renamed, or retyped, ID field changed, or pagination style changed — report it as
+    a `blocking-correctness` breaking change. If `spec/openapi.json` was not updated in this
+    PR, it is now stale: report that as well, at `suggestion` severity when the schema looks
+    unchanged. In every changed-endpoint case, tell the author to regenerate
+    `spec/openapi.json` by running the `build-openapi-spec.md` skill. If no
+    `spec/openapi.json` exists, treat it as the added-endpoint case below.
   - Endpoint added: not a breaking change. Report a `suggestion` asking the author to run the
-    `build-openapi-spec.md` skill so `api.yaml` covers the new endpoint.
+    `build-openapi-spec.md` skill so `spec/openapi.json` covers the new endpoint.
 
 Breaking connector changes should be gated behind opt-in config where possible, called out in
 the PR description, and paired with documentation updates.
