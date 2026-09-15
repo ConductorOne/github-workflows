@@ -8,7 +8,7 @@ The `release.yaml` workflow handles the complete release process for connector r
 
 When a tag is pushed to a connector repository, the shared release workflow:
 
-1. Builds binaries for macOS and Linux (with Apple codesigning)
+1. Builds macOS binaries (with Apple codesigning) and Linux binaries, in parallel jobs
 2. Builds Windows zip and MSI installer (with WiX Toolset)
 3. Builds multi-arch Docker images
 4. Signs all artifacts with Sigstore (keyless)
@@ -45,16 +45,38 @@ Runs opted-in source integrity checks against the exact tagged caller source bef
 
 ### goreleaser-binaries (macOS)
 
-Builds and signs binary archives for macOS and Linux:
+Builds and signs the macOS archives. It runs on a macOS runner because gon needs the
+Apple toolchain and the signing keychain; nothing else in the job requires a Mac.
 
-- Cross-compiles for darwin/linux (amd64/arm64)
-- Apple codesigning via gon (macOS only)
+- Cross-compiles for darwin/amd64 and darwin/arm64
+- Apple codesigning via gon
 - Generates SBOMs using Syft
 - Creates SLSA v1 provenance attestations
 - Signs SBOMs as attestation bundles
 - Uploads all artifacts to S3 with no-overwrite writes
+- Creates the GitHub Release for the tag and publishes the Homebrew formula
 
-**Outputs:** `*.zip` (macOS), `*.tar.gz` (Linux), `*.provenance.sigstore.json`, `*.sbom.sigstore.json`
+**Outputs:** `*.zip` (macOS), `*.provenance.sigstore.json`, `*.sbom.sigstore.json`
+
+### goreleaser-linux (Linux)
+
+Builds and signs the Linux tarballs, concurrently with the macOS and Windows jobs.
+Splitting these two targets off the macOS runner stops them from competing for its
+cores, and the same work costs less on a Linux runner.
+
+- Cross-compiles for linux/amd64 and linux/arm64
+- Generates SBOMs using Syft
+- Creates SLSA v1 provenance attestations
+- Signs SBOMs as attestation bundles
+- Uploads all artifacts to S3 with no-overwrite writes
+- Runs with publishing disabled: the GitHub Release does not exist yet, so the
+  tarballs are staged as a run artifact and attached by `publish-release-manifest`
+
+**Outputs:** `*.tar.gz` (Linux), `*.provenance.sigstore.json`, `*.sbom.sigstore.json`
+
+**Homebrew:** the tap formula is rendered by GoReleaser in the macOS job, which no
+longer has the Linux archive hashes. The formula is therefore macOS-only; Linux users
+should install from the tarballs or use the container images.
 
 ### goreleaser-windows (Windows)
 

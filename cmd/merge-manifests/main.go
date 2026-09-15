@@ -16,21 +16,34 @@ const (
 	AttestationTypeInTotoV1 = "https://in-toto.io/Statement/v1"
 	// PredicateTypeSLSAProvenanceV1 is the SLSA v1 provenance predicate type
 	PredicateTypeSLSAProvenanceV1 = "https://slsa.dev/provenance/v1"
+	// ChecksumsAssetKey is the assets map key holding the unified checksums file
+	ChecksumsAssetKey = "checksums"
 )
 
 func main() {
 	var (
 		binariesManifest string
+		linuxManifest    string
 		imagesManifest   string
 		windowsManifest  string
 	)
 	flag.StringVar(&binariesManifest, "binaries-manifest", "", "JSON string of binaries manifest")
+	flag.StringVar(&linuxManifest, "linux-manifest", "", "JSON string of Linux manifest")
 	flag.StringVar(&imagesManifest, "images-manifest", "", "JSON string of images manifest (optional)")
 	flag.StringVar(&windowsManifest, "windows-manifest", "", "JSON string of Windows assets manifest (optional)")
 	flag.Parse()
 
 	if binariesManifest == "" {
 		fmt.Fprintf(os.Stderr, "merge-manifests: error: binaries-manifest is required\n")
+		os.Exit(1)
+	}
+
+	// The Linux job always runs and publish-release-manifest requires it to have
+	// succeeded, so an empty Linux manifest means the tarballs were silently lost
+	// rather than intentionally skipped. Fail instead of publishing a manifest
+	// that omits every Linux platform.
+	if linuxManifest == "" || linuxManifest == "{}" {
+		fmt.Fprintf(os.Stderr, "merge-manifests: error: linux-manifest is required\n")
 		os.Exit(1)
 	}
 
@@ -107,6 +120,44 @@ func main() {
 		fmt.Fprintf(os.Stderr, "✅ Added %d images to manifest\n", len(images))
 	} else {
 		fmt.Fprintln(os.Stderr, "ℹ️  No images to add to manifest (docker job may have been skipped if no Dockerfile)")
+	}
+
+	// Merge Linux assets. The Linux tarballs are built in a job parallel to the
+	// macOS one, so they arrive as their own manifest rather than in the same dist
+	// directory as the darwin archives.
+	{
+		linux := &pb.Manifest{}
+		if err := opts.Unmarshal([]byte(linuxManifest), linux); err != nil {
+			fmt.Fprintf(os.Stderr, "merge-manifests: ::error::Invalid JSON in linux_manifest output\n")
+			fmt.Fprintf(os.Stderr, "merge-manifests: Raw content:\n%s\n", linuxManifest)
+			fmt.Fprintf(os.Stderr, "merge-manifests: Error: %v\n", err)
+			os.Exit(1)
+		}
+
+		assets := manifest.GetAssets()
+		if assets == nil {
+			assets = make(map[string]*pb.Asset)
+			manifest.SetAssets(assets)
+		}
+
+		added := 0
+		for key, asset := range linux.GetAssets() {
+			// The Linux job generates a partial checksums file so generate-manifest
+			// can hash each tarball, but the authoritative checksums asset is the
+			// unified one publish-release-manifest builds and rewrites afterwards.
+			if key == ChecksumsAssetKey {
+				continue
+			}
+			assets[key] = asset
+			added++
+		}
+
+		if added == 0 {
+			fmt.Fprintf(os.Stderr, "merge-manifests: ::error::Linux manifest contained no platform assets\n")
+			os.Exit(1)
+		}
+
+		fmt.Fprintf(os.Stderr, "✅ Added %d Linux assets to manifest\n", added)
 	}
 
 	// Merge Windows assets if present
