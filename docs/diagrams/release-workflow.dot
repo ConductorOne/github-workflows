@@ -17,7 +17,9 @@ digraph ReleaseWorkflow {
 
     determine_ref [label="determine-workflows-ref\n• resolve workflow SHA", fillcolor="#f9fafb"];
 
-    binaries [label="goreleaser-binaries\n• Linux + macOS archives\n• gon codesign (macOS)\n• SBOMs, provenance\n• upload to S3", fillcolor="#ecfeff"];
+    binaries [label="goreleaser-binaries\n• macOS archives\n• gon codesign\n• SBOMs, provenance\n• creates GitHub Release\n• upload to S3", fillcolor="#ecfeff"];
+
+    linux [label="goreleaser-linux\n• Linux tarballs\n• SBOMs, provenance\n• upload to S3", fillcolor="#ecfeff"];
 
     windows [label="goreleaser-windows\n• Windows zip + MSI\n• WiX Toolset\n• SBOMs, provenance\n• upload to S3", fillcolor="#ecfeff"];
 
@@ -40,12 +42,15 @@ digraph ReleaseWorkflow {
   tag -> validate;
   validate -> determine_ref;
   determine_ref -> binaries;
+  determine_ref -> linux;
   determine_ref -> windows;
   determine_ref -> docker;
   binaries -> record;
+  linux -> record;
   windows -> record;
   docker -> record;
   binaries -> s3 [label="artifacts"];
+  linux -> s3 [label="artifacts"];
   windows -> s3 [label="artifacts"];
   docker -> ecr [label="push"];
   record -> s3 [label="manifest"];

@@ -1,18 +1,10 @@
-## Binary template for signed artifacts, pushes to public registry (S3 bucket)
+## macOS template for signed artifacts, pushes to public registry (S3 bucket)
+## Runs on a macOS runner because gon needs the Apple toolchain and keychain.
+## Linux tarballs are built by the goreleaser-linux job; Windows by goreleaser-windows.
+## This config owns GitHub Release creation for the whole release.
 version: 2
 project_name: "${REPO_NAME}"
 builds:
-  - binary: "${REPO_NAME}"
-    env:
-      - CGO_ENABLED=0
-    id: linux
-    main: "${GO_MAIN_PACKAGE}"
-    goos:
-      - linux
-    goarch:
-      - amd64
-      - arm64
-  # Note: Windows builds moved to dedicated goreleaser-windows job for MSI support
   - binary: "${REPO_NAME}"
     env:
       - CGO_ENABLED=0
@@ -38,14 +30,6 @@ builds:
       post:
         - gon ../_workflows/_generated/.gon-arm64.json
 archives:
-  - id: linux-archive
-    builds:
-      - linux
-    format: tar.gz
-    name_template: "{{ .ProjectName }}-v{{ .Version }}-{{ .Os }}-{{ .Arch }}"
-    files:
-      - none*
-  # Note: Windows archive moved to dedicated goreleaser-windows job
   - id: darwin-archive
     builds:
       - macos-amd64
@@ -56,15 +40,13 @@ archives:
       - none*
 release:
   ids:
-    - linux-archive
     - darwin-archive
 snapshot:
   version_template: "{{ incpatch .Version }}-dev"
 checksum:
-  # Note: checksums are NOT uploaded here - they're merged with Windows hashes
-  # and uploaded by the record-connector-registry job
+  # Note: checksums are NOT uploaded here - they're merged with the Linux and
+  # Windows hashes and uploaded by the publish-release-manifest job.
   ids:
-    - linux-archive
     - darwin-archive
 sboms:
   - artifacts: archive
@@ -74,7 +56,6 @@ signs:
     cmd: cosign
     artifacts: archive
     ids:
-      - linux-archive
       - darwin-archive
     certificate: "{{ .Env.artifact }}.cert"
     args:
@@ -85,9 +66,11 @@ signs:
       - "{{ .Env.artifact }}"
     env:
       - COSIGN_EXPERIMENTAL=1
-  # Note: checksums signing moved to record-connector-registry job
-  # to allow merging with Windows hashes first
+  # Note: checksums signing moved to publish-release-manifest job
+  # to allow merging with the Linux and Windows hashes first
 brews:
+  # macOS-only formula: the Linux tarballs are built in a parallel job, so their
+  # hashes are not available here. See the PR that split goreleaser-linux out.
   - repository:
       owner: conductorone
       name: "${BREW_TAP}"
