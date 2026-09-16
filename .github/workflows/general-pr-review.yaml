@@ -1,7 +1,10 @@
 on:
   pull_request:
     types: [opened, reopened, synchronize, ready_for_review]
-  workflow_call: {}
+  workflow_call:
+    secrets:
+      ANTHROPIC_API_KEY:
+        required: true
 concurrency:
   group: general-pr-review-${{ github.workflow_ref }}-${{ github.event.pull_request.number || github.run_id }}
   cancel-in-progress: true
