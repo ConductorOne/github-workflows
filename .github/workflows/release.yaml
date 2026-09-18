@@ -1720,6 +1720,8 @@ jobs:
 
           # Keep Datadog payload compact (~4k limit on text)
           out="$(printf "%s" "$out" | tail -c 3500)"
+          # Single line: multi-line output breaks the events YAML block scalar.
+          out="$(printf "%s" "$out" | tr '\n' ' ' | sed 's/  \+/ /g')"
 
           {
             echo "annotations<<EOF"
