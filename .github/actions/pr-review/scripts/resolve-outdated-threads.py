@@ -144,6 +144,37 @@ def should_resolve(thread: dict) -> bool:
     return any(body.startswith(prefix) for prefix in REVIEW_PREFIXES)
 
 
+MAX_FINDING_BODY = 600
+MAX_FINDINGS_PER_BUCKET = 60
+
+
+def is_bot_finding_thread(thread: dict) -> bool:
+    """True when the thread was opened by the reviewer with a review-prefixed body."""
+    comments = thread["comments"]["nodes"]
+    if not comments:
+        return False
+    first = comments[0]
+    if (first.get("author") or {}).get("login", "") not in BOT_LOGINS:
+        return False
+    body = first.get("body", "")
+    return any(body.startswith(prefix) for prefix in REVIEW_PREFIXES)
+
+
+def finding_digest(thread: dict) -> dict:
+    """Compact record of one reviewer finding, for dedup on the next run."""
+    comments = thread["comments"]["nodes"]
+    body = comments[0].get("body", "") if comments else ""
+    return {
+        "path": thread["path"],
+        "line": thread.get("line"),
+        "body": body[:MAX_FINDING_BODY],
+        "has_human_reply": any(
+            (c.get("author") or {}).get("login", "") not in BOT_LOGINS
+            for c in comments[1:]
+        ),
+    }
+
+
 def resolve_thread(thread_id: str) -> bool:
     """Resolve a single review thread. Returns True on success."""
     try:
@@ -201,14 +232,39 @@ def main():
                 "body_preview": body_preview,
             })
 
+    # Everything the reviewer has already said on this PR, so the next run does not
+    # say it again. Inline findings never reached the review prompt before: the PR
+    # context only carried summary-comment lines, so an open inline thread on
+    # unchanged code was invisible and got re-posted verbatim after every push.
+    resolved_ids = {t["id"] for t in to_resolve}
+    open_findings, settled_findings = [], []
+    for thread in threads:
+        if not is_bot_finding_thread(thread):
+            continue
+        if thread["isResolved"] or thread["id"] in resolved_ids:
+            settled_findings.append(finding_digest(thread))
+        else:
+            open_findings.append(finding_digest(thread))
+
     summary = {
         "total_threads": len(threads),
         "outdated_bot_threads": len(to_resolve),
         "resolved_count": len(resolved),
         "resolved": resolved,
+        "open_findings": open_findings[:MAX_FINDINGS_PER_BUCKET],
+        "settled_findings": settled_findings[:MAX_FINDINGS_PER_BUCKET],
+        "findings_truncated": (
+            len(open_findings) > MAX_FINDINGS_PER_BUCKET
+            or len(settled_findings) > MAX_FINDINGS_PER_BUCKET
+        ),
     }
 
     write_summary(summary)
+
+    print(
+        f"  {len(open_findings)} open and {len(settled_findings)} settled reviewer "
+        "findings recorded for dedup"
+    )
 
     print(f"\nDone: resolved {len(resolved)}/{len(to_resolve)} threads")
 

@@ -58,11 +58,31 @@ are safe solely because they were filtered out of the incremental artifact.
 Do not use local git history for incremental review. The local checkout is the current
 PR head tree, not the previous reviewed tree.
 
-### Step 3 — Note pre-resolved threads
+### Step 3 — Note what you have already said on this PR
 
-Read `.github/resolved-threads.json` — it contains a summary of outdated bot review threads
-that were automatically resolved before this review started. Use `resolved_count` from this
-file when reporting "Threads Resolved" in the summary.
+Read `.github/resolved-threads.json`. It summarizes the review threads you own on this PR:
+
+- `resolved_count`: outdated threads auto-resolved before this review started. Use this
+  number for "Threads Resolved" in the summary.
+- `open_findings`: inline findings you posted on an earlier run that are **still open**. Each
+  entry has `path`, `line`, the finding `body`, and `has_human_reply`.
+- `settled_findings`: inline findings that are now resolved, whether by this run or by a human.
+- `findings_truncated`: true when either list was capped; if so, be more conservative about
+  claiming a finding is new.
+
+**Every entry in either list is a finding you have already delivered. Do not post it again.**
+This is not a style preference — re-posting is the single most common defect in this review's
+output. The author already sees the earlier comment on that line; a byte-identical second copy
+adds nothing and buries the findings that are actually new.
+
+If the underlying issue still exists and still matters, say so **once** in the Review Summary
+section of the summary comment (e.g. "the pagination finding from the previous run is still
+open"), and leave the original inline thread to carry the detail. Post a new inline comment
+only when you have something genuinely new to say about that line: a different defect, or the
+same defect whose shape changed because the code changed.
+
+An entry with `has_human_reply: true` has been discussed. Do not re-raise it at all; if you
+believe it is unresolved, the summary is the place to say so.
 
 ### Step 4 — Use Trusted Repo-Local Review Criteria
 
@@ -135,8 +155,12 @@ confident about is a validated finding at `suggestion` severity with its confide
 noted, not a dropped finding and not an unvalidated guess. The downstream verdict logic,
 not pre-filtering, decides what blocks merge.
 
-Skip any issue that was already raised in an existing PR comment or inline review comment.
-Do not re-flag issues on unchanged code that were pre-resolved (see step 3).
+Skip any issue already raised on this PR. Check candidates against all three sources before
+posting: `existing_findings` (previous summary lines) and `comments` from
+`.github/pr-context.json`, and `open_findings` / `settled_findings` from
+`.github/resolved-threads.json` (see Step 3). A candidate that matches an entry in any of them
+by file, line and substance has already been reported — drop it from posted output, whether or
+not it is fixed. Do not re-flag issues on unchanged code that were pre-resolved.
 
 ### Step 7 — Post results directly (new findings only)
 
