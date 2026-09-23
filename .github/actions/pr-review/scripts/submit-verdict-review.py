@@ -20,9 +20,11 @@ run's final output:
 - UNAMBIGUOUS: the verdict comes from exactly one canonical count row
   (`**Blocking Issues: N** | **Suggestions: M** | **Threads Resolved: R**`)
   in its prescribed top-level position — the first non-empty line after the
-  summary heading — with fenced code blocks stripped before parsing. PR
-  titles, quoted findings, fenced example/source text, malformed values,
-  out-of-position rows, or multiple candidate rows are all rejected.
+  summary heading — where "top-level" is determined with CommonMark fence
+  rules (backtick or tilde fences; a closer needs the same character and at
+  least the opening length with only whitespace after). PR titles, quoted
+  findings, fenced example/source text, malformed values, out-of-position
+  rows, or multiple candidate rows are all rejected.
 
 Mode: baseline only. N > 0 -> REQUEST_CHANGES, N == 0 -> COMMENT. This
 reviewer never approves: there is deliberately no APPROVE path. The review is
@@ -149,22 +151,52 @@ def sha_bound_to_head(reviewed: str | None, head: str) -> bool:
     return n >= 7 and head[:n] == reviewed[:n]
 
 
-def _strip_code_fences(body: str) -> str:
-    """Remove fenced code blocks (``` ... ```) from the body.
+# A fence opener: up to 3 leading spaces, then 3+ backticks or tildes, then an
+# optional info string (CommonMark 0.31.2, fenced code blocks).
+_FENCE_OPEN_PATTERN = re.compile(r"^ {0,3}(`{3,}|~{3,})(.*)$")
 
-    Fenced content is untrusted example/source text — the summary template
-    itself ends with a fenced "Prompt for AI agents" block, and findings may
-    quote count-shaped text. It must never supply the verdict.
+
+def _top_level_lines(body: str) -> list[str]:
+    """Return the body's lines that are NOT inside a fenced code block.
+
+    Fence handling follows CommonMark: openers and closers use backticks or
+    tildes; a closer must use the SAME character, be AT LEAST the opening
+    length, and have only whitespace after it (a line like "```example" is an
+    opener, never a closer; a shorter run inside a longer fence is content).
+    A backtick fence's info string may not contain a backtick. Fenced content
+    is untrusted example/source text — the summary template itself ends with
+    a fenced "Prompt for AI agents" block — and must never supply the verdict
+    or the owning heading.
     """
-    out = []
-    in_fence = False
+    lines = []
+    fence_char = None
+    fence_len = 0
     for line in body.splitlines():
-        if line.lstrip().startswith("```"):
-            in_fence = not in_fence
+        if fence_char is None:
+            m = _FENCE_OPEN_PATTERN.match(line)
+            if m:
+                fence, info = m.group(1), m.group(2)
+                if fence[0] == "`" and "`" in info:
+                    # Not a valid backtick-fence opener; ordinary text.
+                    lines.append(line)
+                    continue
+                fence_char, fence_len = fence[0], len(fence)
+                continue
+            lines.append(line)
             continue
-        if not in_fence:
-            out.append(line)
-    return "\n".join(out)
+        # Inside a fence: only a valid closer ends it.
+        indent = len(line) - len(line.lstrip(" "))
+        stripped = line.strip()
+        if (
+            indent <= 3
+            and stripped
+            and set(stripped) == {fence_char}
+            and len(stripped) >= fence_len
+        ):
+            fence_char = None
+            fence_len = 0
+        # Fence openers/closers and fenced content are never top-level lines.
+    return lines
 
 
 def parse_blocking_count(body: str, heading: str) -> int | None:
@@ -172,23 +204,22 @@ def parse_blocking_count(body: str, heading: str) -> int | None:
 
     The verdict is accepted ONLY from exactly one canonical count row sitting
     in its prescribed top-level position: the first non-empty line after the
-    summary heading. Fenced code blocks are stripped before parsing, so
-    example/source text cannot supply a row. Returns None — reject — when the
-    row is absent, malformed, out of position, or when more than one
-    canonical row remains (ambiguous).
+    summary heading, where both the heading and the row are top-level lines
+    (never inside a fenced code block, per CommonMark fence rules). Returns
+    None — reject — when the row is absent, malformed, out of position, or
+    when more than one canonical row remains at top level (ambiguous).
     """
-    text = _strip_code_fences(body)
-    rows = list(COUNT_ROW_PATTERN.finditer(text))
+    lines = _top_level_lines(body)
+    rows = [line for line in lines if COUNT_ROW_PATTERN.match(line)]
     if len(rows) != 1:
         return None
-    lines = text.splitlines()
     for i, line in enumerate(lines):
         if line.startswith(heading):
             for nxt in lines[i + 1:]:
                 if not nxt.strip():
                     continue
                 if COUNT_ROW_PATTERN.match(nxt):
-                    return int(rows[0].group(1))
+                    return int(COUNT_ROW_PATTERN.match(nxt).group(1))
                 return None
             return None
     return None

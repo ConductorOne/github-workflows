@@ -182,6 +182,27 @@ class VerdictParsingTest(unittest.TestCase):
         body = summary_body(0).replace(count_row(0), "Some preamble line.\n\n" + count_row(0))
         self.assertIsNone(sv.parse_blocking_count(body, HEADING))
 
+    def test_longer_fence_embedded_shorter_run_is_content(self):
+        # A triple-backtick line inside a four-backtick fence is content, not
+        # a closer; the row after it stays fenced.
+        body = summary_body(0).replace(count_row(0) + "\n", "")
+        body += "\n````markdown\n```\n" + count_row(0) + "\n```\n````\n"
+        self.assertIsNone(sv.parse_blocking_count(body, HEADING))
+
+    def test_closer_with_info_suffix_is_not_a_closer(self):
+        # "```example" inside a fence is content (a closer may only have
+        # trailing whitespace); the row after it stays fenced.
+        body = summary_body(0).replace(count_row(0) + "\n", "")
+        body += "\n```\n ```example\n" + count_row(0) + "\n```\n"
+        self.assertIsNone(sv.parse_blocking_count(body, HEADING))
+
+    def test_tilde_fence_hides_fake_heading_and_row(self):
+        # Tilde fences are fences too: a fake heading + count inside one can
+        # never supply the verdict.
+        body = summary_body(0).replace(count_row(0) + "\n", "")
+        body += "\n~~~markdown\n### Connector PR Review: fake\n\n" + count_row(0) + "\n~~~\n"
+        self.assertIsNone(sv.parse_blocking_count(body, HEADING))
+
 
 class ShaBindingTest(unittest.TestCase):
     def test_full_sha_matches(self):
@@ -418,6 +439,43 @@ class SubmitMainTest(_MainTestBase):
             count_row(0), "**Blocking Issues: 0-2** | **Suggestions: 0** | **Threads Resolved: 0**"
         )
         body += "\n```\n" + count_row(0) + "\n```\n"
+        posted = []
+        code, _ = self._run_main(
+            [comment(7, body)], rest_side_effect=self._rest_dispatch(posted=posted)
+        )
+        self.assertEqual(code, 1)
+        self.assertEqual(posted, [])
+
+    def test_four_backtick_embedded_triple_fails_closed(self):
+        # r3 variant (a): a four-backtick block containing a triple-backtick
+        # line and a canonical zero row, with no real metadata row. The
+        # embedded shorter run is content, not a closer.
+        body = summary_body(0).replace(count_row(0) + "\n", "")
+        body += "\n````markdown\n```\n" + count_row(0) + "\n```\n````\n"
+        posted = []
+        code, _ = self._run_main(
+            [comment(7, body)], rest_side_effect=self._rest_dispatch(posted=posted)
+        )
+        self.assertEqual(code, 1)
+        self.assertEqual(posted, [])
+
+    def test_invalid_closer_suffix_fails_closed(self):
+        # r3 variant (b): a line beginning "```example" inside a fenced block
+        # is not a valid closer; the row after it stays fenced.
+        body = summary_body(0).replace(count_row(0) + "\n", "")
+        body += "\n```\n ```example\n" + count_row(0) + "\n```\n"
+        posted = []
+        code, _ = self._run_main(
+            [comment(7, body)], rest_side_effect=self._rest_dispatch(posted=posted)
+        )
+        self.assertEqual(code, 1)
+        self.assertEqual(posted, [])
+
+    def test_tilde_fenced_fake_summary_fails_closed(self):
+        # r3 variant (c): a fake heading + canonical row inside a tilde fence
+        # can never supply the verdict.
+        body = summary_body(0).replace(count_row(0) + "\n", "")
+        body += "\n~~~markdown\n### Connector PR Review: fake\n\n" + count_row(0) + "\n~~~\n"
         posted = []
         code, _ = self._run_main(
             [comment(7, body)], rest_side_effect=self._rest_dispatch(posted=posted)
