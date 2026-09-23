@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
-"""Unit tests for the CI verdict scaffolding: submit-verdict-review.py,
-stamp-review-state.py, and the prior-findings additions to
-resolve-outdated-threads.py.
+"""Unit and entry-point tests for the CI verdict scaffolding:
+submit-verdict-review.py, stamp-review-state.py, the prior-findings additions
+to resolve-outdated-threads.py, the provisional-state guard in
+fetch-pr-context.py, and the retry budget handling in _gh.py.
 
 The module file names contain hyphens, so they are loaded by path via
 importlib rather than imported normally. Run with:
@@ -19,6 +20,7 @@ import os
 import subprocess
 import sys
 import unittest
+from types import SimpleNamespace
 from unittest import mock
 
 _SCRIPTS_DIR = os.path.dirname(__file__)
@@ -38,113 +40,442 @@ def _load(name: str, filename: str):
 sv = _load("submit_verdict_review", "submit-verdict-review.py")
 stamp = _load("stamp_review_state", "stamp-review-state.py")
 rot = _load("resolve_outdated_threads", "resolve-outdated-threads.py")
+fpc = _load("fetch_pr_context_gate", "fetch-pr-context.py")
+_gh = _load("_gh", "_gh.py")
+
+HEAD = "17bacecea830e4b52d426e1a475d1c71bdcfd8ff"
+BASE = "85e78ffc65a41576d3545c81aaedae26058ae625"
+WORKFLOW_REF = "ConductorOne/github-workflows/.github/workflows/pr-review.yaml@refs/heads/main"
+RUN_START = "2026-09-23T20:00:00Z"
+FRESH = "2026-09-23T20:30:00Z"
+STALE = "2026-09-22T16:00:00Z"
+PROVISIONAL_LINE = "_⏳ Provisional — deeper review still in progress._"
+
+ENV = {
+    "GITHUB_REPOSITORY": "example/repo",
+    "PR_NUMBER": "42",
+    "SUMMARY_MARKER": "### Connector PR Review:",
+    "REVIEW_RUN_STARTED_AT": RUN_START,
+    "GITHUB_WORKFLOW_REF": WORKFLOW_REF,
+}
 
 
-def _thread(
-    body: str,
+def count_row(n: int, m: int = 0, r: int = 0) -> str:
+    return (
+        f"**Blocking Issues: {n}** | **Suggestions: {m}** | **Threads Resolved: {r}**"
+    )
+
+
+def summary_body(
+    n: int,
     *,
-    author: str = "github-actions[bot]",
-    resolved: bool = False,
-    outdated: bool = False,
-    path: str = "pkg/foo.go",
-    line: int | None = 42,
-) -> dict:
+    title: str = "gate: some PR",
+    marker: str | None = "canonical",
+    provisional: bool = False,
+) -> str:
+    parts = [f"### Connector PR Review: {title}", ""]
+    if provisional:
+        parts += [PROVISIONAL_LINE, ""]
+    parts += [count_row(n), "", "### Review Summary", "did things", ""]
+    if marker == "canonical":
+        state = {"last_reviewed_sha": HEAD, "base_sha": BASE, "workflow_ref": WORKFLOW_REF}
+        parts.append(f"<!-- review-state: {json.dumps(state)} -->")
+    elif marker:
+        parts.append(f"<!-- review-state: {marker} -->")
+    return "\n".join(parts)
+
+
+def comment(cid: int, body: str, updated_at: str = FRESH) -> dict:
     return {
-        "id": "PRRT_x",
-        "isResolved": resolved,
-        "isOutdated": outdated,
-        "path": path,
-        "line": line,
-        "comments": {
-            "totalCount": 1,
-            "nodes": [{"body": body, "author": {"login": author}}],
-        },
+        "id": cid,
+        "user": {"login": "github-actions[bot]"},
+        "body": body,
+        "updated_at": updated_at,
     }
 
 
-class VerdictToReviewTest(unittest.TestCase):
+def _git_fake(head: str = HEAD):
+    return lambda *a, **kw: SimpleNamespace(stdout=head + "\n", stderr="")
+
+
+class _MainTestBase(unittest.TestCase):
+    """Shared mocked-boundary harness for stamp/submit entry-point tests."""
+
+    module = None  # set by subclass
+
+    def _run_main(self, comments, *, rest_side_effect=None, head=HEAD, env_extra=None):
+        env = dict(ENV)
+        env.update(env_extra or {})
+        rest_mock = mock.Mock(side_effect=rest_side_effect)
+        with (
+            mock.patch.dict(os.environ, env),
+            mock.patch.object(self.module._gh, "rest_paginate", return_value=comments),
+            mock.patch.object(self.module._gh, "rest", rest_mock),
+            mock.patch.object(self.module.subprocess, "run", _git_fake(head)),
+        ):
+            try:
+                self.module.main()
+                return 0, rest_mock
+            except SystemExit as e:
+                return e.code or 0, rest_mock
+
+
+class VerdictParsingTest(unittest.TestCase):
     def test_blocking_findings_request_changes(self):
-        body = "### Connector PR Review: t\n\n**Blocking Issues: 2** | **Suggestions: 1**\n"
         self.assertEqual(
-            sv.verdict_to_review(body),
-            ("--request-changes", "Blocking issues found — see review comments."),
+            sv.verdict_to_review(summary_body(2)),
+            ("REQUEST_CHANGES", "Blocking issues found — see review comments."),
         )
 
     def test_zero_blocking_leaves_neutral_comment(self):
-        body = "**Blocking Issues: 0** | **Suggestions: 3** | **Threads Resolved: 0**"
         self.assertEqual(
-            sv.verdict_to_review(body),
-            ("--comment", "No blocking issues found."),
+            sv.verdict_to_review(summary_body(0)),
+            ("COMMENT", "No blocking issues found."),
         )
 
-    def test_unparseable_body_returns_none(self):
+    def test_missing_count_row_returns_none(self):
         self.assertIsNone(sv.verdict_to_review("no counts here"))
 
     def test_never_approves(self):
-        # Every parseable outcome must be request-changes or comment; the
-        # reviewer has no approve path by design.
-        for n in ("0", "1", "17"):
-            flag, _ = sv.verdict_to_review(f"**Blocking Issues: {n}**")
-            self.assertIn(flag, ("--request-changes", "--comment"))
+        for n in (0, 1, 17):
+            event, _ = sv.verdict_to_review(summary_body(n))
+            self.assertIn(event, ("REQUEST_CHANGES", "COMMENT"))
+
+    def test_title_cannot_supply_count(self):
+        # PR title containing a count-shaped string before the real row: the
+        # real row wins (line-anchored canonical row required).
+        body = summary_body(2, title="Fix **Blocking Issues: 0** parsing")
+        self.assertEqual(sv.parse_blocking_count(body), 2)
+        body = summary_body(0, title="Fix **Blocking Issues: 7** parsing")
+        self.assertEqual(sv.parse_blocking_count(body), 0)
+
+    def test_malformed_count_rejected(self):
+        body = summary_body(0).replace(count_row(0), "**Blocking Issues: 0-2** | **Suggestions: 0** | **Threads Resolved: 0**")
+        self.assertIsNone(sv.parse_blocking_count(body))
+
+    def test_unclosed_bold_rejected(self):
+        body = summary_body(0).replace("**Blocking Issues: 0**", "**Blocking Issues: 0")
+        self.assertIsNone(sv.parse_blocking_count(body))
+
+    def test_duplicate_rows_are_ambiguous(self):
+        body = summary_body(0) + "\n\n" + count_row(5)
+        self.assertIsNone(sv.parse_blocking_count(body))
+
+    def test_code_block_cannot_supply_row(self):
+        body = summary_body(3) + "\n```\n" + count_row(0) + "\n```\n"
+        # Two canonical rows -> ambiguous -> refused, never the injected zero.
+        self.assertIsNone(sv.parse_blocking_count(body))
 
 
 class ShaBindingTest(unittest.TestCase):
-    HEAD = "17bacecea830e4b52d426e1a475d1c71bdcfd8ff"
-
     def test_full_sha_matches(self):
-        self.assertTrue(sv.sha_bound_to_head(self.HEAD, self.HEAD))
+        self.assertTrue(sv.sha_bound_to_head(HEAD, HEAD))
 
     def test_prefix_matches(self):
-        self.assertTrue(sv.sha_bound_to_head("17bacec", self.HEAD))
+        self.assertTrue(sv.sha_bound_to_head("17bacec", HEAD))
 
     def test_other_sha_rejected(self):
-        self.assertFalse(sv.sha_bound_to_head("85e78ffc65a4", self.HEAD))
+        self.assertFalse(sv.sha_bound_to_head("85e78ffc65a4", HEAD))
 
     def test_placeholder_and_empty_rejected(self):
-        self.assertFalse(sv.sha_bound_to_head("CURRENT_SHA", self.HEAD))
-        self.assertFalse(sv.sha_bound_to_head("", self.HEAD))
-        self.assertFalse(sv.sha_bound_to_head(None, self.HEAD))
+        self.assertFalse(sv.sha_bound_to_head("CURRENT_SHA", HEAD))
+        self.assertFalse(sv.sha_bound_to_head("", HEAD))
+        self.assertFalse(sv.sha_bound_to_head(None, HEAD))
 
     def test_short_prefix_rejected(self):
-        self.assertFalse(sv.sha_bound_to_head("17ba", self.HEAD))
+        self.assertFalse(sv.sha_bound_to_head("17ba", HEAD))
 
 
 class StampMarkerTest(unittest.TestCase):
-    def test_marker_includes_base_and_workflow_ref(self):
-        with mock.patch.dict(
-            os.environ,
-            {"GITHUB_WORKFLOW_REF": "ConductorOne/github-workflows/.github/workflows/pr-review.yaml@refs/heads/main"},
-        ), mock.patch.object(stamp, "current_base_sha", return_value="85e78ffc65a4"):
-            marker = stamp.build_marker("17bacece")
-        state = json.loads(stamp.REVIEW_STATE_PATTERN.search(marker).group(1))
-        self.assertEqual(state["last_reviewed_sha"], "17bacece")
-        self.assertEqual(state["base_sha"], "85e78ffc65a4")
-        self.assertEqual(
-            state["workflow_ref"],
-            "ConductorOne/github-workflows/.github/workflows/pr-review.yaml@refs/heads/main",
-        )
+    def test_canonical_state_includes_base_and_workflow_ref(self):
+        with mock.patch.dict(os.environ, {"GITHUB_WORKFLOW_REF": WORKFLOW_REF}), mock.patch.object(
+            stamp, "current_base_sha", return_value=BASE
+        ):
+            state = stamp.canonical_state(HEAD)
+        self.assertEqual(state["last_reviewed_sha"], HEAD)
+        self.assertEqual(state["base_sha"], BASE)
+        self.assertEqual(state["workflow_ref"], WORKFLOW_REF)
 
-    def test_marker_omits_missing_optional_fields(self):
+    def test_canonical_state_omits_missing_optional_fields(self):
         with mock.patch.dict(os.environ, {"GITHUB_WORKFLOW_REF": ""}), mock.patch.object(
             stamp, "current_base_sha", return_value=None
         ):
-            marker = stamp.build_marker("17bacece")
-        state = json.loads(stamp.REVIEW_STATE_PATTERN.search(marker).group(1))
+            state = stamp.canonical_state(HEAD)
         self.assertNotIn("base_sha", state)
         self.assertNotIn("workflow_ref", state)
 
-    def test_already_bound_prefix_tolerant(self):
-        self.assertTrue(stamp.already_bound("17bacec", "17bacecea830"))
-        self.assertFalse(stamp.already_bound("85e78ff", "17bacecea830"))
+    def test_marker_is_canonical_requires_all_fields(self):
+        canonical = {"last_reviewed_sha": HEAD, "base_sha": BASE, "workflow_ref": WORKFLOW_REF}
+        self.assertTrue(stamp.marker_is_canonical(dict(canonical), canonical, HEAD))
+        # Correct SHA but missing base/workflow fields -> NOT canonical (repair).
+        self.assertFalse(
+            stamp.marker_is_canonical({"last_reviewed_sha": HEAD}, canonical, HEAD)
+        )
+        self.assertFalse(
+            stamp.marker_is_canonical(
+                {"last_reviewed_sha": HEAD, "base_sha": "wrong", "workflow_ref": WORKFLOW_REF},
+                canonical,
+                HEAD,
+            )
+        )
+
+
+class StampMainTest(_MainTestBase):
+    module = stamp
+
+    def _patch_base(self):
+        return mock.patch.object(stamp, "current_base_sha", return_value=BASE)
+
+    def test_fresh_final_summary_is_stamped(self):
+        body = summary_body(1, marker=None)  # model omitted the marker
+        with self._patch_base():
+            code, rest_mock = self._run_main([comment(7, body)])
+        self.assertEqual(code, 0)
+        patch_calls = [c for c in rest_mock.mock_calls if c.args[0] == "PATCH"]
+        self.assertEqual(len(patch_calls), 1)
+        new_body = patch_calls[0].kwargs["data"]["body"]
+        state = json.loads(stamp.REVIEW_STATE_PATTERN.search(new_body).group(1))
+        self.assertEqual(state["last_reviewed_sha"], HEAD)
+        self.assertEqual(state["base_sha"], BASE)
+        self.assertEqual(state["workflow_ref"], WORKFLOW_REF)
+
+    def test_stale_summary_not_rewritten(self):
+        body = summary_body(0, marker=json.dumps({"last_reviewed_sha": "bbbbbbbb"}))
+        code, rest_mock = self._run_main([comment(7, body, updated_at=STALE)])
+        self.assertEqual(code, 1)
+        self.assertEqual([c for c in rest_mock.mock_calls if c.args[0] == "PATCH"], [])
+
+    def test_provisional_summary_refused(self):
+        body = summary_body(0, provisional=True)
+        code, rest_mock = self._run_main([comment(7, body)])
+        self.assertEqual(code, 1)
+        self.assertEqual([c for c in rest_mock.mock_calls if c.args[0] == "PATCH"], [])
+
+    def test_foreign_workflow_summary_refused(self):
+        foreign = json.dumps({"last_reviewed_sha": "bbbbbbbb", "workflow_ref": "other/repo/.github/workflows/x.yaml@refs/heads/main"})
+        code, rest_mock = self._run_main([comment(7, summary_body(0, marker=foreign))])
+        self.assertEqual(code, 1)
+        self.assertEqual([c for c in rest_mock.mock_calls if c.args[0] == "PATCH"], [])
+
+    def test_incomplete_marker_repaired(self):
+        # Correct SHA but missing base/workflow fields -> canonical repair.
+        body = summary_body(0, marker=json.dumps({"last_reviewed_sha": HEAD}))
+        with self._patch_base():
+            code, rest_mock = self._run_main([comment(7, body)])
+        self.assertEqual(code, 0)
+        patch_calls = [c for c in rest_mock.mock_calls if c.args[0] == "PATCH"]
+        self.assertEqual(len(patch_calls), 1)
+        state = json.loads(
+            stamp.REVIEW_STATE_PATTERN.search(patch_calls[0].kwargs["data"]["body"]).group(1)
+        )
+        self.assertEqual(state["base_sha"], BASE)
+        self.assertEqual(state["workflow_ref"], WORKFLOW_REF)
+
+    def test_canonical_marker_noop(self):
+        with self._patch_base():
+            code, rest_mock = self._run_main([comment(7, summary_body(0))])
+        self.assertEqual(code, 0)
+        self.assertEqual([c for c in rest_mock.mock_calls if c.args[0] == "PATCH"], [])
+
+    def test_no_summary_no_stamp(self):
+        code, rest_mock = self._run_main([])
+        self.assertEqual(code, 0)
+        rest_mock.assert_not_called()
+
+
+class SubmitMainTest(_MainTestBase):
+    module = sv
+
+    def _rest_dispatch(self, live_head=HEAD, posted=None):
+        def dispatch(method, path, **kw):
+            if method == "GET" and path == "repos/example/repo/pulls/42":
+                return {"head": {"sha": live_head}}
+            if method == "POST" and path == "repos/example/repo/pulls/42/reviews":
+                if posted is not None:
+                    posted.append(kw["data"])
+                return {"id": 1}
+            raise AssertionError(f"unexpected REST call {method} {path}")
+
+        return dispatch
+
+    def test_success_submits_commit_bound_review(self):
+        posted = []
+        code, _ = self._run_main(
+            [comment(7, summary_body(2))],
+            rest_side_effect=self._rest_dispatch(posted=posted),
+        )
+        self.assertEqual(code, 0)
+        self.assertEqual(len(posted), 1)
+        self.assertEqual(posted[0]["commit_id"], HEAD)
+        self.assertEqual(posted[0]["event"], "REQUEST_CHANGES")
+
+    def test_zero_blocking_submits_comment_event(self):
+        posted = []
+        code, _ = self._run_main(
+            [comment(7, summary_body(0))],
+            rest_side_effect=self._rest_dispatch(posted=posted),
+        )
+        self.assertEqual(code, 0)
+        self.assertEqual(posted[0]["event"], "COMMENT")
+
+    def test_no_summary_fails(self):
+        code, _ = self._run_main([], rest_side_effect=self._rest_dispatch())
+        self.assertEqual(code, 1)
+
+    def test_stale_summary_fails_without_posting(self):
+        posted = []
+        code, _ = self._run_main(
+            [comment(7, summary_body(0), updated_at=STALE)],
+            rest_side_effect=self._rest_dispatch(posted=posted),
+        )
+        self.assertEqual(code, 1)
+        self.assertEqual(posted, [])
+
+    def test_provisional_only_run_fails_as_incomplete(self):
+        posted = []
+        code, _ = self._run_main(
+            [comment(7, summary_body(0, provisional=True))],
+            rest_side_effect=self._rest_dispatch(posted=posted),
+        )
+        self.assertEqual(code, 1)
+        self.assertEqual(posted, [])
+
+    def test_provisional_newer_than_final_fails(self):
+        # A provisional re-post after a final summary in the same run still
+        # fails: the newest fresh output is provisional.
+        posted = []
+        code, _ = self._run_main(
+            [
+                comment(7, summary_body(0), updated_at="2026-09-23T20:10:00Z"),
+                comment(8, summary_body(0, provisional=True), updated_at="2026-09-23T20:20:00Z"),
+            ],
+            rest_side_effect=self._rest_dispatch(posted=posted),
+        )
+        self.assertEqual(code, 1)
+        self.assertEqual(posted, [])
+
+    def test_title_injection_false_negative_blocked(self):
+        # Title claims 0, real row says 2 -> REQUEST_CHANGES, not a clean review.
+        posted = []
+        code, _ = self._run_main(
+            [comment(7, summary_body(2, title="Fix **Blocking Issues: 0** parsing"))],
+            rest_side_effect=self._rest_dispatch(posted=posted),
+        )
+        self.assertEqual(code, 0)
+        self.assertEqual(posted[0]["event"], "REQUEST_CHANGES")
+
+    def test_title_injection_false_positive_blocked(self):
+        # Title claims 7, real row says 0 -> COMMENT, not a false block.
+        posted = []
+        code, _ = self._run_main(
+            [comment(7, summary_body(0, title="Fix **Blocking Issues: 7** parsing"))],
+            rest_side_effect=self._rest_dispatch(posted=posted),
+        )
+        self.assertEqual(code, 0)
+        self.assertEqual(posted[0]["event"], "COMMENT")
+
+    def test_malformed_count_fails(self):
+        body = summary_body(0).replace(count_row(0), "**Blocking Issues: 0-2** | **Suggestions: 0** | **Threads Resolved: 0**")
+        posted = []
+        code, _ = self._run_main(
+            [comment(7, body)], rest_side_effect=self._rest_dispatch(posted=posted)
+        )
+        self.assertEqual(code, 1)
+        self.assertEqual(posted, [])
+
+    def test_live_head_change_stops_publication(self):
+        posted = []
+        code, _ = self._run_main(
+            [comment(7, summary_body(0))],
+            rest_side_effect=self._rest_dispatch(live_head="dddddddddddd", posted=posted),
+        )
+        self.assertEqual(code, 1)
+        self.assertEqual(posted, [])
+
+    def test_foreign_workflow_marker_fails(self):
+        foreign = json.dumps({"last_reviewed_sha": HEAD, "workflow_ref": "other/repo/.github/workflows/x.yaml@refs/heads/main"})
+        posted = []
+        code, _ = self._run_main(
+            [comment(7, summary_body(0, marker=foreign))],
+            rest_side_effect=self._rest_dispatch(posted=posted),
+        )
+        self.assertEqual(code, 1)
+        self.assertEqual(posted, [])
+
+
+class FetchPrContextStateTest(unittest.TestCase):
+    def _comment(self, body, cid=1):
+        return {"id": cid, "user": "github-actions[bot]", "body": body}
+
+    def test_provisional_comment_never_supplies_state(self):
+        state = json.dumps({"last_reviewed_sha": HEAD, "base_sha": BASE, "workflow_ref": WORKFLOW_REF})
+        provisional = self._comment(f"### Connector PR Review: t\n{PROVISIONAL_LINE}\n<!-- review-state: {state} -->")
+        cid, sha, base = fpc.extract_review_state([provisional], "### Connector PR Review:", WORKFLOW_REF)
+        self.assertIsNone(sha)
+        self.assertIsNone(base)
+
+    def test_final_comment_supplies_state(self):
+        state = json.dumps({"last_reviewed_sha": HEAD, "base_sha": BASE, "workflow_ref": WORKFLOW_REF})
+        final = self._comment(f"### Connector PR Review: t\n<!-- review-state: {state} -->")
+        cid, sha, base = fpc.extract_review_state([final], "### Connector PR Review:", WORKFLOW_REF)
+        self.assertEqual(sha, HEAD)
+        self.assertEqual(base, BASE)
+        self.assertEqual(cid, 1)
+
+    def test_provisional_newer_than_final_does_not_advance(self):
+        state = json.dumps({"last_reviewed_sha": "oldsha123", "base_sha": BASE, "workflow_ref": WORKFLOW_REF})
+        final = self._comment(f"### Connector PR Review: t\n<!-- review-state: {state} -->", cid=1)
+        newer_state = json.dumps({"last_reviewed_sha": HEAD, "base_sha": BASE, "workflow_ref": WORKFLOW_REF})
+        provisional = self._comment(f"### Connector PR Review: t\n{PROVISIONAL_LINE}\n<!-- review-state: {newer_state} -->", cid=2)
+        cid, sha, _ = fpc.extract_review_state([final, provisional], "### Connector PR Review:", WORKFLOW_REF)
+        self.assertEqual(sha, "oldsha123")
+
+    def test_stamped_marker_round_trips(self):
+        # The canonical marker the stamper writes is accepted by context
+        # extraction with matching workflow ownership.
+        with mock.patch.dict(os.environ, {"GITHUB_WORKFLOW_REF": WORKFLOW_REF}), mock.patch.object(
+            stamp, "current_base_sha", return_value=BASE
+        ):
+            canonical = stamp.canonical_state(HEAD)
+        body = f"### Connector PR Review: t\n<!-- review-state: {json.dumps(canonical)} -->"
+        _, sha, base = fpc.extract_review_state(
+            [self._comment(body)], "### Connector PR Review:", WORKFLOW_REF
+        )
+        self.assertEqual(sha, HEAD)
+        self.assertEqual(base, BASE)
 
 
 class PriorFindingsTest(unittest.TestCase):
+    def _thread(
+        self,
+        body: str,
+        *,
+        author: str = "github-actions[bot]",
+        resolved: bool = False,
+        outdated: bool = False,
+        path: str = "pkg/foo.go",
+        line: int | None = 42,
+    ) -> dict:
+        return {
+            "id": "PRRT_x",
+            "isResolved": resolved,
+            "isOutdated": outdated,
+            "path": path,
+            "line": line,
+            "comments": {
+                "totalCount": 1,
+                "nodes": [{"body": body, "author": {"login": author}}],
+            },
+        }
+
     def test_collects_bot_findings_only(self):
         threads = [
-            _thread("🟠 Bug: nil deref in parse"),
-            _thread("🟡 Suggestion: rename this", path="pkg/bar.go"),
-            _thread("looks like a finding but is human", author="octocat"),
-            _thread("a bot comment without the finding prefix"),
+            self._thread("🟠 Bug: nil deref in parse"),
+            self._thread("🟡 Suggestion: rename this", path="pkg/bar.go"),
+            # Human-authored but otherwise fully eligible (finding prefix):
+            # the author filter, not the prefix filter, must exclude it.
+            self._thread("🟠 Bug: human spoof attempt", author="octocat"),
+            self._thread("a bot comment without the finding prefix"),
         ]
         findings = rot.collect_prior_findings(threads)
         self.assertEqual(len(findings), 2)
@@ -153,8 +484,8 @@ class PriorFindingsTest(unittest.TestCase):
 
     def test_resolved_threads_included_and_sorted_last(self):
         threads = [
-            _thread("🟠 Bug: resolved one", resolved=True),
-            _thread("🟠 Bug: open one", path="pkg/zzz.go"),
+            self._thread("🟠 Bug: resolved one", resolved=True),
+            self._thread("🟠 Bug: open one", path="pkg/zzz.go"),
         ]
         findings = rot.collect_prior_findings(threads)
         self.assertEqual(len(findings), 2)
@@ -162,7 +493,7 @@ class PriorFindingsTest(unittest.TestCase):
         self.assertTrue(findings[1]["thread_resolved"])
 
     def test_outdated_state_preserved(self):
-        findings = rot.collect_prior_findings([_thread("🟠 Bug: x", outdated=True)])
+        findings = rot.collect_prior_findings([self._thread("🟠 Bug: x", outdated=True)])
         self.assertTrue(findings[0]["thread_outdated"])
 
     def test_severity_mapping(self):
@@ -197,6 +528,84 @@ class ResolveThreadTest(unittest.TestCase):
             ok, blocked = rot.resolve_thread("PRRT_x")
         self.assertTrue(ok)
         self.assertFalse(blocked)
+
+
+class GhRetryBudgetTest(unittest.TestCase):
+    def _http_error(self, status: int, retry_after: str | None = None):
+        import io
+        import urllib.error
+
+        headers = {}
+        if retry_after is not None:
+            headers["Retry-After"] = retry_after
+        return urllib.error.HTTPError(
+            "https://api.github.com/x", status, "err", headers, io.BytesIO(b"rate limited")
+        )
+
+    def test_retry_after_beyond_budget_stops_without_sleeping_short(self):
+        sleeps = []
+        attempts = []
+
+        def fake_urlopen(req, timeout=None):
+            attempts.append(1)
+            raise self._http_error(429, retry_after="60")
+
+        clock = [0.0]
+
+        def fake_now():
+            return clock[0]
+
+        def fake_sleep(d):
+            sleeps.append(d)
+            clock[0] += d
+
+        with (
+            mock.patch.object(_gh.urllib.request, "urlopen", fake_urlopen),
+            mock.patch.dict(os.environ, {"GH_TOKEN": "x"}),
+        ):
+            with self.assertRaises(_gh.TransientOutageError):
+                _gh.request("GET", "https://api.github.com/x", sleep=fake_sleep, now=fake_now)
+        # The 60s server cooldown does not fit the 45s budget: exactly one
+        # request, and no shortened sleep that would violate Retry-After.
+        self.assertEqual(len(attempts), 1)
+        self.assertEqual(sleeps, [])
+
+    def test_retry_after_within_budget_is_honored_exactly(self):
+        class FakeResp:
+            status = 200
+            headers = {}
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *a):
+                return False
+
+            def read(self):
+                return b"{}"
+
+        sleeps = []
+        calls = []
+
+        def fake_urlopen(req, timeout=None):
+            calls.append(1)
+            if len(calls) == 1:
+                raise self._http_error(429, retry_after="5")
+            return FakeResp()
+
+        clock = [0.0]
+        with (
+            mock.patch.object(_gh.urllib.request, "urlopen", fake_urlopen),
+            mock.patch.dict(os.environ, {"GH_TOKEN": "x"}),
+        ):
+            status, _, _ = _gh.request(
+                "GET",
+                "https://api.github.com/x",
+                sleep=lambda d: (sleeps.append(d), clock.__setitem__(0, clock[0] + d)),
+                now=lambda: clock[0],
+            )
+        self.assertEqual(status, 200)
+        self.assertEqual(sleeps, [5])
 
 
 if __name__ == "__main__":

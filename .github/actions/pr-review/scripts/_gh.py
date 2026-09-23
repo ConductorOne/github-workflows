@@ -186,9 +186,12 @@ def request(
 
     last_detail = ""
     for attempt in range(1, max_attempts + 1):
+        remaining = deadline - now()
+        if remaining <= 0:
+            break
         req = urllib.request.Request(url, data=data, method=method, headers=req_headers)
         try:
-            with urllib.request.urlopen(req, timeout=timeout_s) as resp:
+            with urllib.request.urlopen(req, timeout=min(timeout_s, remaining)) as resp:
                 return resp.status, dict(resp.headers), resp.read()
         except urllib.error.HTTPError as e:
             body = ""
@@ -209,13 +212,22 @@ def request(
         # Transient: back off and retry if attempts and budget remain.
         if attempt >= max_attempts:
             break
-        delay = hint if hint is not None else _backoff_delay(
-            attempt, base_delay_s, max_delay_s, jitter_s
-        )
         remaining = deadline - now()
         if remaining <= 0:
             break
-        delay = min(delay, max(0.0, remaining))
+        if hint is not None:
+            if hint > remaining:
+                # The server requested a cooldown (Retry-After / rate-limit
+                # reset) longer than the remaining budget. Shortening it would
+                # violate GitHub's rate-limit contract; stop as an outage
+                # instead of retrying early or overruning the budget.
+                break
+            delay = hint
+        else:
+            delay = min(
+                _backoff_delay(attempt, base_delay_s, max_delay_s, jitter_s),
+                max(0.0, remaining),
+            )
         print(
             f"  transient GitHub failure (attempt {attempt}/{max_attempts}): "
             f"{last_detail}; retrying in {delay:.1f}s",

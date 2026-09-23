@@ -23,6 +23,12 @@ header:
 _⏳ Provisional — deeper review still in progress._
 ```
 
+The provisional summary is progress output, not a verdict: OMIT the
+`<!-- review-state: ... -->` marker from it (only the final summary carries the
+marker), and know that CI will refuse to stamp or submit a verdict from any
+comment still containing the provisional line — a run that ends provisional is
+a failed, incomplete run, not a clean one.
+
 Then keep working and replace it with your final summary, dropping the
 provisional line. If the run is killed mid-review, the provisional summary
 survives and a human still learns something. Never inflate the provisional

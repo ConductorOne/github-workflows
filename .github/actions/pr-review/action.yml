@@ -28,6 +28,11 @@ runs:
     env:
       REVIEW_PROMPT: ${{ inputs.review_prompt }}
     run: |
+      # Captured before any review work: the stamp/submit gates require the
+      # summary comment to have been created/updated at or after this moment,
+      # so a successful agent step can never launder a prior run's summary
+      # into this run's verdict.
+      echo "review_run_started_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "${GITHUB_OUTPUT}"
       case "${REVIEW_PROMPT}" in
         ""|"connector")
           echo "built_in_mixins=connector" >> "${GITHUB_OUTPUT}"
@@ -135,6 +140,7 @@ runs:
       GH_TOKEN: ${{ inputs.github_token }}
       PR_NUMBER: ${{ inputs.pr_number }}
       SUMMARY_MARKER: ${{ steps.review-config.outputs.summary_heading }}
+      REVIEW_RUN_STARTED_AT: ${{ steps.review-config.outputs.review_run_started_at }}
     run: python3 ${{ github.action_path }}/scripts/stamp-review-state.py
   - name: Submit verdict review
     id: submit_verdict
@@ -144,14 +150,18 @@ runs:
     # upgrades — the agent stopped after posting the summary, so PRs got a
     # quiet comment and no blocking review). Baseline mode only: request
     # changes on blocking findings, neutral comment otherwise — never approves.
-    # Fails closed (nonzero) when no bound verdict exists, so a broken review
-    # is a loud red check, not silent green.
+    # Gates: the summary must be fresh (this run), final (not provisional),
+    # owned by this workflow, bound to the reviewed commit, and the live PR
+    # head must not have moved; the review is posted via the REST API with an
+    # explicit commit_id. Any gate failure exits nonzero — a broken review is
+    # a loud red check, not silent green.
     if: steps.claude_review.conclusion == 'success'
     shell: bash
     env:
       GH_TOKEN: ${{ inputs.github_token }}
       PR_NUMBER: ${{ inputs.pr_number }}
       SUMMARY_MARKER: ${{ steps.review-config.outputs.summary_heading }}
+      REVIEW_RUN_STARTED_AT: ${{ steps.review-config.outputs.review_run_started_at }}
     run: python3 ${{ github.action_path }}/scripts/submit-verdict-review.py
   - name: Upload review context artifacts
     if: always()

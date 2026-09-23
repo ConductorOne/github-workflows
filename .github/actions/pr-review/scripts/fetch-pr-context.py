@@ -69,6 +69,63 @@ def is_legacy_review_comment(comment: dict, summary_heading: str) -> bool:
     return review_comment_heading(comment, summary_heading) == LEGACY_REVIEW_SUMMARY_HEADING
 
 
+# Line the review prompt requires on provisional (in-progress) summaries. A
+# provisional comment is progress output, not a completed review: it must never
+# supply review state, or a killed/lazy run would advance last_reviewed_sha
+# without completing the audit behind it.
+PROVISIONAL_MARKER = "_⏳ Provisional — deeper review still in progress._"
+
+
+def is_provisional(body: str) -> bool:
+    """Whether a summary comment is provisional (in-progress) output."""
+    return PROVISIONAL_MARKER in body
+
+
+def extract_review_state(
+    review_comments: list[dict], summary_heading: str, workflow_ref: str
+) -> tuple[Optional[int], Optional[str], Optional[str]]:
+    """Choose the authoritative review state from bot review comments.
+
+    Returns (summary_comment_id, last_reviewed_sha, last_review_base_sha).
+    Provisional comments are skipped entirely: they are in-progress output and
+    must not advance reviewed state. State is accepted only from the newest
+    comment whose marker is owned by this workflow. If only legacy markerless
+    comments exist, the newest one is reused so the first marker-writing run
+    does not create a duplicate summary.
+    """
+    last_reviewed_sha = None
+    last_review_base_sha = None
+    summary_comment_id = None
+    legacy_summary_comment_id = None
+    for c in reversed(review_comments):
+        if is_provisional(c["body"]):
+            continue
+        match = REVIEW_STATE_PATTERN.search(c["body"])
+        if not match:
+            if legacy_summary_comment_id is None:
+                legacy_summary_comment_id = c["id"]
+            continue
+
+        try:
+            state = json.loads(match.group(1))
+        except json.JSONDecodeError:
+            continue
+
+        if workflow_ref and state.get("workflow_ref") != workflow_ref:
+            if is_legacy_review_comment(c, summary_heading) and legacy_summary_comment_id is None:
+                legacy_summary_comment_id = c["id"]
+            continue
+
+        summary_comment_id = c["id"]
+        last_reviewed_sha = state.get("last_reviewed_sha")
+        last_review_base_sha = state.get("base_sha")
+        break
+
+    if summary_comment_id is None:
+        summary_comment_id = legacy_summary_comment_id
+    return summary_comment_id, last_reviewed_sha, last_review_base_sha
+
+
 def command_error_summary(error: subprocess.CalledProcessError) -> str:
     detail = (error.stderr or error.stdout or "").strip()
     if not detail:
@@ -471,37 +528,9 @@ def main():
     # markers are untrusted PR content and must not influence review mode.
     review_comments = [c for c in state_comments if is_bot_review_comment(c, summary_heading)]
 
-    # Extract state from the newest bot review comment owned by this workflow.
-    # If only legacy markerless comments exist, reuse the newest one so the first
-    # marker-writing run does not create a duplicate summary.
-    last_reviewed_sha = None
-    last_review_base_sha = None
-    summary_comment_id = None
-    legacy_summary_comment_id = None
-    for c in reversed(review_comments):
-        match = REVIEW_STATE_PATTERN.search(c["body"])
-        if not match:
-            if legacy_summary_comment_id is None:
-                legacy_summary_comment_id = c["id"]
-            continue
-
-        try:
-            state = json.loads(match.group(1))
-        except json.JSONDecodeError:
-            continue
-
-        if workflow_ref and state.get("workflow_ref") != workflow_ref:
-            if is_legacy_review_comment(c, summary_heading) and legacy_summary_comment_id is None:
-                legacy_summary_comment_id = c["id"]
-            continue
-
-        summary_comment_id = c["id"]
-        last_reviewed_sha = state.get("last_reviewed_sha")
-        last_review_base_sha = state.get("base_sha")
-        break
-
-    if summary_comment_id is None:
-        summary_comment_id = legacy_summary_comment_id
+    summary_comment_id, last_reviewed_sha, last_review_base_sha = extract_review_state(
+        review_comments, summary_heading, workflow_ref
+    )
 
     pr_endpoint = f"repos/{repo}/pulls/{pr_number}"
     pr_result = gh_api([pr_endpoint])

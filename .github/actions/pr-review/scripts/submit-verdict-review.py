@@ -2,30 +2,34 @@
 """Submit the review verdict as a formal GitHub PR review.
 
 The review agent records its verdict in the sticky summary comment, but it no
-longer submits the formal `gh pr review` itself. That used to be the last
-instruction in the prompt, and it proved fragile: it depended on the agent
-reliably running a trailing Bash command at the very end of its turn. Claude
-Code upgrades have regressed exactly that behavior more than once — the agent
-stops after posting the summary comment, so `gh pr review` never runs and the
-PR shows a quiet summary with no blocking review (observed on
-ConductorOne/baton-axiomatic after the Claude Code 2.1.280 upgrade: zero formal
-reviews submitted across a full day of runs).
+longer submits the formal review itself — that trailing model step regressed
+repeatedly (the agent stops after the summary and no review is ever posted).
+CI reads the verdict out of the summary and submits it deterministically.
 
-This script removes that dependency. The agent only has to write an accurate
-summary comment; CI reads the verdict out of that comment and submits the
-matching `gh pr review` deterministically.
+This script is a gate. It submits ONLY from a summary that is provably this
+run's final output:
 
-Mode: baseline only. Reads "**Blocking Issues: N**" from the summary and maps
-it to --request-changes (N > 0) or --comment (N == 0). This reviewer never
-approves: there is deliberately no --approve path in this script.
+- FRESH: the comment's `updated_at` must be at/after REVIEW_RUN_STARTED_AT —
+  a successful agent step is not evidence a summary was posted.
+- FINAL: a comment containing the provisional (in-progress) line is refused;
+  a run that produced only provisional output fails here as incomplete.
+- OWNED: the review-state marker's workflow_ref must match this workflow.
+- BOUND: the marker's last_reviewed_sha must match the local checkout HEAD,
+  AND the live PR head (re-fetched immediately before submitting) must still
+  equal that SHA — a push during the run stops publication.
+- UNAMBIGUOUS: the verdict comes from exactly one canonical count row
+  (`**Blocking Issues: N** | **Suggestions: M** | **Threads Resolved: R**` on
+  its own line). PR titles, quoted findings, code blocks, malformed values,
+  or multiple candidate rows are all rejected.
 
-Reads the verdict from the most recent bot-authored issue comment containing
-SUMMARY_MARKER (the sticky summary the agent just posted/updated), and only
-when that comment's review-state marker is bound to the current HEAD. Exits
-nonzero if no verdict can be found or the review submission fails, so a broken
-gate is loud rather than silently green.
+Mode: baseline only. N > 0 -> REQUEST_CHANGES, N == 0 -> COMMENT. This
+reviewer never approves: there is deliberately no APPROVE path. The review is
+submitted via the REST API with an explicit `commit_id` (the reviewed SHA),
+so the verdict is bound to the commit it reviewed. Any gate failure exits
+nonzero — a broken review is a loud red check, never silent green.
 
-Ported from ductone/github-workflows (judge/approve mode stripped).
+Ported from ductone/github-workflows (judge/approve mode stripped), then
+hardened per gate review on ConductorOne/github-workflows#129.
 """
 
 import json
@@ -33,52 +37,82 @@ import os
 import re
 import subprocess
 import sys
+from datetime import datetime, timezone
 
 import _gh
 
 # Bot logins that post review comments via claude-code-action. Only GitHub
 # itself can author comments under these logins (the "[bot]" suffix is reserved
 # for apps and cannot be registered by a user), so a PR author cannot spoof a
-# verdict comment directly. The hardening below defends the remaining vectors:
-# a stale/foreign bot comment being read as if it were this run's verdict.
+# verdict comment directly. The gates below defend the remaining vectors: a
+# stale/foreign/provisional comment being read as this run's final verdict.
 BOT_LOGINS = {"github-actions[bot]", "github-actions"}
 
-# The blocking-count pattern is anchored to the bold form the prompt template
-# emits ("**Blocking Issues: 0**"), so free-text prose in the summary can't be
-# misread as the verdict.
-BLOCKING_COUNT_PATTERN = re.compile(
-    r"\*\*\s*Blocking\s+Issues:\s*(\d+)", re.IGNORECASE
+# The canonical verdict row from the summary template, on its own line, with
+# all three counts and closing bold markers. Anchoring to the full row means a
+# PR title (which precedes the row in the template), quoted findings, or code
+# blocks cannot supply the verdict, and malformed values ("0-2") do not parse.
+COUNT_ROW_PATTERN = re.compile(
+    r"^\*\*Blocking Issues: (\d+)\*\* \| "
+    r"\*\*Suggestions: \d+\*\* \| "
+    r"\*\*Threads Resolved: \d+\*\*\s*$",
+    re.MULTILINE,
 )
-# The sticky comment embeds the SHA it reviewed. We require it to match the
-# current HEAD before submitting, so a verdict from an earlier (e.g. clean)
-# commit can never be replayed against the current (e.g. malicious) head, and
-# a comment lacking this marker (a foreign bot comment that merely contains
-# the human-readable header) is rejected.
+# The sticky comment embeds the SHA it reviewed; it must match the current
+# HEAD, so a verdict from an earlier commit can never be replayed against the
+# current one, and a comment lacking this marker is rejected.
 REVIEW_STATE_PATTERN = re.compile(
     r"<!--\s*review-state:\s*(\{.*?\})\s*-->", re.DOTALL
 )
+# Must match the provisional line required by prompts/base-pr-review.md.
+PROVISIONAL_MARKER = "_⏳ Provisional — deeper review still in progress._"
 
 
-def gh_api_paginate(endpoint: str) -> list[dict]:
-    """Fetch all pages from a REST endpoint via the shared resilient helper."""
-    return _gh.rest_paginate(endpoint)
+def _parse_ts(raw: str) -> datetime:
+    return datetime.fromisoformat(raw.replace("Z", "+00:00")).astimezone(timezone.utc)
 
 
-def latest_summary_comment(repo: str, pr_number: str, marker: str) -> str | None:
-    """Return the body of the most recent bot summary comment for this reviewer."""
-    comments = gh_api_paginate(f"repos/{repo}/issues/{pr_number}/comments")
+def run_started_at() -> datetime:
+    raw = os.environ.get("REVIEW_RUN_STARTED_AT", "")
+    if not raw:
+        print("REVIEW_RUN_STARTED_AT must be set", file=sys.stderr)
+        sys.exit(1)
+    return _parse_ts(raw)
+
+
+def is_fresh(comment: dict, started: datetime) -> bool:
+    raw = comment.get("updated_at") or comment.get("created_at") or ""
+    if not raw:
+        return False
+    return _parse_ts(raw) >= started
+
+
+def is_provisional(body: str) -> bool:
+    return PROVISIONAL_MARKER in body
+
+
+def marker_state(body: str) -> dict | None:
+    m = REVIEW_STATE_PATTERN.search(body)
+    if not m:
+        return None
+    try:
+        state = json.loads(m.group(1))
+    except json.JSONDecodeError:
+        return None
+    return state if isinstance(state, dict) else None
+
+
+def summary_candidates(repo: str, pr_number: str, marker: str) -> list[dict]:
+    """All bot-authored summary comments for this reviewer, newest id last."""
+    comments = _gh.rest_paginate(f"repos/{repo}/issues/{pr_number}/comments")
     matching = [
         c
         for c in comments
         if c.get("user", {}).get("login") in BOT_LOGINS
         and marker in c.get("body", "")
     ]
-    if not matching:
-        return None
-    # The sticky comment is updated in place; if more than one survives, the
-    # highest id is the most recently created.
     matching.sort(key=lambda c: c.get("id", 0))
-    return matching[-1].get("body", "")
+    return matching
 
 
 def current_head_sha() -> str:
@@ -91,15 +125,10 @@ def current_head_sha() -> str:
     ).stdout.strip()
 
 
-def comment_reviewed_sha(body: str) -> str | None:
-    """Extract last_reviewed_sha from the comment's review-state marker."""
-    m = REVIEW_STATE_PATTERN.search(body)
-    if not m:
-        return None
-    try:
-        return json.loads(m.group(1)).get("last_reviewed_sha")
-    except json.JSONDecodeError:
-        return None
+def live_head_sha(repo: str, pr_number: str) -> str:
+    """Re-fetch the PR's current head from the API immediately before submit."""
+    pr = _gh.rest("GET", f"repos/{repo}/pulls/{pr_number}")
+    return pr["head"]["sha"]
 
 
 def sha_bound_to_head(reviewed: str | None, head: str) -> bool:
@@ -118,32 +147,76 @@ def sha_bound_to_head(reviewed: str | None, head: str) -> bool:
     return n >= 7 and head[:n] == reviewed[:n]
 
 
+def parse_blocking_count(body: str) -> int | None:
+    """Extract the blocking-issue count from exactly one canonical count row.
+
+    Returns None when there is no canonical row (no verdict) or more than one
+    (ambiguous — refuse to guess).
+    """
+    matches = COUNT_ROW_PATTERN.findall(body)
+    if len(matches) != 1:
+        return None
+    return int(matches[0])
+
+
 def verdict_to_review(body: str) -> tuple[str, str] | None:
-    """Map a summary-comment body to (gh review flag, review body).
+    """Map a summary-comment body to (review event, review body).
 
     Baseline mode only: request changes on any blocking finding, otherwise
     leave a neutral comment. Never approves. Returns None if the blocking
-    count could not be parsed.
+    count could not be parsed unambiguously.
     """
-    m = BLOCKING_COUNT_PATTERN.search(body)
-    if not m:
+    blocking = parse_blocking_count(body)
+    if blocking is None:
         return None
-    blocking = int(m.group(1))
     if blocking > 0:
-        return "--request-changes", "Blocking issues found — see review comments."
-    return "--comment", "No blocking issues found."
+        return "REQUEST_CHANGES", "Blocking issues found — see review comments."
+    return "COMMENT", "No blocking issues found."
 
 
-def submit_review(repo: str, pr_number: str, flag: str, body: str) -> None:
-    """Submit a formal PR review via `gh pr review`, with transient retry.
+def select_final_summary(
+    candidates: list[dict], started: datetime
+) -> tuple[dict | None, str | None]:
+    """Pick this run's final summary from the candidates, newest first.
 
-    `gh` is the right tool for review submission (handles the reviews API and
-    event mapping), so it stays a subprocess; run_gh_cli adds bounded retry on
-    transient-looking failures. A terminal failure exits nonzero so a broken
-    gate is loud, never silently green."""
-    print(f"Submitting review: gh pr review {pr_number} {flag}")
+    Returns (comment, rejection_reason). A rejection_reason is set when
+    candidates exist but none qualifies — the run produced output that cannot
+    be treated as a final verdict, which must fail loudly.
+    """
+    saw_stale = False
+    for comment in reversed(candidates):
+        body = comment.get("body", "")
+        if not is_fresh(comment, started):
+            saw_stale = True
+            continue
+        if is_provisional(body):
+            return None, (
+                "the newest summary from this run is marked provisional "
+                "(in-progress); the run is incomplete and no verdict may be "
+                "submitted"
+            )
+        return comment, None
+    if saw_stale:
+        return None, (
+            "no summary comment was created or updated during this run; a "
+            "successful agent step is not evidence a final summary was posted"
+        )
+    return None, None
+
+
+def submit_review(repo: str, pr_number: str, commit: str, event: str, body: str) -> None:
+    """Submit a formal PR review via the REST API, bound to the reviewed commit.
+
+    `gh pr review` cannot carry a commit argument, so submission goes through
+    POST /pulls/{n}/reviews with an explicit commit_id — the verdict is bound
+    to the SHA that was actually reviewed."""
+    print(f"Submitting review: POST pulls/{pr_number}/reviews event={event} commit={commit[:12]}")
     try:
-        _gh.run_gh_cli(["pr", "review", pr_number, flag, "-b", body, "-R", repo])
+        _gh.rest(
+            "POST",
+            f"repos/{repo}/pulls/{pr_number}/reviews",
+            data={"commit_id": commit, "event": event, "body": body},
+        )
     except _gh.TerminalError as e:
         print(f"Failed to submit review: {e}", file=sys.stderr)
         sys.exit(1)
@@ -162,8 +235,11 @@ def main() -> None:
         )
         sys.exit(1)
 
-    body = latest_summary_comment(repo, pr_number, marker)
-    if body is None:
+    started = run_started_at()
+    workflow_ref = os.environ.get("GITHUB_WORKFLOW_REF", "")
+
+    candidates = summary_candidates(repo, pr_number, marker)
+    if not candidates:
         print(
             f"No bot summary comment matching {marker!r} found — cannot derive a "
             f"verdict. The review agent may not have posted its summary.",
@@ -171,12 +247,29 @@ def main() -> None:
         )
         sys.exit(1)
 
-    # Bind the verdict to the current HEAD. This refuses to act on a stale
-    # comment from an earlier commit (e.g. a clean commit that was reviewed
-    # before a malicious one was pushed) or a foreign bot comment that lacks
-    # the review-state marker but happens to contain the human-readable header.
+    comment, rejection = select_final_summary(candidates, started)
+    if comment is None:
+        print(f"Refusing to submit a review: {rejection}.", file=sys.stderr)
+        sys.exit(1)
+
+    body = comment.get("body", "")
+
+    # Ownership: the verdict must belong to this workflow, not a foreign one
+    # whose heading happens to match.
+    state = marker_state(body)
+    claimed_ref = (state or {}).get("workflow_ref")
+    if workflow_ref and claimed_ref and claimed_ref != workflow_ref:
+        print(
+            "Refusing to submit a review: the summary's review-state marker is "
+            f"owned by a different workflow ({claimed_ref!r} != {workflow_ref!r}).",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+
+    # Bind the verdict to the reviewed commit. This refuses to act on a stale
+    # comment from an earlier commit or a comment lacking the marker.
     head = current_head_sha()
-    reviewed = comment_reviewed_sha(body)
+    reviewed = (state or {}).get("last_reviewed_sha")
     if not sha_bound_to_head(reviewed, head):
         print(
             "Refusing to submit a review: the summary comment's reviewed SHA "
@@ -187,16 +280,31 @@ def main() -> None:
         )
         sys.exit(1)
 
-    mapping = verdict_to_review(body)
-    if mapping is None:
+    # Bind to the LIVE PR head: a push during the run stops publication. The
+    # prompt's head guard covers the agent's own posts; this covers the CI
+    # submission the agent no longer performs.
+    live = live_head_sha(repo, pr_number)
+    if live != head:
         print(
-            "Could not parse a blocking-issue count from the summary comment.",
+            "Refusing to submit a review: the PR head changed during the run "
+            f"(reviewed {head}, live {live}). The verdict belongs to a commit "
+            "that is no longer current.",
             file=sys.stderr,
         )
         sys.exit(1)
 
-    flag, review_body = mapping
-    submit_review(repo, pr_number, flag, review_body)
+    mapping = verdict_to_review(body)
+    if mapping is None:
+        print(
+            "Could not parse an unambiguous blocking-issue count from the "
+            "summary comment (need exactly one canonical count row: "
+            "'**Blocking Issues: N** | **Suggestions: M** | **Threads Resolved: R**').",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+
+    event, review_body = mapping
+    submit_review(repo, pr_number, head, event, review_body)
 
 
 if __name__ == "__main__":
