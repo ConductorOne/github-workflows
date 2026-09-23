@@ -427,15 +427,17 @@ jobs:
           role-to-assume: arn:aws:iam::025044153841:role/${{ steps.role-names.outputs.gha_artifacts_role_name }}
           aws-region: us-west-2
 
-      # -p 4: GoReleaser defaults its build semaphore to runtime.GOMAXPROCS(0)
-      # (cmd/release.go), which is 3 on macos-latest. With four targets the fourth
-      # queues behind the first three. Pinning to the target count admits them all.
+      # -p pins GoReleaser's build semaphore, which otherwise defaults to
+      # runtime.GOMAXPROCS(0) (cmd/release.go). The standard macOS fleet is mixed
+      # (GitHub bills it as "3-core or 4-core"), so the number of the four targets
+      # that run concurrently varies by whichever machine a release lands on.
+      # Pinning it makes the release reproducible instead of a hardware lottery.
       - name: Run GoReleaser
         uses: goreleaser/goreleaser-action@v6
         with:
           workdir: _caller
           version: "~> v2.13"
-          args: release --clean -p 4 --config ../_workflows/_generated/.goreleaser.binaries.yaml
+          args: release --clean -p 3 --config ../_workflows/_generated/.goreleaser.binaries.yaml
         env:
           GITHUB_TOKEN: ${{ secrets.RELENG_GITHUB_TOKEN }}
           GORELEASER_CURRENT_TAG: ${{ inputs.tag }}
