@@ -36,7 +36,7 @@ on:
         required: false
         type: string
         default: "macos-latest-xlarge"
-        description: "Runner label for the macOS binaries job. Must be an Apple Silicon label; Intel runners would change the Homebrew prefix and the codesigning host."
+        description: "Runner label for the macOS binaries job. Prefer an Apple Silicon label; the Intel macos-latest-large label is allowed for runner benchmarking, but it changes the Homebrew prefix and the codesigning host."
       go_source_hygiene:
         required: false
         type: boolean
@@ -196,13 +196,15 @@ jobs:
         run: |
           # This job holds the Apple signing certificate and assumes the artifacts AWS role,
           # so the runner it lands on is a trust decision, not a preference. Allow only
-          # GitHub-hosted Apple Silicon labels.
+          # GitHub-hosted labels. macos-latest-large is Intel, kept on the list so the
+          # larger runner tiers can be benchmarked against each other; it changes the
+          # Homebrew prefix and the codesigning host, so it is not a release default.
           case "$MACOS_RUNNER" in
-            macos-latest|macos-latest-xlarge|macos-14-xlarge|macos-15-xlarge|macos-26-xlarge)
+            macos-latest|macos-latest-xlarge|macos-14-xlarge|macos-15-xlarge|macos-26-xlarge|macos-latest-large)
               echo "Using macOS runner: $MACOS_RUNNER"
               ;;
             *)
-              echo "::error::macos_runner must be a GitHub-hosted Apple Silicon label, got: $MACOS_RUNNER"
+              echo "::error::macos_runner must be a GitHub-hosted macOS runner label from the allowlist, got: $MACOS_RUNNER"
               exit 1
               ;;
           esac
