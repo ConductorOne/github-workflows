@@ -337,6 +337,18 @@ jobs:
       binaries_checksums: ${{ steps.output-checksums.outputs.checksums }}
       released_at: ${{ steps.release-meta.outputs.released_at }}
     steps:
+      # Diagnostic: GoReleaser sizes its build semaphore from runtime.GOMAXPROCS(0),
+      # so the runner's core count decides how many of the four targets build at once.
+      # GitHub bills the standard macOS tier as "3-core or 4-core" and one observed
+      # release did get 4 slots, so record the hardware instead of inferring it.
+      - name: Report runner hardware
+        shell: bash
+        run: |
+          echo "runner_label=${{ inputs.macos_runner }}"
+          echo "ncpu=$(sysctl -n hw.ncpu) logical=$(sysctl -n hw.logicalcpu) physical=$(sysctl -n hw.physicalcpu)"
+          echo "cpu=$(sysctl -n machdep.cpu.brand_string 2>/dev/null || echo unknown)"
+          echo "mem_bytes=$(sysctl -n hw.memsize)"
+
       - name: Checkout caller repo
         uses: actions/checkout@v5
         with:
