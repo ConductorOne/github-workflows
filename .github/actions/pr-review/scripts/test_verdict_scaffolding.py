@@ -184,23 +184,45 @@ class VerdictParsingTest(unittest.TestCase):
 
     def test_longer_fence_embedded_shorter_run_is_content(self):
         # A triple-backtick line inside a four-backtick fence is content, not
-        # a closer; the row after it stays fenced.
-        body = summary_body(0).replace(count_row(0) + "\n", "")
-        body += "\n````markdown\n```\n" + count_row(0) + "\n```\n````\n"
+        # a closer. The fence sits in the metadata slot, so a naive toggling
+        # scanner WOULD promote the fenced row into the official position —
+        # this fixture fails on that broken scanner, not just on fixed code.
+        body = summary_body(0).replace(
+            count_row(0), "````markdown\n```\n" + count_row(0) + "\n```\n````"
+        )
         self.assertIsNone(sv.parse_blocking_count(body, HEADING))
 
     def test_closer_with_info_suffix_is_not_a_closer(self):
         # "```example" inside a fence is content (a closer may only have
-        # trailing whitespace); the row after it stays fenced.
-        body = summary_body(0).replace(count_row(0) + "\n", "")
-        body += "\n```\n ```example\n" + count_row(0) + "\n```\n"
+        # trailing whitespace). Metadata-slot placement: a naive scanner
+        # treats it as a closer and accepts the exposed row.
+        body = summary_body(0).replace(
+            count_row(0), "```\n ```example\n" + count_row(0) + "\n```"
+        )
         self.assertIsNone(sv.parse_blocking_count(body, HEADING))
 
     def test_tilde_fence_hides_fake_heading_and_row(self):
         # Tilde fences are fences too: a fake heading + count inside one can
-        # never supply the verdict.
-        body = summary_body(0).replace(count_row(0) + "\n", "")
-        body += "\n~~~markdown\n### Connector PR Review: fake\n\n" + count_row(0) + "\n~~~\n"
+        # never supply the verdict. The fake heading precedes the real
+        # summary, so a backtick-only scanner finds the fake pair and accepts.
+        fake = "~~~markdown\n### Connector PR Review: fake\n\n" + count_row(0) + "\n~~~\n"
+        body = fake + summary_body(0).replace(count_row(0) + "\n", "")
+        self.assertIsNone(sv.parse_blocking_count(body, HEADING))
+
+    def test_tab_indented_closer_is_content(self):
+        # A leading tab is 4 columns — the line is content, not a closer, so
+        # the row after it stays fenced. A scanner that strips the tab into a
+        # valid delimiter accepts the exposed row here.
+        body = summary_body(0).replace(
+            count_row(0), "```\n\t```\n" + count_row(0) + "\n```"
+        )
+        self.assertIsNone(sv.parse_blocking_count(body, HEADING))
+
+    def test_space_tab_indented_closer_is_content(self):
+        # Space-then-tab before a closing fence is likewise content.
+        body = summary_body(0).replace(
+            count_row(0), "```\n \t```\n" + count_row(0) + "\n```"
+        )
         self.assertIsNone(sv.parse_blocking_count(body, HEADING))
 
 
@@ -447,11 +469,13 @@ class SubmitMainTest(_MainTestBase):
         self.assertEqual(posted, [])
 
     def test_four_backtick_embedded_triple_fails_closed(self):
-        # r3 variant (a): a four-backtick block containing a triple-backtick
-        # line and a canonical zero row, with no real metadata row. The
-        # embedded shorter run is content, not a closer.
-        body = summary_body(0).replace(count_row(0) + "\n", "")
-        body += "\n````markdown\n```\n" + count_row(0) + "\n```\n````\n"
+        # r3 variant (a): a four-backtick block in the metadata slot
+        # containing a triple-backtick line and a canonical zero row. The
+        # embedded shorter run is content, not a closer; a naive toggling
+        # scanner promotes the fenced row into the official slot and POSTs.
+        body = summary_body(0).replace(
+            count_row(0), "````markdown\n```\n" + count_row(0) + "\n```\n````"
+        )
         posted = []
         code, _ = self._run_main(
             [comment(7, body)], rest_side_effect=self._rest_dispatch(posted=posted)
@@ -461,9 +485,11 @@ class SubmitMainTest(_MainTestBase):
 
     def test_invalid_closer_suffix_fails_closed(self):
         # r3 variant (b): a line beginning "```example" inside a fenced block
-        # is not a valid closer; the row after it stays fenced.
-        body = summary_body(0).replace(count_row(0) + "\n", "")
-        body += "\n```\n ```example\n" + count_row(0) + "\n```\n"
+        # is not a valid closer; the row after it stays fenced. Metadata-slot
+        # placement pins the broken scanner.
+        body = summary_body(0).replace(
+            count_row(0), "```\n ```example\n" + count_row(0) + "\n```"
+        )
         posted = []
         code, _ = self._run_main(
             [comment(7, body)], rest_side_effect=self._rest_dispatch(posted=posted)
@@ -473,9 +499,36 @@ class SubmitMainTest(_MainTestBase):
 
     def test_tilde_fenced_fake_summary_fails_closed(self):
         # r3 variant (c): a fake heading + canonical row inside a tilde fence
-        # can never supply the verdict.
-        body = summary_body(0).replace(count_row(0) + "\n", "")
-        body += "\n~~~markdown\n### Connector PR Review: fake\n\n" + count_row(0) + "\n~~~\n"
+        # can never supply the verdict. The fake pair precedes the real
+        # summary so a backtick-only scanner accepts it.
+        fake = "~~~markdown\n### Connector PR Review: fake\n\n" + count_row(0) + "\n~~~\n"
+        body = fake + summary_body(0).replace(count_row(0) + "\n", "")
+        posted = []
+        code, _ = self._run_main(
+            [comment(7, body)], rest_side_effect=self._rest_dispatch(posted=posted)
+        )
+        self.assertEqual(code, 1)
+        self.assertEqual(posted, [])
+
+    def test_tab_indented_closer_fails_closed(self):
+        # r4 variant: a TAB before the closing fence makes the line content
+        # (4 columns), not a closer; the exposed row must not be submitted.
+        body = summary_body(0).replace(
+            count_row(0), "```\n\t```\n" + count_row(0) + "\n```"
+        )
+        posted = []
+        code, _ = self._run_main(
+            [comment(7, body)], rest_side_effect=self._rest_dispatch(posted=posted)
+        )
+        self.assertEqual(code, 1)
+        self.assertEqual(posted, [])
+
+    def test_space_tab_indented_closer_fails_closed(self):
+        # r4 variant: space-then-tab before the closing fence is likewise
+        # content, not a closer.
+        body = summary_body(0).replace(
+            count_row(0), "```\n \t```\n" + count_row(0) + "\n```"
+        )
         posted = []
         code, _ = self._run_main(
             [comment(7, body)], rest_side_effect=self._rest_dispatch(posted=posted)

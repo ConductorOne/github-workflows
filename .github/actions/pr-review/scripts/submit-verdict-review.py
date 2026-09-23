@@ -154,6 +154,10 @@ def sha_bound_to_head(reviewed: str | None, head: str) -> bool:
 # A fence opener: up to 3 leading spaces, then 3+ backticks or tildes, then an
 # optional info string (CommonMark 0.31.2, fenced code blocks).
 _FENCE_OPEN_PATTERN = re.compile(r"^ {0,3}(`{3,}|~{3,})(.*)$")
+# A fence closer: up to 3 LITERAL leading spaces (a leading tab is 4 columns —
+# content, not a closer), then a delimiter run, then only spaces/tabs. The
+# delimiter character and minimum length are checked against the opener.
+_FENCE_CLOSE_PATTERN = re.compile(r"^ {0,3}(`+|~+)[ \t]*$")
 
 
 def _top_level_lines(body: str) -> list[str]:
@@ -184,17 +188,16 @@ def _top_level_lines(body: str) -> list[str]:
                 continue
             lines.append(line)
             continue
-        # Inside a fence: only a valid closer ends it.
-        indent = len(line) - len(line.lstrip(" "))
-        stripped = line.strip()
-        if (
-            indent <= 3
-            and stripped
-            and set(stripped) == {fence_char}
-            and len(stripped) >= fence_len
-        ):
-            fence_char = None
-            fence_len = 0
+        # Inside a fence: only a valid closer ends it. The closer grammar is
+        # anchored: 0-3 literal leading spaces (a leading tab is 4 columns,
+        # i.e. content), the matching delimiter repeated at least the opening
+        # length, and only spaces/tabs afterward.
+        closer = _FENCE_CLOSE_PATTERN.match(line)
+        if closer:
+            delimiter = closer.group(1)
+            if delimiter[0] == fence_char and len(delimiter) >= fence_len:
+                fence_char = None
+                fence_len = 0
         # Fence openers/closers and fenced content are never top-level lines.
     return lines
 
