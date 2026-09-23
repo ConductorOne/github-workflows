@@ -313,6 +313,16 @@ jobs:
       binaries_checksums: ${{ steps.output-checksums.outputs.checksums }}
       released_at: ${{ steps.release-meta.outputs.released_at }}
     steps:
+      # Records the core count so a run can be read correctly: GitHub bills the
+      # standard macOS tier as "3-core or 4-core", and a 4-core runner would admit
+      # all four targets even without -p, masking the flag's effect.
+      - name: Report runner hardware
+        shell: bash
+        run: |
+          echo "ncpu=$(sysctl -n hw.ncpu) logical=$(sysctl -n hw.logicalcpu) physical=$(sysctl -n hw.physicalcpu)"
+          echo "cpu=$(sysctl -n machdep.cpu.brand_string 2>/dev/null || echo unknown)"
+          echo "mem_bytes=$(sysctl -n hw.memsize)"
+
       - name: Checkout caller repo
         uses: actions/checkout@v5
         with:
@@ -417,12 +427,15 @@ jobs:
           role-to-assume: arn:aws:iam::025044153841:role/${{ steps.role-names.outputs.gha_artifacts_role_name }}
           aws-region: us-west-2
 
+      # -p 4: GoReleaser defaults its build semaphore to runtime.GOMAXPROCS(0)
+      # (cmd/release.go), which is 3 on macos-latest. With four targets the fourth
+      # queues behind the first three. Pinning to the target count admits them all.
       - name: Run GoReleaser
         uses: goreleaser/goreleaser-action@v6
         with:
           workdir: _caller
           version: "~> v2.13"
-          args: release --clean --config ../_workflows/_generated/.goreleaser.binaries.yaml
+          args: release --clean -p 4 --config ../_workflows/_generated/.goreleaser.binaries.yaml
         env:
           GITHUB_TOKEN: ${{ secrets.RELENG_GITHUB_TOKEN }}
           GORELEASER_CURRENT_TAG: ${{ inputs.tag }}
