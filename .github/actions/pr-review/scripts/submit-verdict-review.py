@@ -18,9 +18,11 @@ run's final output:
   AND the live PR head (re-fetched immediately before submitting) must still
   equal that SHA — a push during the run stops publication.
 - UNAMBIGUOUS: the verdict comes from exactly one canonical count row
-  (`**Blocking Issues: N** | **Suggestions: M** | **Threads Resolved: R**` on
-  its own line). PR titles, quoted findings, code blocks, malformed values,
-  or multiple candidate rows are all rejected.
+  (`**Blocking Issues: N** | **Suggestions: M** | **Threads Resolved: R**`)
+  in its prescribed top-level position — the first non-empty line after the
+  summary heading — with fenced code blocks stripped before parsing. PR
+  titles, quoted findings, fenced example/source text, malformed values,
+  out-of-position rows, or multiple candidate rows are all rejected.
 
 Mode: baseline only. N > 0 -> REQUEST_CHANGES, N == 0 -> COMMENT. This
 reviewer never approves: there is deliberately no APPROVE path. The review is
@@ -147,26 +149,59 @@ def sha_bound_to_head(reviewed: str | None, head: str) -> bool:
     return n >= 7 and head[:n] == reviewed[:n]
 
 
-def parse_blocking_count(body: str) -> int | None:
-    """Extract the blocking-issue count from exactly one canonical count row.
+def _strip_code_fences(body: str) -> str:
+    """Remove fenced code blocks (``` ... ```) from the body.
 
-    Returns None when there is no canonical row (no verdict) or more than one
-    (ambiguous — refuse to guess).
+    Fenced content is untrusted example/source text — the summary template
+    itself ends with a fenced "Prompt for AI agents" block, and findings may
+    quote count-shaped text. It must never supply the verdict.
     """
-    matches = COUNT_ROW_PATTERN.findall(body)
-    if len(matches) != 1:
+    out = []
+    in_fence = False
+    for line in body.splitlines():
+        if line.lstrip().startswith("```"):
+            in_fence = not in_fence
+            continue
+        if not in_fence:
+            out.append(line)
+    return "\n".join(out)
+
+
+def parse_blocking_count(body: str, heading: str) -> int | None:
+    """Extract the blocking-issue count from the summary's metadata row.
+
+    The verdict is accepted ONLY from exactly one canonical count row sitting
+    in its prescribed top-level position: the first non-empty line after the
+    summary heading. Fenced code blocks are stripped before parsing, so
+    example/source text cannot supply a row. Returns None — reject — when the
+    row is absent, malformed, out of position, or when more than one
+    canonical row remains (ambiguous).
+    """
+    text = _strip_code_fences(body)
+    rows = list(COUNT_ROW_PATTERN.finditer(text))
+    if len(rows) != 1:
         return None
-    return int(matches[0])
+    lines = text.splitlines()
+    for i, line in enumerate(lines):
+        if line.startswith(heading):
+            for nxt in lines[i + 1:]:
+                if not nxt.strip():
+                    continue
+                if COUNT_ROW_PATTERN.match(nxt):
+                    return int(rows[0].group(1))
+                return None
+            return None
+    return None
 
 
-def verdict_to_review(body: str) -> tuple[str, str] | None:
+def verdict_to_review(body: str, heading: str) -> tuple[str, str] | None:
     """Map a summary-comment body to (review event, review body).
 
     Baseline mode only: request changes on any blocking finding, otherwise
     leave a neutral comment. Never approves. Returns None if the blocking
-    count could not be parsed unambiguously.
+    count could not be parsed unambiguously from the summary's metadata row.
     """
-    blocking = parse_blocking_count(body)
+    blocking = parse_blocking_count(body, heading)
     if blocking is None:
         return None
     if blocking > 0:
@@ -293,12 +328,14 @@ def main() -> None:
         )
         sys.exit(1)
 
-    mapping = verdict_to_review(body)
+    mapping = verdict_to_review(body, marker)
     if mapping is None:
         print(
             "Could not parse an unambiguous blocking-issue count from the "
-            "summary comment (need exactly one canonical count row: "
-            "'**Blocking Issues: N** | **Suggestions: M** | **Threads Resolved: R**').",
+            "summary comment (need exactly one canonical count row — "
+            "'**Blocking Issues: N** | **Suggestions: M** | **Threads Resolved: R**' — "
+            "as the first non-empty line after the summary heading; fenced "
+            "code blocks are ignored).",
             file=sys.stderr,
         )
         sys.exit(1)
