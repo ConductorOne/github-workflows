@@ -628,11 +628,14 @@ class SummaryHeadingValidationTest(unittest.TestCase):
             with self.subTest(value=value):
                 self.assertFalse(fpc.is_valid_summary_heading(value))
 
-    def test_rejects_reserved_heading_extensions(self):
+    def test_rejects_reserved_heading_collisions(self):
         for value in (
             "### Connector PR Review: Replay:",
             "### General PR Review: Replay:",
             "### PR Review: Replay:",
+            "### Replay: ### Connector PR Review:",
+            "### Replay: ### General PR Review:",
+            "### Replay: ### PR Review:",
         ):
             with self.subTest(value=value):
                 self.assertFalse(fpc.is_valid_summary_heading(value))

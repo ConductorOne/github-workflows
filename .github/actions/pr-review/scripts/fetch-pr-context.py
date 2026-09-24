@@ -50,12 +50,12 @@ def is_valid_summary_heading(value: str) -> bool:
         return False
     if not value.startswith("### ") or not value.endswith(":"):
         return False
-    # Prefix-based legacy consumers must not mistake a custom summary for
+    # Substring-based legacy consumers must not mistake a custom summary for
     # their own. Exact built-in headings remain valid for existing callers.
-    if value != LEGACY_REVIEW_SUMMARY_HEADING and value.startswith(LEGACY_REVIEW_SUMMARY_HEADING):
+    if value != LEGACY_REVIEW_SUMMARY_HEADING and LEGACY_REVIEW_SUMMARY_HEADING in value:
         return False
     for reserved in BUILT_IN_REVIEW_SUMMARY_HEADINGS:
-        if value != reserved and value.startswith(reserved):
+        if value != reserved and reserved in value:
             return False
     return bool(value[len("### "):-1].strip())
 
