@@ -303,7 +303,7 @@ jobs:
 
   goreleaser-binaries:
     needs: [determine-workflows-ref, release-preflight]
-    runs-on: macos-26-arm64
+    runs-on: macos-26
     permissions:
       contents: read
       id-token: write # <-- needed for cosign keyless (OIDC)
@@ -320,7 +320,7 @@ jobs:
       - name: Report runner hardware
         shell: bash
         run: |
-          echo "runner_label=macos-26-arm64"
+          echo "runner_label=macos-26"
           echo "ncpu=$(sysctl -n hw.ncpu) logical=$(sysctl -n hw.logicalcpu) physical=$(sysctl -n hw.physicalcpu)"
           echo "cpu=$(sysctl -n machdep.cpu.brand_string 2>/dev/null || echo unknown)"
           echo "mem_bytes=$(sysctl -n hw.memsize)"
