@@ -25,6 +25,29 @@ Prompt layers are additive:
 Keep broadly shared connector criteria in the connector mixin. Use repo-local
 `ci-review.md` only for rules that are specific to one repo or a small set of repos.
 
+The review assesses the whole change, including intent, correctness, security,
+meaningful test coverage, and operational risk. Prior findings are rechecked against
+current code; resolving a thread does not remove an unfixed blocker from the verdict.
+CI submits a commit-bound request-changes review for blockers or a neutral comment
+otherwise. This reviewer never approves. Stale, provisional, or malformed summaries
+cannot supply a completed verdict.
+
+### Reusable Workflow Calls
+
+Callers of `pr-review.yaml` must pass `ANTHROPIC_API_KEY` as a named secret; do not
+inherit unrelated secrets. The called workflow uses the caller's existing
+`GITHUB_TOKEN` and declared review permissions.
+
+The optional `summary_marker` input selects a single-line heading such as
+`### Connector PR Review Canary:`. Empty uses the selected profile's existing
+heading. Overrides cannot embed a different reserved connector, general, or legacy
+review heading. Custom headings keep summary/state selection separate; they do not
+isolate all inline review feedback or grant additional permissions.
+
+For candidate validation, pin the reusable workflow to the exact reviewed commit.
+Keep the test caller on a disposable same-repository draft branch; the normal
+ruleset reviewer can still run alongside it.
+
 ### Custom Review Criteria
 
 Repos can extend the review with project-specific criteria by adding a markdown file:
