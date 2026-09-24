@@ -606,8 +606,11 @@ class SummaryHeadingValidationTest(unittest.TestCase):
         for heading in (
             "### Connector PR Review:",
             "### General PR Review:",
+            "### PR Review:",
             "### Replay PR Review:",
             "### x:",
+            "### Connector PR Review Canary:",
+            "### Replay: isolated:",
         ):
             with self.subTest(heading=heading):
                 self.assertTrue(fpc.is_valid_summary_heading(heading))
@@ -621,6 +624,15 @@ class SummaryHeadingValidationTest(unittest.TestCase):
             "Connector PR Review:",  # not a heading
             "### Connector PR Review",  # missing trailing colon
             "### Connector PR Review: ",  # trailing space after the colon
+        ):
+            with self.subTest(value=value):
+                self.assertFalse(fpc.is_valid_summary_heading(value))
+
+    def test_rejects_reserved_heading_extensions(self):
+        for value in (
+            "### Connector PR Review: Replay:",
+            "### General PR Review: Replay:",
+            "### PR Review: Replay:",
         ):
             with self.subTest(value=value):
                 self.assertFalse(fpc.is_valid_summary_heading(value))

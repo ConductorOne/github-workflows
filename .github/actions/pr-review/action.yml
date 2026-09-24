@@ -67,6 +67,12 @@ runs:
           echo "::error::summary_marker must be a Markdown heading of the form '### ...:'"
           exit 1
         fi
+        for reserved in "### Connector PR Review:" "### General PR Review:" "### PR Review:"; do
+          if [[ "${SUMMARY_MARKER}" != "${reserved}" && "${SUMMARY_MARKER}" == "${reserved}"* ]]; then
+            echo "::error::summary_marker must not extend a reserved review heading"
+            exit 1
+          fi
+        done
         summary_heading="${SUMMARY_MARKER}"
       fi
       echo "summary_heading=${summary_heading}" >> "${GITHUB_OUTPUT}"
