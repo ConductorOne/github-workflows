@@ -98,11 +98,6 @@ def is_bot_review_comment(comment: dict, summary_heading: str) -> bool:
     )
 
 
-def is_legacy_review_comment(comment: dict, summary_heading: str) -> bool:
-    """Check if a comment is a bot-posted pre-migration review summary."""
-    return review_comment_heading(comment, summary_heading) == LEGACY_REVIEW_SUMMARY_HEADING
-
-
 # Line the review prompt requires on provisional (in-progress) summaries. A
 # provisional comment is progress output, not a completed review: it must never
 # supply review state, or a killed/lazy run would advance last_reviewed_sha
@@ -116,50 +111,68 @@ def is_provisional(body: str) -> bool:
 
 
 def extract_review_state(
-    review_comments: list[dict], summary_heading: str, workflow_ref: str
+    review_comments: list[dict], workflow_ref: str
 ) -> tuple[Optional[int], Optional[str], Optional[str]]:
-    """Choose the authoritative review state from bot review comments.
+    """Choose the summary comment to update and the authoritative review state.
 
     Returns (summary_comment_id, last_reviewed_sha, last_review_base_sha).
-    Provisional comments are skipped entirely: they are in-progress output and
-    must not advance reviewed state. State is accepted only from the newest
-    comment whose marker is owned by this workflow. If only markerless
-    comments exist, the newest one is reused so the first marker-writing run
-    does not create a duplicate summary. Callers pass only comments matching
-    the selected heading (legacy-heading comments included solely for the
-    built-in production headings), so a custom heading can never adopt
-    production or legacy review state.
+    Comment identity and completed-review state are selected separately:
+
+    - summary_comment_id is the newest eligible summary comment, even when it
+      is provisional or markerless, so a retried run updates the existing
+      summary instead of posting a duplicate next to an abandoned provisional.
+    - last_reviewed_sha/last_review_base_sha come from the newest comment with
+      a non-provisional marker owned by this workflow. A provisional marker
+      never supplies state: it is in-progress output and must not advance
+      reviewed state. When no completed state exists the caller falls back to
+      full review mode but still updates the same summary comment.
+
+    A comment carrying an explicit foreign workflow's marker supplies neither
+    the slot nor state, including one under a legacy heading. A comment whose
+    marker fails to parse fails closed the same way. Markerless bot summaries
+    remain reusable slots under the heading/bot trust fallback (the caller
+    passes only bot-authored comments matching the selected heading), but they
+    carry no state. Callers pass only comments matching the selected heading
+    (legacy-heading comments included solely for the built-in production
+    headings), so a custom heading can never adopt production or legacy review
+    state.
     """
+    summary_comment_id = None
     last_reviewed_sha = None
     last_review_base_sha = None
-    summary_comment_id = None
-    legacy_summary_comment_id = None
     for c in reversed(review_comments):
-        if is_provisional(c["body"]):
-            continue
         match = REVIEW_STATE_PATTERN.search(c["body"])
         if not match:
-            if legacy_summary_comment_id is None:
-                legacy_summary_comment_id = c["id"]
+            # Markerless summary: reusable as the update slot under the
+            # heading/bot trust fallback, but it carries no review state.
+            if summary_comment_id is None:
+                summary_comment_id = c["id"]
             continue
 
         try:
             state = json.loads(match.group(1))
         except json.JSONDecodeError:
+            state = None
+        if not isinstance(state, dict):
+            # Malformed marker (unparseable or not a JSON object): fail
+            # closed — neither slot nor state.
             continue
 
         if workflow_ref and state.get("workflow_ref") != workflow_ref:
-            if is_legacy_review_comment(c, summary_heading) and legacy_summary_comment_id is None:
-                legacy_summary_comment_id = c["id"]
+            # Explicit foreign workflow marker: never adopt its summary
+            # thread or its state, even under a legacy heading.
             continue
 
-        summary_comment_id = c["id"]
+        if summary_comment_id is None:
+            summary_comment_id = c["id"]
+        if is_provisional(c["body"]):
+            # Provisional owned marker: a valid update slot, but completed
+            # state must come from an older finished review — keep scanning.
+            continue
         last_reviewed_sha = state.get("last_reviewed_sha")
         last_review_base_sha = state.get("base_sha")
         break
 
-    if summary_comment_id is None:
-        summary_comment_id = legacy_summary_comment_id
     return summary_comment_id, last_reviewed_sha, last_review_base_sha
 
 
@@ -570,7 +583,7 @@ def main():
     review_comments = [c for c in state_comments if is_bot_review_comment(c, summary_heading)]
 
     summary_comment_id, last_reviewed_sha, last_review_base_sha = extract_review_state(
-        review_comments, summary_heading, workflow_ref
+        review_comments, workflow_ref
     )
 
     pr_endpoint = f"repos/{repo}/pulls/{pr_number}"

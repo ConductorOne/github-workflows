@@ -216,85 +216,168 @@ class FetchCompareDiffTest(unittest.TestCase):
         self.assertEqual(meta["kept_bytes"], 0)
 
 
-class MainContextTest(unittest.TestCase):
-    def test_incremental_diff_metadata_written_to_context(self):
-        metadata = {
-            "dropped_sections": 1,
-            "dropped_paths": ["vendor/example.com/pkg/secret.go"],
-            "dropped_paths_omitted": 0,
-            "truncated": False,
-            "kept_bytes": len(GO_SECTION),
-            "partial": True,
-        }
-        workflow_ref = "ConductorOne/github-workflows/.github/workflows/pr-review.yaml@refs/heads/main"
-        state = json.dumps(
-            {
-                "last_reviewed_sha": "old-sha",
-                "base_sha": "base-sha",
-                "workflow_ref": workflow_ref,
-            }
-        )
-        raw_comments = [
-            {
-                "id": 123,
-                "author_association": "MEMBER",
-                "user": {"login": "github-actions[bot]", "type": "Bot"},
-                "body": f"{fpc.DEFAULT_REVIEW_SUMMARY_HEADING} Previous\n<!-- review-state: {state} -->",
-            }
-        ]
-        pr = {
-            "head": {
-                "sha": "head-sha",
-                "repo": {"full_name": "ConductorOne/example"},
-            },
-            "base": {
-                "sha": "base-sha",
-                "ref": "main",
-                "repo": {"default_branch": "main"},
-            },
-        }
+_WORKFLOW_REF = (
+    "ConductorOne/github-workflows/.github/workflows/pr-review.yaml@refs/heads/main"
+)
+_FOREIGN_WORKFLOW_REF = "other/repo/.github/workflows/x.yaml@refs/heads/main"
 
+
+def _raw_comment(cid, login, body, user_type="Bot", association="MEMBER"):
+    """A raw PR comment as the GitHub issues API returns it."""
+    return {
+        "id": cid,
+        "author_association": association,
+        "user": {"login": login, "type": user_type},
+        "body": body,
+    }
+
+
+def _review_state_marker(sha, base="base-sha", workflow_ref=_WORKFLOW_REF):
+    state = {"last_reviewed_sha": sha, "base_sha": base, "workflow_ref": workflow_ref}
+    return f"<!-- review-state: {json.dumps(state)} -->"
+
+
+class MainContextTest(unittest.TestCase):
+    ENV = {
+        "GITHUB_REPOSITORY": "ConductorOne/example",
+        "PR_NUMBER": "42",
+        "PR_HEAD_SHA": "head-sha",
+        "GITHUB_WORKFLOW_REF": _WORKFLOW_REF,
+        "GITHUB_RUN_ID": "99",
+        "GITHUB_SERVER_URL": "https://github.com",
+    }
+    PR = {
+        "head": {
+            "sha": "head-sha",
+            "repo": {"full_name": "ConductorOne/example"},
+        },
+        "base": {
+            "sha": "base-sha",
+            "ref": "main",
+            "repo": {"default_branch": "main"},
+        },
+    }
+    COMPARE_METADATA = {
+        "dropped_sections": 1,
+        "dropped_paths": ["vendor/example.com/pkg/secret.go"],
+        "dropped_paths_omitted": 0,
+        "truncated": False,
+        "kept_bytes": len(GO_SECTION),
+        "partial": True,
+    }
+
+    def _run_main(self, raw_comments, *, compare_result=None):
+        """Run main() against mocked GitHub boundaries in a scratch cwd and
+        return (written pr-context.json, fetch_compare_diff mock)."""
         old_cwd = os.getcwd()
         with tempfile.TemporaryDirectory() as tmpdir:
             os.chdir(tmpdir)
             try:
                 with (
-                    mock.patch.dict(
-                        os.environ,
-                        {
-                            "GITHUB_REPOSITORY": "ConductorOne/example",
-                            "PR_NUMBER": "42",
-                            "PR_HEAD_SHA": "head-sha",
-                            "GITHUB_WORKFLOW_REF": workflow_ref,
-                            "GITHUB_RUN_ID": "99",
-                            "GITHUB_SERVER_URL": "https://github.com",
-                        },
-                        clear=False,
-                    ),
+                    mock.patch.dict(os.environ, self.ENV, clear=False),
                     mock.patch.object(fpc, "gh_api_paginate", return_value=raw_comments),
                     mock.patch.object(
                         fpc,
                         "gh_api",
-                        return_value=SimpleNamespace(stdout=json.dumps(pr)),
+                        return_value=SimpleNamespace(stdout=json.dumps(self.PR)),
                     ),
                     mock.patch.object(fpc, "current_checkout_sha", return_value="head-sha"),
                     mock.patch.object(
-                        fpc,
-                        "fetch_compare_diff",
-                        return_value=("diff text", metadata),
-                    ),
+                        fpc, "fetch_compare_diff", return_value=compare_result
+                    ) as compare_mock,
                 ):
                     fpc.main()
 
                 with open(".github/pr-context.json") as f:
-                    context = json.load(f)
-                self.assertEqual(context["review_mode"], "incremental")
-                self.assertEqual(context["incremental_diff_path"], ".github/incremental.diff")
-                self.assertEqual(context["incremental_diff_metadata"], metadata)
-                self.assertEqual(context["current_base_ref"], "main")
-                self.assertEqual(context["base_default_branch"], "main")
+                    return json.load(f), compare_mock
             finally:
                 os.chdir(old_cwd)
+
+    def test_incremental_diff_metadata_written_to_context(self):
+        raw_comments = [
+            _raw_comment(
+                123,
+                "github-actions[bot]",
+                f"{fpc.DEFAULT_REVIEW_SUMMARY_HEADING} Previous\n"
+                f"{_review_state_marker('old-sha')}",
+            )
+        ]
+
+        context, _ = self._run_main(
+            raw_comments, compare_result=("diff text", self.COMPARE_METADATA)
+        )
+
+        self.assertEqual(context["review_mode"], "incremental")
+        self.assertEqual(context["incremental_diff_path"], ".github/incremental.diff")
+        self.assertEqual(context["incremental_diff_metadata"], self.COMPARE_METADATA)
+        self.assertEqual(context["current_base_ref"], "main")
+        self.assertEqual(context["base_default_branch"], "main")
+
+    def test_abandoned_provisional_is_reused_with_full_review(self):
+        # The original PR #129 failure: a killed run leaves a provisional
+        # summary behind. The retry must update that comment rather than post
+        # a duplicate, while still running a full review (a provisional
+        # carries no completed state).
+        provisional = _raw_comment(
+            55,
+            "github-actions[bot]",
+            f"{fpc.DEFAULT_REVIEW_SUMMARY_HEADING} In progress\n"
+            f"{fpc.PROVISIONAL_MARKER}",
+        )
+
+        context, compare_mock = self._run_main([provisional])
+
+        self.assertEqual(context["summary_comment_id"], 55)
+        self.assertIsNone(context["last_reviewed_sha"])
+        self.assertIsNone(context["last_review_base_sha"])
+        self.assertEqual(context["review_mode"], "full")
+        self.assertIsNone(context["incremental_diff_path"])
+        compare_mock.assert_not_called()
+
+    def test_provisional_slot_split_from_completed_state_and_trust_filters(self):
+        # Newest-first: the foreign-workflow provisional (103) supplies
+        # nothing; the owned provisional (102) is the update slot but its
+        # forged up-to-date marker never advances state; completed state
+        # comes from the older final (101). The human-authored marker (104)
+        # is trusted prompt context but never review state.
+        final = _raw_comment(
+            101,
+            "github-actions[bot]",
+            f"{fpc.DEFAULT_REVIEW_SUMMARY_HEADING} Done\n"
+            f"{_review_state_marker('old-sha')}",
+        )
+        forged_provisional = _raw_comment(
+            102,
+            "github-actions[bot]",
+            f"{fpc.DEFAULT_REVIEW_SUMMARY_HEADING} In progress\n"
+            f"{fpc.PROVISIONAL_MARKER}\n"
+            f"{_review_state_marker('head-sha')}",
+        )
+        foreign_provisional = _raw_comment(
+            103,
+            "github-actions[bot]",
+            f"{fpc.LEGACY_REVIEW_SUMMARY_HEADING} In progress\n"
+            f"{fpc.PROVISIONAL_MARKER}\n"
+            f"{_review_state_marker('evil-sha', workflow_ref=_FOREIGN_WORKFLOW_REF)}",
+        )
+        human_forge = _raw_comment(
+            104,
+            "pr-author",
+            f"{fpc.DEFAULT_REVIEW_SUMMARY_HEADING} Done\n"
+            f"{_review_state_marker('human-sha')}",
+            user_type="User",
+        )
+
+        context, _ = self._run_main(
+            [final, forged_provisional, foreign_provisional, human_forge],
+            compare_result=("diff text", self.COMPARE_METADATA),
+        )
+
+        self.assertEqual(context["summary_comment_id"], 102)
+        self.assertEqual(context["last_reviewed_sha"], "old-sha")
+        self.assertEqual(context["last_review_base_sha"], "base-sha")
+        self.assertEqual(context["review_mode"], "incremental")
+        self.assertEqual([c["id"] for c in context["comments"]], [104])
 
 
 if __name__ == "__main__":

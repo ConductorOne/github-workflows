@@ -556,32 +556,134 @@ class SubmitMainTest(_MainTestBase):
         self.assertEqual(posted, [])
 
 
+FOREIGN_WORKFLOW_REF = "other/repo/.github/workflows/x.yaml@refs/heads/main"
+
+
 class FetchPrContextStateTest(unittest.TestCase):
+    """Comment-slot vs completed-state selection in fetch-pr-context.py.
+
+    extract_review_state picks the summary comment to update (the newest
+    eligible slot, provisional or markerless included) independently from the
+    completed review state (newest owned, non-provisional marker only), so a
+    retried run updates an abandoned provisional instead of posting a
+    duplicate summary next to it.
+    """
+
+    HEADING = "### Connector PR Review:"
+    LEGACY_HEADING = "### PR Review:"
+
     def _comment(self, body, cid=1):
         return {"id": cid, "user": "github-actions[bot]", "body": body}
 
-    def test_provisional_comment_never_supplies_state(self):
-        state = json.dumps({"last_reviewed_sha": HEAD, "base_sha": BASE, "workflow_ref": WORKFLOW_REF})
-        provisional = self._comment(f"### Connector PR Review: t\n{PROVISIONAL_LINE}\n<!-- review-state: {state} -->")
-        cid, sha, base = fpc.extract_review_state([provisional], "### Connector PR Review:", WORKFLOW_REF)
-        self.assertIsNone(sha)
-        self.assertIsNone(base)
+    def _marker(self, sha=HEAD, base=BASE, workflow_ref=WORKFLOW_REF):
+        state = {"last_reviewed_sha": sha, "base_sha": base}
+        if workflow_ref is not None:
+            state["workflow_ref"] = workflow_ref
+        return f"<!-- review-state: {json.dumps(state)} -->"
 
-    def test_final_comment_supplies_state(self):
-        state = json.dumps({"last_reviewed_sha": HEAD, "base_sha": BASE, "workflow_ref": WORKFLOW_REF})
-        final = self._comment(f"### Connector PR Review: t\n<!-- review-state: {state} -->")
-        cid, sha, base = fpc.extract_review_state([final], "### Connector PR Review:", WORKFLOW_REF)
-        self.assertEqual(sha, HEAD)
-        self.assertEqual(base, BASE)
-        self.assertEqual(cid, 1)
+    def _body(self, marker=None, *, provisional=False, heading=HEADING):
+        parts = [f"{heading} t"]
+        if provisional:
+            parts.append(PROVISIONAL_LINE)
+        if marker is not None:
+            parts.append(marker)
+        return "\n".join(parts)
 
-    def test_provisional_newer_than_final_does_not_advance(self):
-        state = json.dumps({"last_reviewed_sha": "oldsha123", "base_sha": BASE, "workflow_ref": WORKFLOW_REF})
-        final = self._comment(f"### Connector PR Review: t\n<!-- review-state: {state} -->", cid=1)
-        newer_state = json.dumps({"last_reviewed_sha": HEAD, "base_sha": BASE, "workflow_ref": WORKFLOW_REF})
-        provisional = self._comment(f"### Connector PR Review: t\n{PROVISIONAL_LINE}\n<!-- review-state: {newer_state} -->", cid=2)
-        cid, sha, _ = fpc.extract_review_state([final, provisional], "### Connector PR Review:", WORKFLOW_REF)
-        self.assertEqual(sha, "oldsha123")
+    def test_slot_and_state_selection(self):
+        old_sha = "oldsha123"
+        cases = [
+            # (name, comments oldest -> newest, (id, last_reviewed_sha, base))
+            ("empty history returns nothing", [], (None, None, None)),
+            (
+                "ordinary final supplies slot and state",
+                [self._comment(self._body(self._marker()), cid=1)],
+                (1, HEAD, BASE),
+            ),
+            (
+                # The original PR #129 failure: the retried run must update
+                # the abandoned provisional, not post a duplicate summary.
+                "markerless provisional is reused as slot without state",
+                [self._comment(self._body(provisional=True), cid=7)],
+                (7, None, None),
+            ),
+            (
+                "owned provisional with forged current sha never advances state",
+                [self._comment(self._body(self._marker(), provisional=True), cid=5)],
+                (5, None, None),
+            ),
+            (
+                "newer provisional keeps slot while older final supplies state",
+                [
+                    self._comment(self._body(self._marker(sha=old_sha)), cid=1),
+                    self._comment(self._body(self._marker(), provisional=True), cid=2),
+                ],
+                (2, old_sha, BASE),
+            ),
+            (
+                "newer markerless keeps slot while older final supplies state",
+                [
+                    self._comment(self._body(self._marker(sha=old_sha)), cid=1),
+                    self._comment(self._body(), cid=2),
+                ],
+                (2, old_sha, BASE),
+            ),
+            (
+                "foreign provisional supplies neither slot nor state",
+                [
+                    self._comment(self._body(self._marker(sha=old_sha)), cid=1),
+                    self._comment(
+                        self._body(self._marker(workflow_ref=FOREIGN_WORKFLOW_REF), provisional=True),
+                        cid=2,
+                    ),
+                ],
+                (1, old_sha, BASE),
+            ),
+            (
+                "foreign provisional alone yields nothing",
+                [self._comment(self._body(self._marker(workflow_ref=FOREIGN_WORKFLOW_REF), provisional=True), cid=9)],
+                (None, None, None),
+            ),
+            (
+                "foreign marker under legacy heading is not adopted",
+                [self._comment(
+                    self._body(self._marker(workflow_ref=FOREIGN_WORKFLOW_REF), heading=self.LEGACY_HEADING),
+                    cid=3,
+                )],
+                (None, None, None),
+            ),
+            (
+                "marker without workflow ref is foreign",
+                [self._comment(self._body(self._marker(workflow_ref=None)), cid=8)],
+                (None, None, None),
+            ),
+            (
+                "malformed marker fails closed",
+                [self._comment(self._body("<!-- review-state: {not json} -->"), cid=4)],
+                (None, None, None),
+            ),
+            (
+                "older provisional does not displace newer final",
+                [
+                    self._comment(self._body(provisional=True), cid=1),
+                    self._comment(self._body(self._marker()), cid=2),
+                ],
+                (2, HEAD, BASE),
+            ),
+            (
+                "newest final wins slot and state",
+                [
+                    self._comment(self._body(self._marker(sha=old_sha)), cid=1),
+                    self._comment(self._body(self._marker()), cid=2),
+                ],
+                (2, HEAD, BASE),
+            ),
+        ]
+        for name, comments, expected in cases:
+            with self.subTest(name=name):
+                self.assertEqual(
+                    expected,
+                    fpc.extract_review_state(comments, WORKFLOW_REF),
+                )
 
     def test_stamped_marker_round_trips(self):
         # The canonical marker the stamper writes is accepted by context
@@ -592,7 +694,7 @@ class FetchPrContextStateTest(unittest.TestCase):
             canonical = stamp.canonical_state(HEAD)
         body = f"### Connector PR Review: t\n<!-- review-state: {json.dumps(canonical)} -->"
         _, sha, base = fpc.extract_review_state(
-            [self._comment(body)], "### Connector PR Review:", WORKFLOW_REF
+            [self._comment(body)], WORKFLOW_REF
         )
         self.assertEqual(sha, HEAD)
         self.assertEqual(base, BASE)
@@ -675,7 +777,7 @@ class CustomHeadingStateTest(unittest.TestCase):
         # The exact pipeline fetch-pr-context.py main() runs: filter bot
         # comments by heading, then extract authoritative state.
         review_comments = [c for c in comments if fpc.is_bot_review_comment(c, heading)]
-        return fpc.extract_review_state(review_comments, heading, workflow_ref)
+        return fpc.extract_review_state(review_comments, workflow_ref)
 
     def test_custom_heading_ignores_production_state(self):
         production = self._with_state(self.CONNECTOR, cid=1)
@@ -726,6 +828,34 @@ class CustomHeadingStateTest(unittest.TestCase):
         self.assertFalse(fpc.is_bot_review_comment(production, self.CUSTOM))
         self.assertFalse(fpc.is_bot_review_comment(legacy, self.CUSTOM))
         self.assertTrue(fpc.is_bot_review_comment(custom, self.CUSTOM))
+
+    def test_custom_heading_does_not_adopt_production_provisional(self):
+        # Slot reuse must not leak across headings: a custom-heading run
+        # leaves the production provisional thread alone.
+        production_provisional = self._comment(
+            f"{self.CONNECTOR} t\n{PROVISIONAL_LINE}", cid=9
+        )
+        cid, sha, base = self._select([production_provisional], self.CUSTOM)
+        self.assertIsNone(cid)
+        self.assertIsNone(sha)
+        self.assertIsNone(base)
+
+    def test_human_authored_marker_is_not_adopted(self):
+        # User-authored markers are untrusted PR content: a forged comment
+        # mimicking the summary format supplies neither the update slot nor
+        # review state.
+        state = json.dumps(
+            {"last_reviewed_sha": HEAD, "base_sha": BASE, "workflow_ref": WORKFLOW_REF}
+        )
+        forged = {
+            "id": 10,
+            "user": "pr-author",
+            "body": f"{self.CONNECTOR} t\n<!-- review-state: {state} -->",
+        }
+        cid, sha, base = self._select([forged], self.CONNECTOR)
+        self.assertIsNone(cid)
+        self.assertIsNone(sha)
+        self.assertIsNone(base)
 
 
 class PriorFindingsTest(unittest.TestCase):
