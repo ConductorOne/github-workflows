@@ -21,6 +21,7 @@ from typing import Optional
 REVIEW_STATE_PATTERN = re.compile(
     r"<!--\s*review-state:\s*(\{.*?\})\s*-->", re.DOTALL
 )
+REVIEW_STATE_MARKER_PATTERN = re.compile(r"<!--\s*review-state\b")
 HTTP_STATUS_PATTERN = re.compile(r"HTTP\s+(\d{3})")
 
 # Bot logins that post review comments via GitHub Actions.
@@ -143,6 +144,9 @@ def extract_review_state(
     for c in reversed(review_comments):
         match = REVIEW_STATE_PATTERN.search(c["body"])
         if not match:
+            if REVIEW_STATE_MARKER_PATTERN.search(c["body"]):
+                # An invalid or incomplete marker is not a markerless summary.
+                continue
             # Markerless summary: reusable as the update slot under the
             # heading/bot trust fallback, but it carries no review state.
             if summary_comment_id is None:

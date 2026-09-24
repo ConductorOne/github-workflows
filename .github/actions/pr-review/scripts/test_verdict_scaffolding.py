@@ -662,6 +662,16 @@ class FetchPrContextStateTest(unittest.TestCase):
                 (None, None, None),
             ),
             (
+                "non-object provisional marker is not a markerless slot",
+                [self._comment(self._body("<!-- review-state: [] -->", provisional=True), cid=4)],
+                (None, None, None),
+            ),
+            (
+                "unterminated provisional marker is not a markerless slot",
+                [self._comment(self._body('<!-- review-state: {"last_reviewed_sha": "forged"', provisional=True), cid=4)],
+                (None, None, None),
+            ),
+            (
                 "older provisional does not displace newer final",
                 [
                     self._comment(self._body(provisional=True), cid=1),
