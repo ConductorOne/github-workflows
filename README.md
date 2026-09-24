@@ -28,7 +28,8 @@ Keep broadly shared connector criteria in the connector mixin. Use repo-local
 The review assesses the whole change, including intent, correctness, security,
 meaningful test coverage, and operational risk. Prior findings are rechecked against
 current code; resolving a thread does not remove an unfixed blocker from the verdict.
-CI submits a commit-bound request-changes review for blockers or a neutral comment
+CI adds reviewed-state metadata after the agent publishes its final summary, then
+submits a commit-bound request-changes review for blockers or a neutral comment
 otherwise. This reviewer never approves. Stale, provisional, or malformed summaries
 cannot supply a completed verdict.
 Active findings appear once in their severity section, labeled `New` or

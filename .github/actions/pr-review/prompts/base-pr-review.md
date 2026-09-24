@@ -36,11 +36,11 @@ header:
 _⏳ Provisional — deeper review still in progress._
 ```
 
-The provisional summary is progress output, not a verdict: OMIT the
-`<!-- review-state: ... -->` marker from it (only the final summary carries the
-marker), and know that CI will refuse to stamp or submit a verdict from any
-comment still containing the provisional line — a run that ends provisional is
-a failed, incomplete run, not a clean one.
+The provisional summary is progress output, not a verdict. Do not emit review-state
+metadata in either summary: CI stamps the reviewed commit, base, and workflow after
+you publish the final summary. CI refuses a comment still marked provisional, so
+leave that line only while the review itself is incomplete. Once the review and
+final-comment publication are complete, remove it; do not wait for CI's metadata.
 
 Then keep working and replace it with your final summary, dropping the
 provisional line. If the run is killed mid-review, the provisional summary
@@ -61,9 +61,9 @@ need none at all. A bounded review you finish beats a thorough one that gets kil
 Read `.github/pr-context.json` — it contains pre-fetched PR data with these fields:
 - `repository`: the owner/repo name
 - `pr_number`: the pull request number
-- `current_sha`: the HEAD SHA (use this as `CURRENT_SHA`)
-- `current_base_sha`: the PR base SHA (use this as `CURRENT_BASE_SHA`)
-- `workflow_ref`: the workflow ref that owns this review state (use this as `CURRENT_WORKFLOW_REF`)
+- `current_sha`: the checked-out PR HEAD SHA
+- `current_base_sha`: the PR base SHA
+- `workflow_ref`: the workflow ref that owns this review state
 - `review_run_url`: link to this review workflow run
 - `summary_heading`: the exact markdown heading for the summary comment
 - `review_mode`: `"incremental"` or `"full"`
@@ -327,13 +327,13 @@ file:line and evidence; or "None.">
 <brief `fixed` / `obsolete` outcomes with the fixing file:line or replacement
 evidence; group related outcomes where possible. Do not repeat active findings
 here. Omit this section when no prior findings were fixed or made obsolete.>
-
-<!-- review-state: {"last_reviewed_sha": "CURRENT_SHA", "base_sha": "CURRENT_BASE_SHA", "workflow_ref": "CURRENT_WORKFLOW_REF"} -->
 ```
 
-Replace `CURRENT_SHA`, `CURRENT_BASE_SHA`, `CURRENT_WORKFLOW_REF`, and
-`<review_run_url>` with the values from `.github/pr-context.json`. If `review_run_url`
-is empty, omit the review run link line.
+Use `review_run_url` from `.github/pr-context.json`; omit the link if it is empty.
+CI owns the review-state marker and formal review submission. Do not try to write
+that marker, create a file to carry it, or leave a completed review provisional
+because the marker is absent. Publish the findings and final summary; CI attaches
+the metadata afterward.
 
 After the summary body, include a collapsible section with a single fenced code block
 that lists every finding as a concise, actionable description a developer can follow
