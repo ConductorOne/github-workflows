@@ -43,7 +43,11 @@ completion are the previous report (including any pending leftover) and the
 consumed working comment collapsed — bodies retained, linked to the new
 report — so a failed run leaves the previous report untouched.
 Stale, provisional, foreign, or malformed working output cannot be published, and a
-push during the run stops publication. Publication is idempotent per workflow run
+push during the run stops publication. Working output already consumed by a
+published report is never republished without fresh model work, and an attempt
+whose start predates an already-completed later attempt (compared by the actual
+attempt start times recorded in each report, never run-ID order) is refused as
+obsolete before publishing. Publication is idempotent per workflow run
 and attempt: a repeated finalization reuses the already-published report and never
 submits a second formal review, while an intentional new run or attempt gets a new
 report. Completed reports are never handed back to the agent as update targets — a

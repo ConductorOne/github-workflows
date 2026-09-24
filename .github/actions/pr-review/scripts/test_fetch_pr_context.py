@@ -14,6 +14,7 @@ or directly:
 import importlib.util
 import json
 import os
+import subprocess
 import sys
 import tempfile
 from types import SimpleNamespace
@@ -415,6 +416,322 @@ class MainContextTest(unittest.TestCase):
         self.assertIsNone(context["summary_comment_id"])
         self.assertEqual(context["last_reviewed_sha"], "old-sha")
         self.assertEqual(context["review_mode"], "incremental")
+
+
+class CompareFallbackTest(unittest.TestCase):
+    """Server-side compare outcomes after history rewrites (rebase, squash,
+    amend, force-push): any non-\"ahead\" status, API failure, or empty diff
+    must fall back to a full review — never produce a partial verdict from a
+    comparison that no longer describes the code."""
+
+    def _fetch(self, *, status=None, api_error=None, diff=b"diff --git a/f.go b/f.go\n@@ -1 +1 @@\n-a\n+b\n"):
+        calls = {"gh_api": 0, "gh_api_bytes": 0}
+
+        def fake_gh_api(args, **kw):
+            calls["gh_api"] += 1
+            if api_error is not None:
+                raise api_error
+            return SimpleNamespace(stdout=json.dumps({"status": status}))
+
+        def fake_gh_api_bytes(args, **kw):
+            calls["gh_api_bytes"] += 1
+            return diff
+
+        with (
+            mock.patch.object(fpc, "gh_api", side_effect=fake_gh_api),
+            mock.patch.object(fpc, "gh_api_bytes", side_effect=fake_gh_api_bytes),
+        ):
+            text, meta = fpc.fetch_compare_diff("owner/repo", "old-sha", "new-sha")
+        return text, meta, calls
+
+    def test_non_ahead_compare_status_falls_back_to_full(self):
+        # Squash/amend/force-push with an unchanged PR base: the previously
+        # reviewed SHA is no longer ancestral, so the server compare reports
+        # something other than "ahead". The raw diff must not even be fetched.
+        for status in ("diverged", "behind", "identical", ""):
+            with self.subTest(status=status):
+                text, meta, calls = self._fetch(status=status)
+                self.assertIsNone(text)
+                self.assertEqual(meta, fpc.empty_incremental_diff_metadata())
+                self.assertEqual(calls["gh_api_bytes"], 0)
+
+    def test_compare_api_error_falls_back_to_full(self):
+        # The old reviewed SHA is gone from the server (force-pushed branch
+        # rewritten before the compare): the 404 must degrade to full review,
+        # not kill the job.
+        err = subprocess.CalledProcessError(1, ["gh", "api"], stderr="HTTP 404: Not Found")
+        text, meta, calls = self._fetch(api_error=err)
+        self.assertIsNone(text)
+        self.assertEqual(meta, fpc.empty_incremental_diff_metadata())
+        self.assertEqual(calls["gh_api_bytes"], 0)
+
+    def test_wire_error_falls_back_to_full(self):
+        err = subprocess.CalledProcessError(1, ["gh", "api"], stderr="connection reset")
+        text, meta, _ = self._fetch(api_error=err)
+        self.assertIsNone(text)
+        self.assertEqual(meta, fpc.empty_incremental_diff_metadata())
+
+    def test_empty_diff_falls_back_to_full(self):
+        for diff in (b"", b"   \n"):
+            with self.subTest(diff=diff):
+                text, meta, _ = self._fetch(status="ahead", diff=diff)
+                self.assertIsNone(text)
+                self.assertEqual(meta, fpc.empty_incremental_diff_metadata())
+
+    def test_all_excluded_diff_falls_back_to_full(self):
+        # A non-empty compare whose every section is vendored/generated
+        # filters to nothing reviewable: the empty-TEXT guard (not the
+        # empty-raw guard) must fall back to full review.
+        text, meta, _ = self._fetch(status="ahead", diff=VENDOR_SECTION)
+        self.assertIsNone(text)
+        self.assertEqual(meta["dropped_sections"], 1)
+
+
+class HistoryRewriteContextTest(unittest.TestCase):
+    """End-to-end context behavior across history rewrites, through the real
+    fetch_compare_diff with only the gh CLI boundary mocked."""
+
+    ENV = MainContextTest.ENV
+    PR = MainContextTest.PR
+    COMPARE_METADATA = MainContextTest.COMPARE_METADATA
+    # Reuse MainContextTest's harness as an unbound method (subclassing it
+    # would re-run its tests under this class too).
+    _run_main = MainContextTest._run_main
+
+    def _run_main_raw_compare(self, raw_comments, *, pr=None, compare_status="ahead",
+                              compare_error=None, compare_diff=b"diff --git a/f.go b/f.go\n@@ -1 +1 @@\n-a\n+b\n"):
+        """Run main() with the REAL fetch_compare_diff; only gh_api* and the
+        paginated comment fetch are mocked. Returns (context, compare_calls,
+        written_files)."""
+        pr = pr if pr is not None else self.PR
+        compare_calls = []
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmpdir:
+            os.chdir(tmpdir)
+            try:
+                def fake_gh_api(args, **kw):
+                    endpoint = args[0]
+                    if "/compare/" in endpoint:
+                        compare_calls.append(endpoint)
+                        if compare_error is not None:
+                            raise compare_error
+                        return SimpleNamespace(stdout=json.dumps({"status": compare_status}))
+                    return SimpleNamespace(stdout=json.dumps(pr))
+
+                def fake_gh_api_bytes(args, **kw):
+                    compare_calls.append(args[0] + " (diff)")
+                    return compare_diff
+
+                with (
+                    mock.patch.dict(os.environ, self.ENV, clear=False),
+                    mock.patch.object(fpc, "gh_api_paginate", return_value=raw_comments),
+                    mock.patch.object(fpc, "gh_api", side_effect=fake_gh_api),
+                    mock.patch.object(fpc, "gh_api_bytes", side_effect=fake_gh_api_bytes),
+                    mock.patch.object(fpc, "current_checkout_sha", return_value="head-sha"),
+                ):
+                    fpc.main()
+
+                with open(".github/pr-context.json") as f:
+                    context = json.load(f)
+                written = set()
+                for root, _, files in os.walk(".github"):
+                    for name in files:
+                        written.add(os.path.join(root, name))
+                return context, compare_calls, written
+            finally:
+                os.chdir(old_cwd)
+
+    def _completed_report(self, cid, sha="old-sha", base="base-sha", findings=("- `pkg/foo.go:42` 🟠 Bug: stale finding",)):
+        body = (
+            f"{fpc.DEFAULT_REVIEW_SUMMARY_HEADING} Done\n"
+            + "".join(f"{line}\n" for line in findings)
+            + _review_state_marker(sha, base=base)
+        )
+        return _raw_comment(cid, "github-actions[bot]", body)
+
+    def test_rebase_onto_changed_base_forces_full_mode(self):
+        # Rebase onto a moved base: the recorded base_sha no longer matches the
+        # PR's current base, so the old reviewed SHA is meaningless for an
+        # incremental compare. Full review, and the server compare is never
+        # consulted — but the prior findings stay available for the
+        # current-code audit.
+        report = self._completed_report(101, base="previous-base-sha")
+        context, compare_mock = self._run_main([report])
+
+        self.assertEqual(context["review_mode"], "full")
+        self.assertIsNone(context["last_reviewed_sha"])
+        self.assertIsNone(context["incremental_diff_path"])
+        compare_mock.assert_not_called()
+        self.assertIn("- `pkg/foo.go:42` 🟠 Bug: stale finding", context["existing_findings"])
+
+    def test_force_push_diverged_compare_forces_full_mode(self):
+        # Squash/force-push with an UNCHANGED base: the compare against the old
+        # reviewed SHA comes back diverged. Full review, no incremental
+        # artifact on disk, reviewed state cleared, findings retained.
+        report = self._completed_report(101)
+        context, compare_calls, written = self._run_main_raw_compare(
+            [report], compare_status="diverged"
+        )
+
+        self.assertEqual(context["review_mode"], "full")
+        self.assertIsNone(context["last_reviewed_sha"])
+        self.assertIsNone(context["incremental_diff_path"])
+        self.assertEqual([c for c in compare_calls if "(diff)" in c], [])
+        self.assertNotIn(".github/incremental.diff", written)
+        self.assertIn("- `pkg/foo.go:42` 🟠 Bug: stale finding", context["existing_findings"])
+
+    def test_old_reviewed_sha_unavailable_forces_full_mode(self):
+        # The old SHA was garbage-collected after a force-push: the compare
+        # 404s. Full review, no incremental artifact, findings retained.
+        err = subprocess.CalledProcessError(1, ["gh", "api"], stderr="HTTP 404: Not Found")
+        report = self._completed_report(101)
+        context, _, written = self._run_main_raw_compare([report], compare_error=err)
+
+        self.assertEqual(context["review_mode"], "full")
+        self.assertIsNone(context["last_reviewed_sha"])
+        self.assertIsNone(context["incremental_diff_path"])
+        self.assertNotIn(".github/incremental.diff", written)
+        self.assertIn("- `pkg/foo.go:42` 🟠 Bug: stale finding", context["existing_findings"])
+
+    def test_unusable_compare_result_clears_reviewed_state(self):
+        # Any compare that yields no usable diff (empty, truncated to nothing)
+        # must clear the reviewed state: the model gets a full review, not an
+        # incremental anchored to a diff that does not exist.
+        report = self._completed_report(101)
+        context, _ = self._run_main(
+            [report], compare_result=(None, fpc.empty_incremental_diff_metadata())
+        )
+
+        self.assertEqual(context["review_mode"], "full")
+        self.assertIsNone(context["last_reviewed_sha"])
+        self.assertIsNone(context["incremental_diff_path"])
+
+    def test_existing_findings_mined_from_bot_reports_only(self):
+        # Prior findings come from bot review comments in either mode; a human
+        # comment mimicking the finding format is untrusted PR content and is
+        # never mined, even though it remains trusted prompt context.
+        bot_report = self._completed_report(101)
+        human_mimic = _raw_comment(
+            102,
+            "pr-author",
+            f"{fpc.DEFAULT_REVIEW_SUMMARY_HEADING} Fake\n- `pkg/evil.go:1` 🟠 Bug: spoofed finding\n",
+            user_type="User",
+        )
+        context, _ = self._run_main(
+            [bot_report, human_mimic],
+            compare_result=("diff text", self.COMPARE_METADATA),
+        )
+
+        self.assertIn("- `pkg/foo.go:42` 🟠 Bug: stale finding", context["existing_findings"])
+        self.assertNotIn("- `pkg/evil.go:1` 🟠 Bug: spoofed finding", context["existing_findings"])
+        self.assertEqual([c["id"] for c in context["comments"]], [102])
+
+
+class CheckoutGuardTest(unittest.TestCase):
+    """The local-checkout guards in fetch-pr-context.py main(), exercised
+    against REAL temporary git histories (no mocked rev-parse)."""
+
+    ENV = dict(MainContextTest.ENV)
+
+    def _init_repo(self, path):
+        def git(*args):
+            return subprocess.run(
+                ["git", *args], cwd=path, capture_output=True, text=True, check=True
+            ).stdout.strip()
+
+        git("init", "-q")
+        git("config", "user.email", "test@example.com")
+        git("config", "user.name", "Test")
+        with open(os.path.join(path, "file.txt"), "w") as f:
+            f.write("one\n")
+        git("add", "file.txt")
+        git("commit", "-qm", "initial")
+        return git("rev-parse", "HEAD")
+
+    def _run_main_in(self, path, pr_head_sha, env_extra=None):
+        env = dict(self.ENV)
+        remove_keys = []
+        for key, value in (env_extra or {}).items():
+            if value is None:
+                # patch.dict(clear=False) never DELETES ambient keys: a None
+                # sentinel must be popped inside the patched context, or an
+                # inherited PR_HEAD_SHA silently re-arms the event guards.
+                env.pop(key, None)
+                remove_keys.append(key)
+            else:
+                env[key] = value
+        with (
+            mock.patch.dict(os.environ, env, clear=False),
+            mock.patch.object(fpc, "gh_api_paginate", return_value=[]),
+            mock.patch.object(
+                fpc,
+                "gh_api",
+                return_value=SimpleNamespace(
+                    stdout=json.dumps(
+                        {
+                            "head": {"sha": pr_head_sha, "repo": {"full_name": "ConductorOne/example"}},
+                            "base": {"sha": "base-sha", "ref": "main", "repo": {"default_branch": "main"}},
+                        }
+                    )
+                ),
+            ),
+        ):
+            for key in remove_keys:
+                os.environ.pop(key, None)
+            old_cwd = os.getcwd()
+            os.chdir(path)
+            try:
+                fpc.main()
+                return 0
+            except SystemExit as e:
+                return e.code or 0
+            finally:
+                os.chdir(old_cwd)
+
+    def test_matching_real_checkout_proceeds(self):
+        # Positive control: a real checkout whose HEAD equals the event and
+        # live head passes every guard and writes the context.
+        with tempfile.TemporaryDirectory() as tmpdir:
+            real_sha = self._init_repo(tmpdir)
+            code = self._run_main_in(tmpdir, real_sha, env_extra={"PR_HEAD_SHA": real_sha})
+            self.assertEqual(code, 0)
+            with open(os.path.join(tmpdir, ".github", "pr-context.json")) as f:
+                context = json.load(f)
+            self.assertEqual(context["current_sha"], real_sha)
+            self.assertEqual(context["review_mode"], "full")
+
+    def test_checkout_mismatch_with_event_head_fails(self):
+        # A pre-force-push checkout (real history) cannot serve a review for
+        # the rewritten event head: fail before any context is written.
+        with tempfile.TemporaryDirectory() as tmpdir:
+            real_sha = self._init_repo(tmpdir)
+            other_sha = "0" * 40
+            self.assertNotEqual(real_sha, other_sha)
+            code = self._run_main_in(tmpdir, other_sha, env_extra={"PR_HEAD_SHA": other_sha})
+            self.assertEqual(code, 1)
+            self.assertFalse(os.path.exists(os.path.join(tmpdir, ".github", "pr-context.json")))
+
+    def test_checkout_mismatch_with_live_head_fails_when_event_sha_unset(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            real_sha = self._init_repo(tmpdir)
+            code = self._run_main_in(tmpdir, "0" * 40, env_extra={"PR_HEAD_SHA": None})
+            self.assertEqual(code, 1)
+            self.assertFalse(os.path.exists(os.path.join(tmpdir, ".github", "pr-context.json")))
+
+    def test_non_git_workspace_with_event_sha_fails(self):
+        # rev-parse fails outside a git repo: the checkout cannot be identified
+        # as the reviewed head, so the run fails closed. The ceiling keeps git
+        # from discovering a repository above the scratch dir.
+        with tempfile.TemporaryDirectory() as tmpdir:
+            code = self._run_main_in(
+                tmpdir,
+                # Live head equals the event head so the FIRST (event-vs-live)
+                # guard passes and the checkout guard is the one exercised.
+                self.ENV["PR_HEAD_SHA"],
+                env_extra={"GIT_CEILING_DIRECTORIES": os.path.dirname(tmpdir)},
+            )
+            self.assertEqual(code, 1)
+            self.assertFalse(os.path.exists(os.path.join(tmpdir, ".github", "pr-context.json")))
 
 
 if __name__ == "__main__":

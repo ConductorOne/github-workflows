@@ -168,7 +168,10 @@ runs:
     # steps regressed repeatedly — the agent stops after the summary and the
     # formal review is never submitted). This step:
     # 1. selects THIS run's fresh, final working summary (never a completed
-    #    report — those are CI-published output the model must not mutate),
+    #    report — those are CI-published output the model must not mutate —
+    #    and never output already consumed by a published report), refusing
+    #    as obsolete when a later attempt already completed (actual attempt
+    #    start times, never run-ID order),
     # 2. validates the baseline count row and that the live PR head still
     #    equals the reviewed checkout,
     # 3. POSTs a NEW report comment (publication: pending) carrying a visible
