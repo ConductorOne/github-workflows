@@ -31,6 +31,9 @@ current code; resolving a thread does not remove an unfixed blocker from the ver
 CI submits a commit-bound request-changes review for blockers or a neutral comment
 otherwise. This reviewer never approves. Stale, provisional, or malformed summaries
 cannot supply a completed verdict.
+Active findings appear once in their severity section, labeled `New` or
+`Prior — still present`. A compact resolved section records fixed/obsolete prior
+findings with evidence; it does not repeat the active findings.
 
 ### Reusable Workflow Calls
 

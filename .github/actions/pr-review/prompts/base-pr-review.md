@@ -134,10 +134,15 @@ flagged location and assign exactly one verdict:
 - `obsolete` — the code it applied to was removed or rewritten so the issue no
   longer applies. Say what replaced it.
 
-Report every verdict in the "Prior Findings Re-check" section of the summary
-(Step 7). This audit is required in BOTH review modes — incremental mode scopes
-NEW inline suggestions to the incremental diff, but the verdict and the prior
-findings audit always cover the whole PR.
+Report each active issue once in its Security, Correctness, or Suggestions section
+(Step 7), labeled **Prior — still present**; label newly discovered issues **New**.
+Do not repeat active issues in a separate audit list. Briefly record `fixed` and
+`obsolete` outcomes under "Resolved prior findings", with evidence rather than
+reprinting the old finding. Combine duplicate threads about the same issue into
+one summary item and count that issue once, but recheck every supplied entry.
+No prior finding can silently disappear without a current-code disposition.
+This audit is required in BOTH review modes — incremental mode scopes NEW inline
+suggestions to the incremental diff, but the audit always covers the whole PR.
 
 ### Step 4 — Use Trusted Repo-Local Review Criteria
 
@@ -276,8 +281,8 @@ findings the Step 3 audit confirmed `still present` at blocking severity — a P
 with a confirmed unfixed blocking issue stays blocked even when this push adds
 nothing new. CI reads this count and submits the formal PR review from it
 (`--request-changes` when N > 0, `--comment` when N == 0), so the count must be
-accurate: never inflate it, never zero it out while a blocking issue is
-confirmed still present.
+accurate: count each distinct issue once even when several prior threads describe
+it, never inflate the count, and never zero it out while a blocker is still present.
 
 Always include the review run link and a short review summary before the issue sections.
 Keep the review summary concise — a few sentences, evidence over volume. It must say:
@@ -305,19 +310,22 @@ _Review mode: incremental since `<last_reviewed_sha short>`_ (or _Review mode: f
 prior feedback when applicable, for example "The previous pagination suggestion is now
 addressed by passing the page token through the client call. No new issues found.">
 
-### Prior Findings Re-check
-<one line per `prior_findings` entry from Step 3: verdict (still present / fixed /
-obsolete) + evidence file:line — or "No prior findings." This section is mandatory
-whenever `.github/prior-findings.json` is non-empty.>
-
 ### Security Issues
-<one-liner per finding with file:line, or "None found.">
+<one line per distinct active issue: **New** or **Prior — still present**, file:line
+and concrete evidence; or "None found.">
 
 ### Correctness Issues
-<one-liner per finding with file:line, or "None found.">
+<one line per distinct active issue: **New** or **Prior — still present**, file:line
+and concrete evidence; or "None found.">
 
 ### Suggestions
-<one-liner per suggestion with file:line, or "None.">
+<one line per distinct active suggestion: **New** or **Prior — still present**,
+file:line and evidence; or "None.">
+
+### Resolved prior findings
+<brief `fixed` / `obsolete` outcomes with the fixing file:line or replacement
+evidence; group related outcomes where possible. Do not repeat active findings
+here. Omit this section when no prior findings were fixed or made obsolete.>
 
 <!-- review-state: {"last_reviewed_sha": "CURRENT_SHA", "base_sha": "CURRENT_BASE_SHA", "workflow_ref": "CURRENT_WORKFLOW_REF"} -->
 ```
