@@ -288,9 +288,10 @@ Always include the review run link and a short review summary before the issue s
 Keep the review summary concise — a few sentences, evidence over volume. It must say:
 what the change actually does (not just restate the PR title), that the full PR diff was
 scanned for security and correctness, how the trusted repo-local criteria were applied
-(or that none loaded), and why each reported finding matters. For incremental reviews,
-explicitly say what the new commits changed. If prior bot feedback appears addressed,
-say that in the review summary. Use
+(or that none loaded). For incremental reviews, explicitly say what the new commits
+changed. Explain findings in their classification sections and fixed/obsolete outcomes
+only in "Resolved prior findings"; do not repeat their descriptions or numeric totals
+in the review summary. On an unchanged-code push, do not imply that new fixes landed. Use
 `existing_findings`, `comments`, and `.github/resolved-threads.json` as context, but verify
 against the current diff before claiming something was fixed. If there were no prior findings
 and no new findings, say what changed and that no new issues were found. If any part of
@@ -306,9 +307,9 @@ _Review mode: incremental since `<last_reviewed_sha short>`_ (or _Review mode: f
 [View review run](<review_run_url>)
 
 ### Review Summary
-<1-3 sentences describing what was reviewed. In incremental mode, include addressed
-prior feedback when applicable, for example "The previous pagination suggestion is now
-addressed by passing the page token through the client call. No new issues found.">
+<1-3 sentences describing the actual change, review coverage, and criteria applied.
+For incremental review, explain the new commits without repeating finding totals or
+the resolved-findings list.>
 
 ### Security Issues
 <one line per distinct active issue: **New** or **Prior — still present**, file:line
