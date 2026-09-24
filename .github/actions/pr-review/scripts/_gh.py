@@ -426,7 +426,7 @@ def _status_link(source: str | None) -> str | None:
 # --------------------------------------------------------------------------- #
 # Review-stage failure marker.                                                 #
 #                                                                              #
-# A review-stage step (stamp / submit-verdict) that fails cannot post the      #
+# A review-stage step (context / publish) that fails cannot post the           #
 # outage/incomplete notice itself without racing the always() "classify"       #
 # step, which would double-post. Instead the failing script drops a small      #
 # JSON marker describing WHY it failed; the single classify step reads it and  #

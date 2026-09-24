@@ -37,10 +37,11 @@ _⏳ Provisional — deeper review still in progress._
 ```
 
 The provisional summary is progress output, not a verdict. Do not emit review-state
-metadata in either summary: CI stamps the reviewed commit, base, and workflow after
-you publish the final summary. CI refuses a comment still marked provisional, so
-leave that line only while the review itself is incomplete. Once the review and
-final-comment publication are complete, remove it; do not wait for CI's metadata.
+metadata in either summary: CI attaches the reviewed commit, base, workflow, and
+publication metadata when it publishes the completed report. CI refuses working output
+still marked provisional, so leave that line only while the review itself is
+incomplete. Once the review and final-comment publication are complete, remove it;
+do not wait for CI's metadata.
 
 Then keep working and replace it with your final summary, dropping the
 provisional line. If the run is killed mid-review, the provisional summary
@@ -68,7 +69,9 @@ Read `.github/pr-context.json` — it contains pre-fetched PR data with these fi
 - `summary_heading`: the exact markdown heading for the summary comment
 - `review_mode`: `"incremental"` or `"full"`
 - `last_reviewed_sha`: the SHA from the previous review, used only for deduplication
-- `summary_comment_id`: the existing bot summary comment to update, if one exists
+- `summary_comment_id`: the existing WORKING summary comment to update, if one
+  exists — an earlier in-progress run's provisional or unfinished comment.
+  Completed published reports are never handed to you as update targets.
 - `incremental_diff_path`: path to a GitHub API compare diff when incremental review is available
 - `incremental_diff_metadata`: metadata about filtered incremental diff coverage,
   including dropped vendored/generated/lockfile paths and truncation state
@@ -273,6 +276,13 @@ If it is not set, create one the same way against
 `repos/<repository>/issues/<pr_number>/comments`.
 Do not delete existing summary comments before the new review has been posted.
 
+The comment you post is this run's WORKING summary. At completion, CI publishes the
+completed report as a separate new comment (carrying the reviewed-commit link and the
+CI-owned review-state metadata), submits the formal review linking to it, and then
+collapses the working comment and the superseded prior report. Never edit a comment
+that already carries a `<!-- review-state: ... -->` marker — it is a completed
+report, not your working slot.
+
 Use this template for the summary body. The heading must be exactly the `summary_heading`
 value from `.github/pr-context.json`.
 
@@ -330,10 +340,10 @@ here. Omit this section when no prior findings were fixed or made obsolete.>
 ```
 
 Use `review_run_url` from `.github/pr-context.json`; omit the link if it is empty.
-CI owns the review-state marker and formal review submission. Do not try to write
-that marker, create a file to carry it, or leave a completed review provisional
-because the marker is absent. Publish the findings and final summary; CI attaches
-the metadata afterward.
+CI owns the review-state marker, the completed report, and formal review submission.
+Do not try to write that marker, create a file to carry it, or leave a completed
+review provisional because the marker is absent. Publish the findings and final
+working summary; CI posts the completed report with the metadata afterward.
 
 After the summary body, include a collapsible section with a single fenced code block
 that lists every finding as a concise, actionable description a developer can follow
@@ -372,10 +382,11 @@ specific fix in plain English. If there are no findings, omit this section entir
 
 **Verdict:** CI submits the formal PR review for you — do NOT run `gh pr review`
 yourself. After you post the final summary, CI reads the `**Blocking Issues: N**`
-count from it and submits `--request-changes` when N > 0 or `--comment` when
-N == 0. Your only obligation is an accurate count and a complete summary; a
-missing or malformed count turns the whole run red, so always post the summary
-in the exact template above.
+count from it, publishes the completed report, and submits a commit-bound
+`--request-changes` when N > 0 or `--comment` when N == 0, linking to the report.
+Your only obligation is an accurate count and a complete summary; a missing or
+malformed count turns the whole run red, so always post the summary in the exact
+template above.
 
 ## Review Criteria
 

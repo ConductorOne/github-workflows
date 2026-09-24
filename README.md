@@ -28,12 +28,32 @@ Keep broadly shared connector criteria in the connector mixin. Use repo-local
 The review assesses the whole change, including intent, correctness, security,
 meaningful test coverage, and operational risk. Prior findings are rechecked against
 current code; resolving a thread does not remove an unfixed blocker from the verdict.
-CI adds reviewed-state metadata after the agent publishes its final summary, then
-submits a commit-bound request-changes review for blockers or a neutral comment
-otherwise. This reviewer never approves. Stale, provisional, or malformed summaries
-cannot supply a completed verdict. A provisional or markerless summary is still the
-comment a retried run updates — only completed state is withheld — so a recovered run
-posts full-mode findings into the existing summary instead of duplicating it.
+The agent posts its verdict in a working summary comment and never writes
+review-state metadata. After a successful run, CI publishes the report as a NEW
+comment carrying a visible reviewed-commit link and CI-owned review-state
+metadata (reviewed SHA, base, workflow, run, attempt, summary marker, verdict
+mode), then submits a commit-bound request-changes review for blockers or a
+neutral comment otherwise, linking directly to the report. This reviewer never
+approves. Only after the formal review exists does CI mark the report
+`publication: completed` — a completed report is the report PLUS its formal
+result, so a report whose review never landed stays `pending`: preserved and
+reconciled by identity for a same-attempt retry, but never the next run's
+review-state baseline and never a comment the agent can edit. Only after
+completion are the previous report (including any pending leftover) and the
+consumed working comment collapsed — bodies retained, linked to the new
+report — so a failed run leaves the previous report untouched.
+Stale, provisional, foreign, or malformed working output cannot be published, and a
+push during the run stops publication. Working output already consumed by a
+published report is never republished without fresh model work, and an attempt
+whose start predates an already-completed later attempt (compared by the actual
+attempt start times recorded in each report, never run-ID order) is refused as
+obsolete before publishing. Publication is idempotent per workflow run
+and attempt: a repeated finalization reuses the already-published report and never
+submits a second formal review, while an intentional new run or attempt gets a new
+report. Completed reports are never handed back to the agent as update targets — a
+retried run updates only an earlier in-progress (provisional or markerless) working
+comment, while completed state is still selected independently for incremental
+review.
 Active findings appear once in their severity section, labeled `New` or
 `Prior — still present`. A compact resolved section records fixed/obsolete prior
 findings with evidence; it does not repeat the active findings.
