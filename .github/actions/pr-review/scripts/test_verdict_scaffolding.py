@@ -57,6 +57,9 @@ FOREIGN_WORKFLOW_REF = "other/repo/.github/workflows/x.yaml@refs/heads/main"
 RUN_ID = "87654321"
 RUN_ATTEMPT = "2"
 RUN_START = "2026-09-23T20:00:00Z"
+T1 = "2026-09-23T19:00:00Z"
+T2 = "2026-09-23T21:00:00Z"
+T3 = "2026-09-23T22:00:00Z"
 FRESH = "2026-09-23T20:30:00Z"
 STALE = "2026-09-22T16:00:00Z"
 PROVISIONAL_LINE = "_⏳ Provisional — deeper review still in progress._"
@@ -114,6 +117,7 @@ def new_style_state(**overrides) -> dict:
         "summary_marker": HEADING,
         "verdict_mode": "baseline",
         "publication": "completed",
+        "started_at": RUN_START,
     }
     state.update(overrides)
     return state
@@ -617,7 +621,11 @@ class PublishMainTest(unittest.TestCase):
 
     def test_success_publishes_report_review_then_supersedes(self):
         old_report = comment(
-            1, report_body(1, state=new_style_state(run_id="11111111", run_attempt="1"))
+            1,
+            report_body(
+                1,
+                state=new_style_state(run_id="11111111", run_attempt="1", started_at=T1),
+            ),
         )
         working = comment(2, working_body(2))
         code, calls = self._run_main([old_report, working])
@@ -794,6 +802,127 @@ class PublishMainTest(unittest.TestCase):
         self.assertEqual(_posts(calls, "issues/42/comments"), [])
         self.assertEqual(_posts(calls, "pulls/42/reviews"), [])
         self.assertEqual(_patches(calls), [])
+
+    def test_obsolete_attempt_fails_before_publication(self):
+        # Run A started at RUN_START(t1) and died before creating any report.
+        # Run B started later (T2) and already completed report 200. A's
+        # replay must refuse BEFORE publishing: chronology compares actual
+        # attempt start times, never run-ID order. B's working output is NOT
+        # consumed here, so only the later-completed-attempt guard stops A.
+        working_b = comment(150, working_body(0), updated_at=T2)
+        report_b = comment(
+            200,
+            report_body(0, state=new_style_state(run_id="11111111", started_at=T2)),
+        )
+        code, calls = self._run_main([working_b, report_b])
+        self.assertEqual(code, 1)
+        self.assertEqual(calls, [])  # no GET/POST/PATCH: refused up front
+
+    def test_a_no_report_b_completed_cleanup_failed_regression(self):
+        # The exact reported sequence: A started t1, failed before any
+        # report. B started t2 > t1, completed report 200, but B's cleanup
+        # left its consumed working comment 150 visible and unchanged.
+        # Replaying A must neither republish 150 as A's report nor collapse
+        # B's newer report 200.
+        working_b = comment(150, working_body(0), updated_at=T2)
+        report_b = comment(
+            200,
+            report_body(
+                0,
+                state=new_style_state(
+                    run_id="11111111",
+                    started_at=T2,
+                    working_comment_id=150,
+                    working_comment_updated_at=T2,
+                ),
+            ),
+        )
+        code, calls = self._run_main([working_b, report_b])
+        self.assertEqual(code, 1)
+        self.assertEqual(calls, [])
+
+    def test_consumed_working_output_not_republished(self):
+        # Legacy chronology cannot obsolete A, but the report identifies
+        # this working comment as consumed. An unchanged or unrecorded
+        # consumption timestamp cannot establish fresh model work.
+        for name, recorded_at in [
+            ("unchanged consumed output", FRESH),
+            ("missing consumption timestamp", None),
+        ]:
+            with self.subTest(name=name):
+                working_b = comment(150, working_body(0), updated_at=FRESH)
+                report_b = comment(
+                    200,
+                    report_body(
+                        0,
+                        state=new_style_state(
+                            run_id="11111111",
+                            started_at=None,
+                            working_comment_id=150,
+                            working_comment_updated_at=recorded_at,
+                        ),
+                    ),
+                )
+                code, calls = self._run_main([working_b, report_b])
+                self.assertEqual(code, 1)
+                self.assertEqual(calls, [])
+
+    def test_consumed_then_refreshed_working_output_is_eligible(self):
+        # Interrupted working-slot recovery: B's report 200 consumed comment
+        # 150 at T2, but the model has since done FRESH work in it (updated
+        # T3). The consumed guard protects only the UNCHANGED comment — the
+        # refreshed one is eligible and publishes normally.
+        working_b = comment(150, working_body(0), updated_at=T3)
+        report_b = comment(
+            200,
+            report_body(
+                0,
+                state=new_style_state(
+                    run_id="11111111",
+                    started_at=T2,
+                    working_comment_id=150,
+                    working_comment_updated_at=T2,
+                ),
+            ),
+        )
+        code, calls = self._run_main(
+            [working_b, report_b], env_extra={"REVIEW_RUN_STARTED_AT": T3}
+        )
+        self.assertEqual(code, 0)
+        report_posts = _posts(calls, "issues/42/comments")
+        self.assertEqual(len(report_posts), 1)
+        # The new report records the FRESH consumption timestamp...
+        state = json.loads(rs.REVIEW_STATE_PATTERN.search(report_posts[0]["body"]).group(1))
+        self.assertEqual(state["working_comment_id"], 150)
+        self.assertEqual(state["working_comment_updated_at"], T3)
+        # ...and cleanup supersedes B's older report and the consumed comment.
+        self.assertEqual([cid for cid, _ in _patches(calls)], [900, 200, 150])
+
+    def test_intentional_rerun_new_attempt_accepted(self):
+        # An intentional rerun (this attempt started T3) publishing after
+        # older attempts completed is NOT obsolete: reports whose attempts
+        # started earlier (T2) or at the same moment (T3, another run) never
+        # block a later attempt. Publication proceeds normally.
+        older = comment(
+            100,
+            report_body(0, state=new_style_state(run_id="11111111", started_at=T2)),
+        )
+        same_start = comment(
+            101,
+            report_body(0, state=new_style_state(run_id="22222222", started_at=T3)),
+        )
+        working = comment(2, working_body(0), updated_at=T3)
+        code, calls = self._run_main(
+            [older, same_start, working], env_extra={"REVIEW_RUN_STARTED_AT": T3}
+        )
+        self.assertEqual(code, 0)
+        report_posts = _posts(calls, "issues/42/comments")
+        self.assertEqual(len(report_posts), 1)
+        state = json.loads(rs.REVIEW_STATE_PATTERN.search(report_posts[0]["body"]).group(1))
+        self.assertEqual(state["started_at"], T3)
+        # Both older completed reports and the consumed working comment are
+        # superseded after the new report completes.
+        self.assertEqual([cid for cid, _ in _patches(calls)], [900, 101, 100, 2])
 
     def test_replay_reuses_report_and_skips_duplicate_review(self):
         report = comment(
@@ -1010,6 +1139,7 @@ class PublishMainTest(unittest.TestCase):
         transitioned = json.loads(rs.REVIEW_STATE_PATTERN.search(patches[0][1]).group(1))
         self.assertEqual(transitioned["publication"], "completed")
         self.assertEqual(transitioned["base_sha"], original_base)
+        self.assertEqual(transitioned["started_at"], RUN_START)
         self.assertEqual(transitioned["working_comment_id"], 2)
 
     def test_ambiguous_report_post_reconciles_by_identity(self):

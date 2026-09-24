@@ -7,10 +7,17 @@ agent run, this trusted CI step finalizes the run:
 
 1. Selects this run's FRESH, FINAL working output — a bot summary comment
    matching the summary heading that was created/updated at or after
-   REVIEW_RUN_STARTED_AT, is not provisional, and carries no foreign or
-   malformed marker. Completed reports and superseded comments are never
-   working output; a successful agent step is not evidence a summary was
-   posted, so stale-only output fails here.
+   REVIEW_RUN_STARTED_AT, is not provisional, carries no foreign or
+   malformed marker, and was not already consumed by a published report
+   (republishing consumed output would fabricate a verdict without fresh
+   model work). Completed reports and superseded comments are never working
+   output; a successful agent step is not evidence a summary was posted, so
+   stale-only output fails here. Before any NEW publication, an owned
+   completed report whose attempt started LATER than this one (comparing
+   actual attempt start times from the persisted started_at, never run-ID
+   order) makes this attempt obsolete: it fails closed. Legacy reports
+   without started_at never obsolete an attempt; an unparseable started_at
+   is left untouched.
 2. Validates the baseline canonical fields: exactly one canonical count row
    (`**Blocking Issues: N** | **Suggestions: M** | **Threads Resolved: R**`)
    in its prescribed top-level position (CommonMark fence rules), and that
@@ -96,13 +103,19 @@ def _parse_ts(raw: str) -> datetime:
     return datetime.fromisoformat(raw.replace("Z", "+00:00")).astimezone(timezone.utc)
 
 
-def run_started_at() -> datetime:
-    """Return the run-start timestamp captured before the agent step."""
+def run_started_raw() -> str:
+    """The raw REVIEW_RUN_STARTED_AT value captured before the agent step —
+    persisted verbatim in the report marker as the attempt's chronology key."""
     raw = os.environ.get("REVIEW_RUN_STARTED_AT", "")
     if not raw:
         print("REVIEW_RUN_STARTED_AT must be set", file=sys.stderr)
         sys.exit(1)
-    return _parse_ts(raw)
+    return raw
+
+
+def run_started_at() -> datetime:
+    """Return the run-start timestamp captured before the agent step."""
+    return _parse_ts(run_started_raw())
 
 
 def is_fresh(comment: dict, started: datetime) -> bool:
@@ -263,7 +276,11 @@ def publication_identity() -> dict:
 
 
 def report_state(
-    identity: dict, head: str, base: str | None, publication: str = "completed"
+    identity: dict,
+    head: str,
+    base: str | None,
+    publication: str = "completed",
+    started_at: str | None = None,
 ) -> dict:
     """CI-owned review-state metadata for a newly published report.
 
@@ -275,6 +292,11 @@ def report_state(
     "completed" by the host ONLY after the required formal review exists: a
     completed report is the report PLUS its formal result, so a report whose
     review never landed must never become the next run's state baseline.
+
+    started_at is the host-captured attempt start (REVIEW_RUN_STARTED_AT) —
+    a NON-identity chronology key: publication ordering compares actual
+    attempt times, never run-ID order (run creation time ≠ attempt execution
+    time across reruns).
     """
     state = {"last_reviewed_sha": head}
     if base:
@@ -283,6 +305,8 @@ def report_state(
         if identity.get(key):
             state[key] = identity[key]
     state["publication"] = publication
+    if started_at:
+        state["started_at"] = started_at
     return state
 
 
@@ -300,8 +324,66 @@ def summary_comments(comments: list[dict], marker: str) -> list[dict]:
     return matching
 
 
-def select_working_output(
+def later_completed_attempt(
     comments: list[dict], started: datetime, workflow_ref: str
+) -> dict | None:
+    """An owned COMPLETED report whose attempt started LATER than this one —
+    evidence this attempt's publication would be stale (a concurrent or
+    intentionally-rerun later attempt already finished). Chronology compares
+    actual attempt start times, never run-ID order (run creation time ≠
+    attempt execution time across reruns).
+
+    Legacy compatibility: a report without started_at never makes an attempt
+    obsolete, and a present-but-unparseable started_at is left untouched
+    (not treated as evidence either way).
+    """
+    for c in comments:
+        if (
+            _review_state.classify_summary_comment(c.get("body", ""), workflow_ref)
+            != "completed"
+        ):
+            continue
+        state = _review_state.marker_state(c.get("body", "")) or {}
+        raw = state.get("started_at")
+        if not raw:
+            continue
+        try:
+            completed_started = _parse_ts(raw)
+        except (ValueError, TypeError):
+            continue
+        if completed_started > started:
+            return c
+    return None
+
+
+def consumed_working_ids(comments: list[dict], workflow_ref: str) -> dict:
+    """Working comment id -> consumption timestamp recorded by owned reports.
+
+    A working comment named in a report's persisted working_comment_id was
+    already turned into a publication. When that report's cleanup collapse
+    failed, the comment is still visible — and it stays reusable as the
+    model's update slot, so it is only "consumed" for publication while it
+    is UNCHANGED (its current timestamp still equals the recorded one).
+    Republishing the unchanged comment would fabricate a verdict without
+    fresh model work; a comment updated since consumption IS fresh work.
+    """
+    consumed = {}
+    for c in comments:
+        if _review_state.classify_summary_comment(
+            c.get("body", ""), workflow_ref
+        ) in ("completed", "pending"):
+            state = _review_state.marker_state(c.get("body", "")) or {}
+            working_id = state.get("working_comment_id")
+            if working_id:
+                consumed[working_id] = state.get("working_comment_updated_at")
+    return consumed
+
+
+def select_working_output(
+    comments: list[dict],
+    started: datetime,
+    workflow_ref: str,
+    consumed_ids=frozenset(),
 ) -> tuple[dict | None, str | None]:
     """Pick this run's final working output from the candidates, newest first.
 
@@ -309,12 +391,26 @@ def select_working_output(
     working candidates exist but none qualifies — the run produced output
     that cannot be treated as final, which must fail loudly. Completed
     reports are skipped: they are publication output, never working input.
+    Comments recorded as consumed by a published report (consumed_ids maps
+    id -> consumption timestamp) are skipped ONLY while unchanged: a comment
+    updated since its recorded consumption carries fresh model work and is
+    eligible again.
     """
     saw_stale = False
+    saw_consumed = False
     for comment in reversed(comments):
         body = comment.get("body", "")
         if _review_state.classify_summary_comment(body, workflow_ref) != "working":
             continue
+        if comment.get("id") in consumed_ids:
+            recorded_ts = consumed_ids[comment["id"]]
+            current_ts = comment.get("updated_at") or comment.get("created_at")
+            if not recorded_ts or current_ts == recorded_ts:
+                # Unchanged since a published report consumed it (or the
+                # report predates timestamp recording — fail closed).
+                saw_consumed = True
+                continue
+            # Updated after consumption: fresh model work — eligible below.
         if not is_fresh(comment, started):
             saw_stale = True
             continue
@@ -325,6 +421,12 @@ def select_working_output(
                 "published"
             )
         return comment, None
+    if saw_consumed:
+        return None, (
+            "the only working summary comments here were already consumed by "
+            "a published report; republishing them would fabricate a verdict "
+            "without fresh model work"
+        )
     if saw_stale:
         return None, (
             "no working summary comment was created or updated during this "
@@ -411,7 +513,7 @@ def recover_consumed_working(comments: list[dict], report: dict) -> dict | None:
 
 
 def compose_report_body(
-    working: dict, identity: dict, head: str, base: str | None
+    working: dict, identity: dict, head: str, base: str | None, started_raw: str
 ) -> str:
     """The completed report: the run's working output plus a visible
     reviewed-commit link and the CI-owned review-state marker. The marker is
@@ -419,11 +521,12 @@ def compose_report_body(
     only after the required formal review exists. It also persists the exact
     consumed working comment's identity (id + timestamp) so a replayed
     finalization collapses exactly that comment — and can never collapse a
-    later run's reused slot."""
+    later run's reused slot — and the attempt's started_at so publication
+    chronology compares actual attempt times."""
     server_url = os.environ.get("GITHUB_SERVER_URL", "https://github.com").rstrip("/")
     repo = os.environ.get("GITHUB_REPOSITORY", "")
     commit_url = f"{server_url}/{repo}/commit/{head}"
-    state = report_state(identity, head, base, publication="pending")
+    state = report_state(identity, head, base, publication="pending", started_at=started_raw)
     state["working_comment_id"] = working.get("id")
     consumed_ts = working.get("updated_at") or working.get("created_at")
     if consumed_ts:
@@ -730,8 +833,29 @@ def _run() -> None:
             )
             sys.exit(1)
     else:
+        # Obsolete-attempt guard, BEFORE any new publication: a concurrent or
+        # intentionally-rerun later attempt already completed. Chronology is
+        # actual attempt start time, never run-ID order. Existing-report
+        # replay (above) stays idempotent and is unaffected.
+        obsolete = later_completed_attempt(comments, started, identity["workflow_ref"])
+        if obsolete is not None:
+            obsolete_started = (_review_state.marker_state(obsolete.get("body", "")) or {}).get(
+                "started_at"
+            )
+            print(
+                "Refusing to publish: a later attempt already completed "
+                f"report {obsolete['id']} (started {obsolete_started}, after "
+                f"this attempt's {run_started_raw()}). This attempt's "
+                "publication would be stale.",
+                file=sys.stderr,
+            )
+            sys.exit(1)
+
         working, rejection = select_working_output(
-            comments, started, identity["workflow_ref"]
+            comments,
+            started,
+            identity["workflow_ref"],
+            consumed_working_ids(comments, identity["workflow_ref"]),
         )
         if working is None:
             if rejection is None:
@@ -769,7 +893,8 @@ def _run() -> None:
             sys.exit(1)
 
         report = create_report(
-            repo, pr_number, compose_report_body(working, identity, head, base),
+            repo, pr_number,
+            compose_report_body(working, identity, head, base, run_started_raw()),
             identity, head,
         )
         print(f"Published review report {report['id']} -> {head[:12]} (pending completion)")
