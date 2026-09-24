@@ -14,10 +14,17 @@ or directly:
 import importlib.util
 import json
 import os
+import sys
 import tempfile
 from types import SimpleNamespace
 import unittest
 from unittest import mock
+
+_SCRIPTS_DIR = os.path.dirname(__file__)
+# fetch-pr-context.py imports `_review_state`; make the scripts directory
+# importable regardless of how the test was invoked.
+if _SCRIPTS_DIR not in sys.path:
+    sys.path.insert(0, _SCRIPTS_DIR)
 
 _SCRIPT = os.path.join(os.path.dirname(__file__), "fetch-pr-context.py")
 _spec = importlib.util.spec_from_file_location("fetch_pr_context", _SCRIPT)
@@ -312,6 +319,9 @@ class MainContextTest(unittest.TestCase):
         self.assertEqual(context["incremental_diff_metadata"], self.COMPARE_METADATA)
         self.assertEqual(context["current_base_ref"], "main")
         self.assertEqual(context["base_default_branch"], "main")
+        # The completed report supplies review state, but it is NOT handed to
+        # the model as an update slot — completed reports are never mutated.
+        self.assertIsNone(context["summary_comment_id"])
 
     def test_abandoned_provisional_is_reused_with_full_review(self):
         # The original PR #129 failure: a killed run leaves a provisional
@@ -378,6 +388,33 @@ class MainContextTest(unittest.TestCase):
         self.assertEqual(context["last_review_base_sha"], "base-sha")
         self.assertEqual(context["review_mode"], "incremental")
         self.assertEqual([c["id"] for c in context["comments"]], [104])
+
+    def test_superseded_report_yields_state_to_current_report(self):
+        # A collapsed (superseded) report is archived output: it supplies
+        # neither the working slot nor review state. The current completed
+        # report still drives incremental mode.
+        superseded = _raw_comment(
+            101,
+            "github-actions[bot]",
+            f"<!-- review-superseded: {{\"report_comment_id\": 102}} -->\n"
+            f"<details>\n<summary>Superseded</summary>\n\n"
+            f"{fpc.DEFAULT_REVIEW_SUMMARY_HEADING} Old\n"
+            f"{_review_state_marker('ancient-sha')}\n\n</details>",
+        )
+        current = _raw_comment(
+            102,
+            "github-actions[bot]",
+            f"{fpc.DEFAULT_REVIEW_SUMMARY_HEADING} Done\n"
+            f"{_review_state_marker('old-sha')}",
+        )
+
+        context, _ = self._run_main(
+            [superseded, current], compare_result=("diff text", self.COMPARE_METADATA)
+        )
+
+        self.assertIsNone(context["summary_comment_id"])
+        self.assertEqual(context["last_reviewed_sha"], "old-sha")
+        self.assertEqual(context["review_mode"], "incremental")
 
 
 if __name__ == "__main__":
