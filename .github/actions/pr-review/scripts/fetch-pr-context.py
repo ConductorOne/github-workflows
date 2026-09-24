@@ -21,14 +21,44 @@ from typing import Optional
 REVIEW_STATE_PATTERN = re.compile(
     r"<!--\s*review-state:\s*(\{.*?\})\s*-->", re.DOTALL
 )
+REVIEW_STATE_MARKER_PATTERN = re.compile(r"<!--\s*review-state\b")
 HTTP_STATUS_PATTERN = re.compile(r"HTTP\s+(\d{3})")
 
 # Bot logins that post review comments via GitHub Actions.
 BOT_LOGINS = {"github-actions[bot]", "github-actions"}
 TRUSTED_COMMENT_ASSOCIATIONS = {"OWNER", "MEMBER", "COLLABORATOR"}
 DEFAULT_REVIEW_SUMMARY_HEADING = "### Connector PR Review:"
+GENERAL_REVIEW_SUMMARY_HEADING = "### General PR Review:"
 LEGACY_REVIEW_SUMMARY_HEADING = "### PR Review:"
+# Headings from this workflow's own review lineage. Only these may also match
+# pre-migration (legacy-heading) summaries; a caller-supplied custom heading
+# selects exactly its own comments, so a one-off review run can never adopt
+# or rewrite the production or legacy summary threads.
+BUILT_IN_REVIEW_SUMMARY_HEADINGS = (
+    DEFAULT_REVIEW_SUMMARY_HEADING,
+    GENERAL_REVIEW_SUMMARY_HEADING,
+)
 DEFAULT_API_ATTEMPTS = 3
+
+
+def is_valid_summary_heading(value: str) -> bool:
+    """Whether a summary heading is one non-empty single-line Markdown heading
+    of the form '### <text>:'. Newlines are rejected so a crafted heading can
+    never smuggle extra lines wherever it is written, and empty/whitespace
+    heading text is rejected so the heading always identifies a real summary.
+    """
+    if not value or "\n" in value or "\r" in value:
+        return False
+    if not value.startswith("### ") or not value.endswith(":"):
+        return False
+    # Substring-based legacy consumers must not mistake a custom summary for
+    # their own. Exact built-in headings remain valid for existing callers.
+    if value != LEGACY_REVIEW_SUMMARY_HEADING and LEGACY_REVIEW_SUMMARY_HEADING in value:
+        return False
+    for reserved in BUILT_IN_REVIEW_SUMMARY_HEADINGS:
+        if value != reserved and reserved in value:
+            return False
+    return bool(value[len("### "):-1].strip())
 
 # Incremental-diff hardening. GitHub compare diffs on large vendor-refresh PRs
 # can inline non-UTF-8 bytes (git misclassifies a NUL-free encrypted vendored
@@ -50,23 +80,104 @@ DIFF_DROPPED_PATH_LIMIT = 200
 
 def review_comment_heading(comment: dict, summary_heading: str) -> Optional[str]:
     body = comment["body"].lstrip()
-    for heading in (summary_heading, LEGACY_REVIEW_SUMMARY_HEADING):
+    headings = (summary_heading,)
+    if summary_heading in BUILT_IN_REVIEW_SUMMARY_HEADINGS:
+        headings += (LEGACY_REVIEW_SUMMARY_HEADING,)
+    for heading in headings:
         if body.startswith(heading):
             return heading
     return None
 
 
 def is_bot_review_comment(comment: dict, summary_heading: str) -> bool:
-    """Check if a comment is a bot-posted review summary."""
+    """Check if a comment is a bot-posted review summary for the selected
+    heading. Pre-migration legacy headings count only when the selected
+    heading is one of this workflow's built-in production headings."""
     return (
         comment["user"] in BOT_LOGINS
         and review_comment_heading(comment, summary_heading) is not None
     )
 
 
-def is_legacy_review_comment(comment: dict, summary_heading: str) -> bool:
-    """Check if a comment is a bot-posted pre-migration review summary."""
-    return review_comment_heading(comment, summary_heading) == LEGACY_REVIEW_SUMMARY_HEADING
+# Line the review prompt requires on provisional (in-progress) summaries. A
+# provisional comment is progress output, not a completed review: it must never
+# supply review state, or a killed/lazy run would advance last_reviewed_sha
+# without completing the audit behind it.
+PROVISIONAL_MARKER = "_⏳ Provisional — deeper review still in progress._"
+
+
+def is_provisional(body: str) -> bool:
+    """Whether a summary comment is provisional (in-progress) output."""
+    return PROVISIONAL_MARKER in body
+
+
+def extract_review_state(
+    review_comments: list[dict], workflow_ref: str
+) -> tuple[Optional[int], Optional[str], Optional[str]]:
+    """Choose the summary comment to update and the authoritative review state.
+
+    Returns (summary_comment_id, last_reviewed_sha, last_review_base_sha).
+    Comment identity and completed-review state are selected separately:
+
+    - summary_comment_id is the newest eligible summary comment, even when it
+      is provisional or markerless, so a retried run updates the existing
+      summary instead of posting a duplicate next to an abandoned provisional.
+    - last_reviewed_sha/last_review_base_sha come from the newest comment with
+      a non-provisional marker owned by this workflow. A provisional marker
+      never supplies state: it is in-progress output and must not advance
+      reviewed state. When no completed state exists the caller falls back to
+      full review mode but still updates the same summary comment.
+
+    A comment carrying an explicit foreign workflow's marker supplies neither
+    the slot nor state, including one under a legacy heading. A comment whose
+    marker fails to parse fails closed the same way. Markerless bot summaries
+    remain reusable slots under the heading/bot trust fallback (the caller
+    passes only bot-authored comments matching the selected heading), but they
+    carry no state. Callers pass only comments matching the selected heading
+    (legacy-heading comments included solely for the built-in production
+    headings), so a custom heading can never adopt production or legacy review
+    state.
+    """
+    summary_comment_id = None
+    last_reviewed_sha = None
+    last_review_base_sha = None
+    for c in reversed(review_comments):
+        match = REVIEW_STATE_PATTERN.search(c["body"])
+        if not match:
+            if REVIEW_STATE_MARKER_PATTERN.search(c["body"]):
+                # An invalid or incomplete marker is not a markerless summary.
+                continue
+            # Markerless summary: reusable as the update slot under the
+            # heading/bot trust fallback, but it carries no review state.
+            if summary_comment_id is None:
+                summary_comment_id = c["id"]
+            continue
+
+        try:
+            state = json.loads(match.group(1))
+        except json.JSONDecodeError:
+            state = None
+        if not isinstance(state, dict):
+            # Malformed marker (unparseable or not a JSON object): fail
+            # closed — neither slot nor state.
+            continue
+
+        if workflow_ref and state.get("workflow_ref") != workflow_ref:
+            # Explicit foreign workflow marker: never adopt its summary
+            # thread or its state, even under a legacy heading.
+            continue
+
+        if summary_comment_id is None:
+            summary_comment_id = c["id"]
+        if is_provisional(c["body"]):
+            # Provisional owned marker: a valid update slot, but completed
+            # state must come from an older finished review — keep scanning.
+            continue
+        last_reviewed_sha = state.get("last_reviewed_sha")
+        last_review_base_sha = state.get("base_sha")
+        break
+
+    return summary_comment_id, last_reviewed_sha, last_review_base_sha
 
 
 def command_error_summary(error: subprocess.CalledProcessError) -> str:
@@ -424,8 +535,12 @@ def main():
     if not repo or not pr_number:
         print("GITHUB_REPOSITORY and PR_NUMBER must be set", file=sys.stderr)
         sys.exit(1)
-    if not summary_heading.startswith("### ") or not summary_heading.endswith(":"):
-        print("REVIEW_SUMMARY_HEADING must look like a markdown heading", file=sys.stderr)
+    if not is_valid_summary_heading(summary_heading):
+        print(
+            "REVIEW_SUMMARY_HEADING must be a single-line markdown heading "
+            "of the form '### ...:'",
+            file=sys.stderr,
+        )
         sys.exit(1)
 
     endpoint = f"repos/{repo}/issues/{pr_number}/comments"
@@ -471,37 +586,9 @@ def main():
     # markers are untrusted PR content and must not influence review mode.
     review_comments = [c for c in state_comments if is_bot_review_comment(c, summary_heading)]
 
-    # Extract state from the newest bot review comment owned by this workflow.
-    # If only legacy markerless comments exist, reuse the newest one so the first
-    # marker-writing run does not create a duplicate summary.
-    last_reviewed_sha = None
-    last_review_base_sha = None
-    summary_comment_id = None
-    legacy_summary_comment_id = None
-    for c in reversed(review_comments):
-        match = REVIEW_STATE_PATTERN.search(c["body"])
-        if not match:
-            if legacy_summary_comment_id is None:
-                legacy_summary_comment_id = c["id"]
-            continue
-
-        try:
-            state = json.loads(match.group(1))
-        except json.JSONDecodeError:
-            continue
-
-        if workflow_ref and state.get("workflow_ref") != workflow_ref:
-            if is_legacy_review_comment(c, summary_heading) and legacy_summary_comment_id is None:
-                legacy_summary_comment_id = c["id"]
-            continue
-
-        summary_comment_id = c["id"]
-        last_reviewed_sha = state.get("last_reviewed_sha")
-        last_review_base_sha = state.get("base_sha")
-        break
-
-    if summary_comment_id is None:
-        summary_comment_id = legacy_summary_comment_id
+    summary_comment_id, last_reviewed_sha, last_review_base_sha = extract_review_state(
+        review_comments, workflow_ref
+    )
 
     pr_endpoint = f"repos/{repo}/pulls/{pr_number}"
     pr_result = gh_api([pr_endpoint])

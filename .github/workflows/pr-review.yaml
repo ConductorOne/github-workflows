@@ -8,6 +8,14 @@ on:
         required: false
         default: connector
         type: string
+      summary_marker:
+        description: "Optional override for the review summary heading: a single-line Markdown heading of the form '### ...:'. Empty uses the review_prompt profile's heading."
+        required: false
+        default: ""
+        type: string
+    secrets:
+      ANTHROPIC_API_KEY:
+        required: true
 concurrency:
   group: pr-review-${{ github.workflow_ref }}-${{ github.event.pull_request.number || github.run_id }}
   cancel-in-progress: true
@@ -48,4 +56,5 @@ jobs:
           pr_number: ${{ github.event.pull_request.number }}
           head_sha: ${{ github.event.pull_request.head.sha }}
           review_prompt: ${{ inputs.review_prompt || 'connector' }}
+          summary_marker: ${{ inputs.summary_marker }}
     timeout-minutes: 30

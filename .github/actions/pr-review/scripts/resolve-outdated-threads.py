@@ -144,14 +144,73 @@ def should_resolve(thread: dict) -> bool:
     return any(body.startswith(prefix) for prefix in REVIEW_PREFIXES)
 
 
-def resolve_thread(thread_id: str) -> bool:
-    """Resolve a single review thread. Returns True on success."""
+def resolve_thread(thread_id: str) -> tuple[bool, bool]:
+    """Resolve a single review thread.
+
+    Returns (resolved, permission_blocked). permission_blocked is True when the
+    token is denied the resolveReviewThread mutation ("Resource not accessible
+    by integration") — in that case every remaining thread would fail the same
+    way, so the caller stops attempting.
+    """
     try:
         gh_graphql(RESOLVE_THREAD_MUTATION, threadId=thread_id)
-        return True
+        return True, False
     except subprocess.CalledProcessError as e:
-        print(f"  Failed to resolve {thread_id}: {e.stderr}", file=sys.stderr)
-        return False
+        detail = (e.stderr or "").strip()
+        print(f"  Failed to resolve {thread_id}: {detail}", file=sys.stderr)
+        return False, "Resource not accessible by integration" in detail
+
+
+def severity_of(body: str) -> str:
+    """Map a bot finding's emoji prefix to a severity label."""
+    for prefix in REVIEW_PREFIXES:
+        if body.startswith(prefix):
+            if prefix.startswith("🔴"):
+                return "security"
+            if prefix.startswith("🟠"):
+                return "bug"
+            return "suggestion"
+    return "unknown"
+
+
+def collect_prior_findings(threads: list[dict]) -> list[dict]:
+    """Build the prior-findings list the review prompt audits against.
+
+    Every bot-authored review thread becomes one entry, whether resolved or
+    not: thread state is not evidence of code state (a resolved thread does
+    not mean the issue was fixed; an open one does not mean it is still
+    present), so the reviewer re-verifies each entry against the current code.
+    Unresolved entries sort first, then by path.
+    """
+    findings = []
+    for thread in threads:
+        comments = thread["comments"]["nodes"]
+        if not comments:
+            continue
+        first = comments[0]
+        if (first.get("author") or {}).get("login", "") not in BOT_LOGINS:
+            continue
+        body = first.get("body", "")
+        if not any(body.startswith(prefix) for prefix in REVIEW_PREFIXES):
+            continue
+        findings.append({
+            "path": thread["path"],
+            "line": thread.get("line"),
+            "severity": severity_of(body),
+            "excerpt": body.splitlines()[0][:200],
+            "thread_resolved": thread["isResolved"],
+            "thread_outdated": thread["isOutdated"],
+        })
+    findings.sort(key=lambda f: (f["thread_resolved"], f["path"] or "", f["line"] or 0))
+    return findings
+
+
+def write_prior_findings(findings: list[dict]) -> None:
+    output_path = os.path.join(".github", "prior-findings.json")
+    os.makedirs(os.path.dirname(output_path), exist_ok=True)
+    with open(output_path, "w") as f:
+        json.dump({"prior_findings": findings}, f, indent=2)
+    print(f"Prior findings written to {output_path} ({len(findings)} entries)")
 
 
 def write_summary(summary: dict) -> None:
@@ -190,25 +249,44 @@ def main():
     print(f"  {len(to_resolve)} are outdated bot comments to resolve")
 
     resolved = []
+    resolution_blocked = False
     for thread in to_resolve:
         comments = thread["comments"]["nodes"]
         body_preview = comments[0]["body"][:80] if comments else ""
         print(f"  Resolving: {thread['path']}:{thread.get('line', '?')} — {body_preview}...")
-        if resolve_thread(thread["id"]):
+        ok, permission_blocked = resolve_thread(thread["id"])
+        if ok:
             resolved.append({
                 "path": thread["path"],
                 "line": thread.get("line"),
                 "body_preview": body_preview,
             })
+        elif permission_blocked:
+            # The Actions token is denied the resolveReviewThread mutation in
+            # this context (observed across repos and orgs); every remaining
+            # thread would fail identically, so stop here and let the review
+            # rely on prior-findings.json instead of thread resolution.
+            resolution_blocked = True
+            print(
+                "::warning::resolveReviewThread is denied for this token "
+                "(Resource not accessible by integration); skipping the "
+                f"remaining {len(to_resolve) - len(resolved) - 1} thread(s). "
+                "Prior findings are still passed to the review via "
+                ".github/prior-findings.json.",
+                file=sys.stderr,
+            )
+            break
 
     summary = {
         "total_threads": len(threads),
         "outdated_bot_threads": len(to_resolve),
         "resolved_count": len(resolved),
         "resolved": resolved,
+        "resolution_blocked": resolution_blocked,
     }
 
     write_summary(summary)
+    write_prior_findings(collect_prior_findings(threads))
 
     print(f"\nDone: resolved {len(resolved)}/{len(to_resolve)} threads")
 
