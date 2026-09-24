@@ -27,8 +27,30 @@ HTTP_STATUS_PATTERN = re.compile(r"HTTP\s+(\d{3})")
 BOT_LOGINS = {"github-actions[bot]", "github-actions"}
 TRUSTED_COMMENT_ASSOCIATIONS = {"OWNER", "MEMBER", "COLLABORATOR"}
 DEFAULT_REVIEW_SUMMARY_HEADING = "### Connector PR Review:"
+GENERAL_REVIEW_SUMMARY_HEADING = "### General PR Review:"
 LEGACY_REVIEW_SUMMARY_HEADING = "### PR Review:"
+# Headings from this workflow's own review lineage. Only these may also match
+# pre-migration (legacy-heading) summaries; a caller-supplied custom heading
+# selects exactly its own comments, so a one-off review run can never adopt
+# or rewrite the production or legacy summary threads.
+BUILT_IN_REVIEW_SUMMARY_HEADINGS = (
+    DEFAULT_REVIEW_SUMMARY_HEADING,
+    GENERAL_REVIEW_SUMMARY_HEADING,
+)
 DEFAULT_API_ATTEMPTS = 3
+
+
+def is_valid_summary_heading(value: str) -> bool:
+    """Whether a summary heading is one non-empty single-line Markdown heading
+    of the form '### <text>:'. Newlines are rejected so a crafted heading can
+    never smuggle extra lines wherever it is written, and empty/whitespace
+    heading text is rejected so the heading always identifies a real summary.
+    """
+    if not value or "\n" in value or "\r" in value:
+        return False
+    if not value.startswith("### ") or not value.endswith(":"):
+        return False
+    return bool(value[len("### "):-1].strip())
 
 # Incremental-diff hardening. GitHub compare diffs on large vendor-refresh PRs
 # can inline non-UTF-8 bytes (git misclassifies a NUL-free encrypted vendored
@@ -50,14 +72,19 @@ DIFF_DROPPED_PATH_LIMIT = 200
 
 def review_comment_heading(comment: dict, summary_heading: str) -> Optional[str]:
     body = comment["body"].lstrip()
-    for heading in (summary_heading, LEGACY_REVIEW_SUMMARY_HEADING):
+    headings = (summary_heading,)
+    if summary_heading in BUILT_IN_REVIEW_SUMMARY_HEADINGS:
+        headings += (LEGACY_REVIEW_SUMMARY_HEADING,)
+    for heading in headings:
         if body.startswith(heading):
             return heading
     return None
 
 
 def is_bot_review_comment(comment: dict, summary_heading: str) -> bool:
-    """Check if a comment is a bot-posted review summary."""
+    """Check if a comment is a bot-posted review summary for the selected
+    heading. Pre-migration legacy headings count only when the selected
+    heading is one of this workflow's built-in production headings."""
     return (
         comment["user"] in BOT_LOGINS
         and review_comment_heading(comment, summary_heading) is not None
@@ -89,9 +116,12 @@ def extract_review_state(
     Returns (summary_comment_id, last_reviewed_sha, last_review_base_sha).
     Provisional comments are skipped entirely: they are in-progress output and
     must not advance reviewed state. State is accepted only from the newest
-    comment whose marker is owned by this workflow. If only legacy markerless
+    comment whose marker is owned by this workflow. If only markerless
     comments exist, the newest one is reused so the first marker-writing run
-    does not create a duplicate summary.
+    does not create a duplicate summary. Callers pass only comments matching
+    the selected heading (legacy-heading comments included solely for the
+    built-in production headings), so a custom heading can never adopt
+    production or legacy review state.
     """
     last_reviewed_sha = None
     last_review_base_sha = None
@@ -481,8 +511,12 @@ def main():
     if not repo or not pr_number:
         print("GITHUB_REPOSITORY and PR_NUMBER must be set", file=sys.stderr)
         sys.exit(1)
-    if not summary_heading.startswith("### ") or not summary_heading.endswith(":"):
-        print("REVIEW_SUMMARY_HEADING must look like a markdown heading", file=sys.stderr)
+    if not is_valid_summary_heading(summary_heading):
+        print(
+            "REVIEW_SUMMARY_HEADING must be a single-line markdown heading "
+            "of the form '### ...:'",
+            file=sys.stderr,
+        )
         sys.exit(1)
 
     endpoint = f"repos/{repo}/issues/{pr_number}/comments"

@@ -598,6 +598,121 @@ class FetchPrContextStateTest(unittest.TestCase):
         self.assertEqual(base, BASE)
 
 
+class SummaryHeadingValidationTest(unittest.TestCase):
+    """The heading gate fetch-pr-context.py applies to REVIEW_SUMMARY_HEADING:
+    one non-empty single-line Markdown heading of the form '### ...:'."""
+
+    def test_accepts_builtin_and_custom_headings(self):
+        for heading in (
+            "### Connector PR Review:",
+            "### General PR Review:",
+            "### Replay PR Review:",
+            "### x:",
+        ):
+            with self.subTest(heading=heading):
+                self.assertTrue(fpc.is_valid_summary_heading(heading))
+
+    def test_rejects_malformed_headings(self):
+        for value in (
+            "",  # empty
+            "### :",  # no heading text
+            "###   :",  # whitespace-only heading text
+            "## Connector PR Review:",  # wrong heading level
+            "Connector PR Review:",  # not a heading
+            "### Connector PR Review",  # missing trailing colon
+            "### Connector PR Review: ",  # trailing space after the colon
+        ):
+            with self.subTest(value=value):
+                self.assertFalse(fpc.is_valid_summary_heading(value))
+
+    def test_rejects_newline_injection(self):
+        # A multi-line value could smuggle extra lines wherever the heading is
+        # written (step outputs, env); it must fail closed.
+        for value in (
+            "### a:\nbuilt_in_mixins=evil",
+            "### a:\r\nbuilt_in_mixins=evil",
+            "### a:\rb:",
+        ):
+            with self.subTest(value=value):
+                self.assertFalse(fpc.is_valid_summary_heading(value))
+
+
+class CustomHeadingStateTest(unittest.TestCase):
+    """Summary-marker scoping with one bot posting mixed headings: a custom
+    heading selects exactly its own summaries, and only the built-in
+    production headings may fall back to pre-migration legacy summaries."""
+
+    CONNECTOR = "### Connector PR Review:"
+    GENERAL = "### General PR Review:"
+    LEGACY = "### PR Review:"
+    CUSTOM = "### Replay PR Review:"
+
+    def _comment(self, body, cid=1):
+        return {"id": cid, "user": "github-actions[bot]", "body": body}
+
+    def _with_state(self, heading, sha=HEAD, workflow_ref=WORKFLOW_REF, cid=1):
+        state = json.dumps(
+            {"last_reviewed_sha": sha, "base_sha": BASE, "workflow_ref": workflow_ref}
+        )
+        return self._comment(f"{heading} t\n<!-- review-state: {state} -->", cid=cid)
+
+    def _select(self, comments, heading, workflow_ref=WORKFLOW_REF):
+        # The exact pipeline fetch-pr-context.py main() runs: filter bot
+        # comments by heading, then extract authoritative state.
+        review_comments = [c for c in comments if fpc.is_bot_review_comment(c, heading)]
+        return fpc.extract_review_state(review_comments, heading, workflow_ref)
+
+    def test_custom_heading_ignores_production_state(self):
+        production = self._with_state(self.CONNECTOR, cid=1)
+        custom = self._comment(f"{self.CUSTOM} t", cid=2)
+        cid, sha, base = self._select([production, custom], self.CUSTOM)
+        # The production summary's reviewed state must not be adopted; the
+        # run's own markerless summary is reused so it gets updated in place.
+        self.assertIsNone(sha)
+        self.assertIsNone(base)
+        self.assertEqual(cid, 2)
+
+    def test_custom_heading_ignores_legacy_summary(self):
+        legacy = self._comment(f"{self.LEGACY} old", cid=1)
+        cid, sha, base = self._select([legacy], self.CUSTOM)
+        self.assertIsNone(cid)
+        self.assertIsNone(sha)
+        self.assertIsNone(base)
+
+    def test_custom_heading_still_rejects_foreign_workflow_state(self):
+        foreign = self._with_state(
+            self.CUSTOM,
+            workflow_ref="other/repo/.github/workflows/x.yaml@refs/heads/main",
+            cid=2,
+        )
+        own = self._with_state(self.CUSTOM, sha="oldsha123", cid=1)
+        cid, sha, _ = self._select([own, foreign], self.CUSTOM)
+        # Newest-first: the foreign-owned marker is skipped even under the
+        # custom heading; the older owned marker still supplies state.
+        self.assertEqual(cid, 1)
+        self.assertEqual(sha, "oldsha123")
+
+    def test_builtin_headings_keep_legacy_fallback(self):
+        # Negative control: the production headings still reuse a markerless
+        # pre-migration summary so the first marker-writing run updates it
+        # instead of posting a duplicate.
+        for heading in (self.CONNECTOR, self.GENERAL):
+            with self.subTest(heading=heading):
+                legacy = self._comment(f"{self.LEGACY} old", cid=5)
+                cid, sha, base = self._select([legacy], heading)
+                self.assertEqual(cid, 5)
+                self.assertIsNone(sha)
+                self.assertIsNone(base)
+
+    def test_custom_heading_scopes_bot_comment_filter(self):
+        production = self._comment(f"{self.CONNECTOR} t")
+        legacy = self._comment(f"{self.LEGACY} t")
+        custom = self._comment(f"{self.CUSTOM} t")
+        self.assertFalse(fpc.is_bot_review_comment(production, self.CUSTOM))
+        self.assertFalse(fpc.is_bot_review_comment(legacy, self.CUSTOM))
+        self.assertTrue(fpc.is_bot_review_comment(custom, self.CUSTOM))
+
+
 class PriorFindingsTest(unittest.TestCase):
     def _thread(
         self,

@@ -18,6 +18,10 @@ inputs:
     description: "Review prompt profile to use: connector or general"
     required: false
     default: connector
+  summary_marker:
+    description: "Optional override for the review summary heading: a single-line Markdown heading of the form '### ...:'. Empty uses the review_prompt profile's heading."
+    required: false
+    default: ""
 
 runs:
   using: composite
@@ -27,6 +31,7 @@ runs:
     shell: bash
     env:
       REVIEW_PROMPT: ${{ inputs.review_prompt }}
+      SUMMARY_MARKER: ${{ inputs.summary_marker }}
     run: |
       # Captured before any review work: the stamp/submit gates require the
       # summary comment to have been created/updated at or after this moment,
@@ -36,17 +41,35 @@ runs:
       case "${REVIEW_PROMPT}" in
         ""|"connector")
           echo "built_in_mixins=connector" >> "${GITHUB_OUTPUT}"
-          echo "summary_heading=### Connector PR Review:" >> "${GITHUB_OUTPUT}"
+          summary_heading="### Connector PR Review:"
           ;;
         "general")
           echo "built_in_mixins=" >> "${GITHUB_OUTPUT}"
-          echo "summary_heading=### General PR Review:" >> "${GITHUB_OUTPUT}"
+          summary_heading="### General PR Review:"
           ;;
         *)
           echo "::error::review_prompt must be 'connector' or 'general'"
           exit 1
           ;;
       esac
+      if [ -n "${SUMMARY_MARKER}" ]; then
+        # The override is written to GITHUB_OUTPUT below, so validate before
+        # writing: it must be one non-empty single-line Markdown heading
+        # (### ...:). A newline would smuggle extra output lines; anything
+        # else could never match a real summary comment.
+        case "${SUMMARY_MARKER}" in
+          *$'\n'*|*$'\r'*)
+            echo "::error::summary_marker must be a single line"
+            exit 1
+            ;;
+        esac
+        if ! printf '%s' "${SUMMARY_MARKER}" | grep -qE '^### [^[:space:]].*:$'; then
+          echo "::error::summary_marker must be a Markdown heading of the form '### ...:'"
+          exit 1
+        fi
+        summary_heading="${SUMMARY_MARKER}"
+      fi
+      echo "summary_heading=${summary_heading}" >> "${GITHUB_OUTPUT}"
   - name: Fetch PR context
     shell: bash
     env:
@@ -103,10 +126,10 @@ runs:
       # --setting-sources user: do NOT load the reviewed repo's project/local
       # settings. Those register the repo's own .claude/agents and .claude/commands
       # into this run, which is wrong for a read-only CI reviewer: a project
-      # agent's `model:` frontmatter overrides --model (observed in the ductone
-      # sister repo: 91 of 121 review turns silently ran on a model the workflow
-      # never pinned), and write-oriented repo agents inherit the action's
-      # --permission-mode acceptEdits in a review that must not mutate the tree.
+      # agent's `model:` frontmatter overrides --model (review turns would
+      # silently run on a model the workflow never pinned), and write-oriented
+      # repo agents inherit the action's --permission-mode acceptEdits in a
+      # review that must not mutate the tree.
       # This also unregisters the repo's skills, so Skill is hard-denied below —
       # review criteria already reach the prompt inline via load-review-criteria.
       #
@@ -116,7 +139,7 @@ runs:
       # Loop/scheduling tools (ScheduleWakeup, Cron*) are hard-denied: in a
       # one-shot CI review they are meaningless and harmful — ScheduleWakeup
       # schedules a wakeup no event loop will fire, so the agent ends its turn
-      # waiting and posts no summary (observed in the ductone sister repo).
+      # waiting and posts no summary.
       #
       # Bash(gh pr review:*) is gone from the allow-list: CI submits the verdict
       # deterministically (submit-verdict-review.py) instead of relying on the

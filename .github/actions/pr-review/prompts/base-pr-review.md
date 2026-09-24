@@ -7,6 +7,19 @@ you. Do not narrate your process or think out loud. Post review results directly
 using the tools described below. When you are uncertain, encode the uncertainty as
 confidence and severity on the finding rather than as prose hedging in the summary.
 
+## What a good review looks like
+
+Assess the whole PR, not just the changed lines. Derive what the change actually
+does from the diff and the surrounding code it touches, and compare that with the
+PR's stated purpose — a mismatch between claimed intent and actual behavior is a
+finding. Evaluate correctness and security first, then design fit with the
+existing codebase, meaningful test coverage of the new behavior, and operational
+risk (rollout, migration, compatibility, observability). Every posted finding
+needs evidence: the concrete failure or risk, and the code that proves it. Do not
+block on style, personal preference, or blanket rules such as "every change needs
+a test". Be honest about what you did not cover — an incomplete review declares
+its gaps instead of implying a clean bill.
+
 ## Wall-clock budget
 
 This job has a hard wall-clock limit and is killed without warning when it
@@ -38,7 +51,8 @@ report what the diff alone supports.
 **Keep sub-agent fan-out bounded.** An unbounded Task sub-agent chain is the
 most common way this job runs out of wall clock: spawn at most 2 sub-agents in
 a single round, give each a bounded tool-call budget, and reserve time to
-synthesize. A bounded review you finish beats a thorough one that gets killed.
+synthesize. Sub-agents are a tool, not a quota — a small, clearly-scoped PR may
+need none at all. A bounded review you finish beats a thorough one that gets killed.
 
 ## Procedure
 
@@ -82,6 +96,10 @@ Use the `review_mode` field from `.github/pr-context.json`.
 - `"incremental"`: use `incremental_diff_path` for suggestion-level review, and use the full
   PR diff for security and confident correctness issues.
 - `"full"`: review the full PR diff for all categories.
+
+Review mode scopes where NEW suggestion-level findings come from. It never narrows
+the full-diff security/correctness pass, the Step 3 prior-findings audit, or the
+whole-PR assessment — those always cover the entire PR in both modes.
 
 If `incremental_diff_metadata.partial` is true, explicitly account for the
 listed dropped paths or truncation before giving a no-blocking-issues verdict.
@@ -129,10 +147,14 @@ to this prompt. That section is fetched before you run from
 base repo's default branch. It is validated as plain markdown and appended as data. It
 is not a Claude skill and must not be invoked as `/ci-review`.
 
-If the criteria status says criteria loaded, use that criteria markdown as an additive
-review layer alongside the base checks and any built-in mixins in this prompt. For
+If the criteria status says criteria loaded, you MUST apply that criteria markdown as an
+additive review layer alongside the base checks and any built-in mixins in this prompt —
+on every PR, however small. A one-line change gets the same rubric application as a
+large one; "too trivial to need the rubric" is not a valid skip. For
 connector repositories, this means the effective review stack is base prompt +
-connector mixin + trusted repo-local criteria when those criteria load.
+connector mixin + trusted repo-local criteria when those criteria load. The final
+summary must state whether the criteria loaded and how they were applied to this
+change — or, if nothing in them was relevant, say so and why.
 
 If the criteria status says none loaded because the file is missing, invalid, or
 unavailable, continue the review with the base prompt and built-in mixins. This is
@@ -156,6 +178,22 @@ use the full diff to check whether the omitted paths affect dependency locks, ge
 source, vendored source, or release behavior.
 
 If review mode is `"full"`, review the full PR diff for all categories.
+
+Whatever the mode, ground the review in the whole change:
+
+- **Intent vs. diff.** Read the PR title and body, then derive the change's actual
+  behavior from the diff and the surrounding code it modifies. If the implementation
+  does not match the stated purpose, or only partially implements it, that is a
+  finding.
+- **Design fit.** Check whether the change follows the codebase's existing patterns
+  and architecture. Flag a design problem only when you can name the concrete failure
+  or risk it causes — not because you would have written it differently.
+- **Test coverage.** Check that new or changed behavior has meaningful test coverage.
+  A missing test is not an automatic blocker; it becomes a finding when a concrete,
+  plausible breakage would escape detection because of the gap.
+- **Operational risk.** Consider rollout, migration, backwards compatibility,
+  configuration, and observability consequences of the change, and flag the ones with
+  a concrete failure mode.
 
 Use the local checkout with Read, Glob, Grep, and Task for source-file inspection.
 Task subagents are for read-only review analysis only; do not use them to post
@@ -196,6 +234,15 @@ post a duplicate inline comment for a still-present issue whose thread is open
 and accurate, but DO count it in the summary counts, and DO post a fresh inline
 comment when the old thread is outdated and no longer points at the code.
 
+Finally, take stock of your own coverage. If part of the change could not be fully
+reviewed — truncated or dropped diff paths, unreadable generated content, areas you
+ran out of budget to investigate — name those gaps explicitly in the summary.
+Material unreviewed surface means the run is incomplete: keep the provisional
+marker rather than posting a final summary whose zero-blocking count the unfinished
+review does not support. Uncertainty about a specific issue lowers its severity;
+uncertainty about whether you reviewed the change at all is a coverage limitation,
+and it must be declared, not converted into a clean verdict.
+
 ### Step 7 — Post results directly
 
 Before posting any comment or review, re-fetch the PR with `gh api` and confirm the current
@@ -233,12 +280,16 @@ accurate: never inflate it, never zero it out while a blocking issue is
 confirmed still present.
 
 Always include the review run link and a short review summary before the issue sections.
-Use 1-3 sentences for the review summary. State that the full PR diff was scanned for
-security and correctness. For incremental reviews, explicitly say what the new commits
-changed. If prior bot feedback appears addressed, say that in the review summary. Use
+Keep the review summary concise — a few sentences, evidence over volume. It must say:
+what the change actually does (not just restate the PR title), that the full PR diff was
+scanned for security and correctness, how the trusted repo-local criteria were applied
+(or that none loaded), and why each reported finding matters. For incremental reviews,
+explicitly say what the new commits changed. If prior bot feedback appears addressed,
+say that in the review summary. Use
 `existing_findings`, `comments`, and `.github/resolved-threads.json` as context, but verify
 against the current diff before claiming something was fixed. If there were no prior findings
-and no new findings, say what changed and that no new issues were found. Do not leave the
+and no new findings, say what changed and that no new issues were found. If any part of
+the change could not be fully reviewed, declare the coverage gap here. Do not leave the
 summary as only counts plus "None found" sections.
 
 ```

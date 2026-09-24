@@ -31,9 +31,6 @@ reviewer never approves: there is deliberately no APPROVE path. The review is
 submitted via the REST API with an explicit `commit_id` (the reviewed SHA),
 so the verdict is bound to the commit it reviewed. Any gate failure exits
 nonzero — a broken review is a loud red check, never silent green.
-
-Ported from ductone/github-workflows (judge/approve mode stripped), then
-hardened per gate review on ConductorOne/github-workflows#129.
 """
 
 import json
