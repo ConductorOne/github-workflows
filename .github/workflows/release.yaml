@@ -303,7 +303,7 @@ jobs:
 
   goreleaser-binaries:
     needs: [determine-workflows-ref, release-preflight]
-    runs-on: macos-latest
+    runs-on: macos-latest-xlarge
     permissions:
       contents: read
       id-token: write # <-- needed for cosign keyless (OIDC)
@@ -313,6 +313,18 @@ jobs:
       binaries_checksums: ${{ steps.output-checksums.outputs.checksums }}
       released_at: ${{ steps.release-meta.outputs.released_at }}
     steps:
+      # Diagnostic: GoReleaser sizes its build semaphore from runtime.GOMAXPROCS(0),
+      # so the runner's core count decides how many of the four targets build at once.
+      # GitHub bills the standard macOS tier as "3-core or 4-core" and one observed
+      # release did get 4 slots, so record the hardware instead of inferring it.
+      - name: Report runner hardware
+        shell: bash
+        run: |
+          echo "runner_label=macos-latest-xlarge"
+          echo "ncpu=$(sysctl -n hw.ncpu) logical=$(sysctl -n hw.logicalcpu) physical=$(sysctl -n hw.physicalcpu)"
+          echo "cpu=$(sysctl -n machdep.cpu.brand_string 2>/dev/null || echo unknown)"
+          echo "mem_bytes=$(sysctl -n hw.memsize)"
+
       - name: Checkout caller repo
         uses: actions/checkout@v5
         with:
@@ -422,7 +434,7 @@ jobs:
         with:
           workdir: _caller
           version: "~> v2.13"
-          args: release --clean --config ../_workflows/_generated/.goreleaser.binaries.yaml
+          args: release --clean --parallelism 4 --config ../_workflows/_generated/.goreleaser.binaries.yaml
         env:
           GITHUB_TOKEN: ${{ secrets.RELENG_GITHUB_TOKEN }}
           GORELEASER_CURRENT_TAG: ${{ inputs.tag }}
