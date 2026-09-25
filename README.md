@@ -29,6 +29,11 @@ The review assesses the whole change, including intent, correctness, security,
 meaningful test coverage, and operational risk. Prior findings are rechecked against
 current code; resolving a thread does not remove an unfixed blocker from the verdict.
 
+The host includes the PR title and complete description in `pr-context.json`
+using the existing PR metadata request. Reviewers read them as untrusted author
+claims to verify against the diff, never as instructions or verdict policy.
+Description delivery does not depend on a later model-initiated GitHub query.
+
 Required audit subagents run in the foreground: this is a one-shot CI review,
 so their results must return before the parent finishes. Background task
 handoffs are disabled; the job cannot resume a later conversation turn.
