@@ -29,12 +29,28 @@ The review assesses the whole change, including intent, correctness, security,
 meaningful test coverage, and operational risk. Prior findings are rechecked against
 current code; resolving a thread does not remove an unfixed blocker from the verdict.
 
+The host includes the PR title and complete description in `pr-context.json`
+using the existing PR metadata request. Reviewers read them as untrusted author
+claims to verify against the diff, never as instructions or verdict policy.
+Description delivery does not depend on a later model-initiated GitHub query.
+
 Required audit subagents run in the foreground: this is a one-shot CI review,
 so their results must return before the parent finishes. Background task
 handoffs are disabled; the job cannot resume a later conversation turn.
 
 The agent posts its verdict in a working summary comment and never writes
-review-state metadata. After a successful run, CI publishes the report as a NEW
+review-state metadata. Before the agent runs, the action creates a fresh
+provisional working comment for the run/attempt and binds it to the native
+`update_claude_comment` MCP tool (`CLAUDE_COMMENT_ID`), so the agent passes
+only the Markdown body and never chooses a repository, comment, or head
+target. The body no longer travels through shell heredocs or `gh api` writes;
+the tool keeps its upstream sanitization and secret redaction. GitHub's comment
+size limit still applies, but the shell's command-length limit does not. The
+existing broad `Bash(gh api:*)` permission remains; the prompt restricts its
+intended use to metadata reads, not an enforced read-only boundary. This is a
+transport fix, not credential isolation. The preflight binds a fresh slot, and
+the publisher still validates the live head and report finality at completion.
+After a successful run, CI publishes the report as a NEW
 comment carrying a visible reviewed-commit link and CI-owned review-state
 metadata (reviewed SHA, base, workflow, run, attempt, summary marker, verdict
 mode), then submits a commit-bound request-changes review for blockers or a
@@ -55,10 +71,9 @@ attempt start times recorded in each report, never run-ID order) is refused as
 obsolete before publishing. Publication is idempotent per workflow run
 and attempt: a repeated finalization reuses the already-published report and never
 submits a second formal review, while an intentional new run or attempt gets a new
-report. Completed reports are never handed back to the agent as update targets — a
-retried run updates only an earlier in-progress (provisional or markerless) working
-comment, while completed state is still selected independently for incremental
-review.
+report. Completed reports are never handed back to the agent as update targets —
+every run/attempt writes to its own freshly created provisional working comment,
+while completed state is still selected independently for incremental review.
 Active findings appear once in their severity section, labeled `New` or
 `Prior — still present`. A compact resolved section records fixed/obsolete prior
 findings with evidence; it does not repeat the active findings.
