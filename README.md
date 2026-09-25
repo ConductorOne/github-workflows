@@ -28,6 +28,11 @@ Keep broadly shared connector criteria in the connector mixin. Use repo-local
 The review assesses the whole change, including intent, correctness, security,
 meaningful test coverage, and operational risk. Prior findings are rechecked against
 current code; resolving a thread does not remove an unfixed blocker from the verdict.
+
+Required audit subagents run in the foreground: this is a one-shot CI review,
+so their results must return before the parent finishes. Background task
+handoffs are disabled; the job cannot resume a later conversation turn.
+
 The agent posts its verdict in a working summary comment and never writes
 review-state metadata. After a successful run, CI publishes the report as a NEW
 comment carrying a visible reviewed-commit link and CI-owned review-state
