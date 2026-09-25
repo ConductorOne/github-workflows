@@ -303,7 +303,7 @@ jobs:
 
   goreleaser-binaries:
     needs: [determine-workflows-ref, release-preflight]
-    runs-on: macos-latest
+    runs-on: macos-latest-xlarge
     permissions:
       contents: read
       id-token: write # <-- needed for cosign keyless (OIDC)
