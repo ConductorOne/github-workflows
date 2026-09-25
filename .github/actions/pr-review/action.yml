@@ -122,7 +122,7 @@ runs:
       } >> "${GITHUB_ENV}"
   - name: Run Claude PR Review
     id: claude_review
-    uses: anthropics/claude-code-action@9ca9355b36297178e28d37c799d1c9c8a28e6507  # main: Claude Code 2.1.280
+    uses: anthropics/claude-code-action@9171db3e57d6a3140a37ddc2ba92788584e0ead6  # v1.0.234: Claude Code 2.1.282
     env:
       # This is a one-shot SDK turn: required audit agents must return before
       # the parent finishes, rather than wait for a later background wakeup.
