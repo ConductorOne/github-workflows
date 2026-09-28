@@ -120,6 +120,16 @@ runs:
         fi
         echo "${DELIM}"
       } >> "${GITHUB_ENV}"
+  - name: Prepare review summary
+    id: summary-transport
+    shell: bash
+    env:
+      GH_TOKEN: ${{ inputs.github_token }}
+      PR_NUMBER: ${{ inputs.pr_number }}
+      REVIEW_SUMMARY_HEADING: ${{ steps.review-config.outputs.summary_heading }}
+    # Bind a fresh provisional comment before the model runs. Completed
+    # reports remain separate, CI-owned publication output.
+    run: python3 ${{ github.action_path }}/scripts/prepare-review-summary.py
   - name: Run Claude PR Review
     id: claude_review
     uses: anthropics/claude-code-action@9171db3e57d6a3140a37ddc2ba92788584e0ead6  # v1.0.234: Claude Code 2.1.282
@@ -128,25 +138,27 @@ runs:
       # the parent finishes, rather than wait for a later background wakeup.
       # Keep subagents available, but run their work in the foreground.
       CLAUDE_CODE_DISABLE_BACKGROUND_TASKS: "1"
+      # Agent mode does not create a tracking comment. Its native MCP server
+      # inherits this host-created working comment ID from the step environment.
+      CLAUDE_COMMENT_ID: ${{ steps.summary-transport.outputs.comment_id }}
     with:
       anthropic_api_key: ${{ inputs.anthropic_api_key }}
       github_token: ${{ inputs.github_token }}
       include_fix_links: true
       # use_sticky_comment is OFF: the review's working summary comment is
-      # managed explicitly (summary_comment_id from fetch-pr-context.py), and
-      # completed reports are published as NEW comments by
-      # publish-review-report.py. Sticky reuse must never let
-      # claude-code-action's tracking pick up and overwrite a completed
-      # report comment.
+      # managed explicitly (the summary-transport step creates a fresh
+      # provisional slot per run/attempt and binds it to the native
+      # github_comment MCP tool via CLAUDE_COMMENT_ID), and completed reports
+      # are published as NEW comments by publish-review-report.py. Sticky
+      # reuse must never let claude-code-action's tracking pick up and
+      # overwrite a completed report comment.
       use_sticky_comment: false
       allowed_bots: "*"
       # --setting-sources user: do NOT load the reviewed repo's project/local
       # settings. Those register the repo's own .claude/agents and .claude/commands
       # into this run, which is wrong for a read-only CI reviewer: a project
-      # agent's `model:` frontmatter overrides --model (review turns would
-      # silently run on a model the workflow never pinned), and write-oriented
-      # repo agents inherit the action's --permission-mode acceptEdits in a
-      # review that must not mutate the tree.
+      # agent's model frontmatter can override the pinned model, and its
+      # instructions may be oriented toward implementation rather than review.
       # This also unregisters the repo's skills, so Skill is hard-denied below —
       # review criteria already reach the prompt inline via load-review-criteria.
       #
@@ -164,6 +176,13 @@ runs:
       # trailing command, which Claude Code upgrades have repeatedly
       # regressed (the agent stops after the summary and the formal review is
       # never submitted).
+      #
+      # The working summary is written only through the native
+      # mcp__github_comment__update_claude_comment: a body-only tool bound to
+      # this run's fixed working slot via the step's CLAUDE_COMMENT_ID (see
+      # above), replacing the old heredoc/`gh api` PATCH flow. Bash(gh api:*)
+      # stays granted for metadata reads; the prompt forbids using it (or any
+      # shell path) to create or edit comments.
       claude_args: --model claude-opus-5-5 --max-turns 100 --setting-sources user --strict-mcp-config --disallowedTools "Skill,ScheduleWakeup,CronCreate,CronDelete,CronList" --allowedTools "Read,Glob,Grep,Task,mcp__github_inline_comment__create_inline_comment,mcp__github_comment__update_claude_comment,Bash(gh pr diff:*),Bash(gh pr view:*),Bash(gh api:*)"
       prompt: ${{ env.REVIEW_PROMPT }}
   - name: Publish review report and verdict
