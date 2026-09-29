@@ -14,6 +14,13 @@ import (
 
 var semverTagPattern = regexp.MustCompile(`^v[0-9]+\.[0-9]+\.[0-9]+(?:-[0-9A-Za-z.-]+)?$`)
 
+// The two commit-entry shapes a changelog can carry: goreleaser's release
+// body ("* <sha> <subject>") and this tool's generated fallback
+// ("- <subject> (<sha>)", see commitList).
+var goreleaserCommitLine = regexp.MustCompile(`^\* ([0-9a-f]{7,40}) (.+?)\s*$`)
+var generatedCommitLine = regexp.MustCompile(`^- (.+) \(([0-9a-f]{7,40})\)\s*$`)
+var changelogHeadingLine = regexp.MustCompile(`^ {0,3}(?:#{1,6}(?:[\t ]|$)|(?:=+|-+)[\t ]*\r?$)`)
+
 type githubRelease struct {
 	Body        string `json:"body"`
 	PublishedAt string `json:"published_at"`
@@ -89,6 +96,11 @@ func computeReleaseMetadata(repoDir, tag, workflowTime, githubReleaseJSON string
 			md.Changelog = changelog
 			md.ChangelogSource = source
 		}
+	}
+
+	if collapsed, folded := collapseRepeatedCommits(md.Changelog); folded > 0 {
+		md.Changelog = collapsed
+		fmt.Fprintf(os.Stderr, "release-metadata: folded %d repeated commit line(s) into counts\n", folded)
 	}
 
 	if md.ReleasedAt == "" {
@@ -183,6 +195,57 @@ func commitList(repoDir, rev string) string {
 		return ""
 	}
 	return strings.TrimSpace(out) + "\n"
+}
+
+// collapseRepeatedCommits folds commit entries that share a subject within a
+// heading section into one line carrying the count and the first-listed SHA.
+// Fleet automation lands the same few subjects dozens of
+// times between releases, and repeating them says nothing a count does not.
+// Headings, prose, blank lines and subjects that appear once pass through
+// unchanged. The second result is the number of lines folded away.
+func collapseRepeatedCommits(changelog string) (string, int) {
+	type entry struct {
+		index   int
+		bullet  string
+		sha     string
+		subject string
+		count   int
+	}
+	lines := strings.Split(changelog, "\n")
+	kept := make([]string, 0, len(lines))
+	seen := map[string]*entry{}
+	var entries []*entry
+	folded := 0
+	for _, line := range lines {
+		if changelogHeadingLine.MatchString(line) {
+			seen = map[string]*entry{}
+		}
+		var bullet, sha, subject string
+		if m := goreleaserCommitLine.FindStringSubmatch(line); m != nil {
+			bullet, sha, subject = "*", m[1], m[2]
+		} else if m := generatedCommitLine.FindStringSubmatch(line); m != nil {
+			bullet, subject, sha = "-", m[1], m[2]
+		}
+		if subject == "" {
+			kept = append(kept, line)
+			continue
+		}
+		if e, ok := seen[subject]; ok {
+			e.count++
+			folded++
+			continue
+		}
+		e := &entry{index: len(kept), bullet: bullet, sha: sha, subject: subject, count: 1}
+		seen[subject] = e
+		entries = append(entries, e)
+		kept = append(kept, line)
+	}
+	for _, e := range entries {
+		if e.count > 1 {
+			kept[e.index] = fmt.Sprintf("%s %s (%d commits, first listed %s)", e.bullet, e.subject, e.count, e.sha)
+		}
+	}
+	return strings.Join(kept, "\n"), folded
 }
 
 func normalizeRFC3339(value string) (string, error) {
