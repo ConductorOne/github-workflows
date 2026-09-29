@@ -20,6 +20,17 @@ set -euo pipefail
 # Constants
 BASE_URL="https://dist.conductorone.com/releases"
 
+# cosign verification reaches Rekor and the certificate transparency log,
+# which time out and rate-limit under load. A failed verification is retried
+# up to COSIGN_VERIFY_ATTEMPTS times, waiting COSIGN_VERIFY_DELAY seconds
+# before the second attempt and doubling after that.
+COSIGN_VERIFY_ATTEMPTS="${COSIGN_VERIFY_ATTEMPTS:-3}"
+COSIGN_VERIFY_DELAY="${COSIGN_VERIFY_DELAY:-10}"
+if [[ ! "$COSIGN_VERIFY_ATTEMPTS" =~ ^[1-9][0-9]*$ || ! "$COSIGN_VERIFY_DELAY" =~ ^[0-9]+$ ]]; then
+  echo "COSIGN_VERIFY_ATTEMPTS must be a positive integer and COSIGN_VERIFY_DELAY a non-negative integer, got: ${COSIGN_VERIFY_ATTEMPTS} / ${COSIGN_VERIFY_DELAY}" >&2
+  exit 1
+fi
+
 # Colors for output
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -74,6 +85,41 @@ warn() {
 
 info() {
   echo -e "ℹ️  $1"
+}
+
+COSIGN_STDERR="$TEMP_DIR/cosign-stderr.log"
+
+# verify_with_retry LABEL COSIGN_ARGS...
+# Runs cosign with the given arguments, retrying a failure per the settings
+# above. cosign's stderr from the last attempt is left in COSIGN_STDERR for
+# fail_verify to print, so the reason for a failure reaches the log.
+verify_with_retry() {
+  local label="$1"
+  shift
+  local attempt=1
+  local delay=$((10#$COSIGN_VERIFY_DELAY))
+  while :; do
+    if cosign "$@" > /dev/null 2> "$COSIGN_STDERR"; then
+      if [[ $attempt -gt 1 ]]; then
+        info "$label: verified on attempt $attempt of $COSIGN_VERIFY_ATTEMPTS"
+      fi
+      return 0
+    fi
+    if [[ $attempt -ge $COSIGN_VERIFY_ATTEMPTS ]]; then
+      return 1
+    fi
+    warn "$label: attempt $attempt of $COSIGN_VERIFY_ATTEMPTS failed ($(tail -n 1 "$COSIGN_STDERR")); retrying in ${delay}s"
+    sleep "$delay"
+    delay=$((delay * 2))
+    attempt=$((attempt + 1))
+  done
+}
+
+# fail_verify MESSAGE: records a failed verification and prints cosign's
+# stderr from the final attempt beneath it.
+fail_verify() {
+  fail "$1"
+  sed 's/^/     /' "$COSIGN_STDERR"
 }
 
 # Certificate identity pattern for cosign verification
@@ -143,15 +189,15 @@ for platform in $(echo "$MANIFEST" | jq -r '.assets | keys[]'); do
   CERT_FILE="${HREF}.cert"
   if curl -sfL "$SIG_FILE" -o "$TEMP_DIR/${FILENAME}.sig" 2>/dev/null && \
      curl -sfL "$CERT_FILE" -o "$TEMP_DIR/${FILENAME}.cert" 2>/dev/null; then
-    if cosign verify-blob \
+    if verify_with_retry "binary signature $platform" verify-blob \
       --signature "$TEMP_DIR/${FILENAME}.sig" \
       --certificate "$TEMP_DIR/${FILENAME}.cert" \
       --certificate-oidc-issuer "$CERT_OIDC_ISSUER" \
       --certificate-identity-regexp "$CERT_IDENTITY_REGEXP" \
-      "$TEMP_DIR/$FILENAME" > /dev/null 2>&1; then
+      "$TEMP_DIR/$FILENAME"; then
       pass "Binary signature verified: $platform"
     else
-      fail "Binary signature verification failed: $platform"
+      fail_verify "Binary signature verification failed: $platform"
     fi
   else
     fail "Binary signature files missing: $platform (.sig or .cert)"
@@ -163,15 +209,15 @@ for platform in $(echo "$MANIFEST" | jq -r '.assets | keys[]'); do
     fail "Provenance bundle missing: $PROV_BUNDLE"
   else
     # Verify provenance
-    if cosign verify-blob-attestation \
+    if verify_with_retry "provenance $platform" verify-blob-attestation \
       --bundle "$TEMP_DIR/${FILENAME}.provenance.sigstore.json" \
       --type https://slsa.dev/provenance/v1 \
       --certificate-oidc-issuer "$CERT_OIDC_ISSUER" \
       --certificate-identity-regexp "$CERT_IDENTITY_REGEXP" \
-      "$TEMP_DIR/$FILENAME" > /dev/null 2>&1; then
+      "$TEMP_DIR/$FILENAME"; then
       pass "Provenance verified: $platform"
     else
-      fail "Provenance verification failed: $platform"
+      fail_verify "Provenance verification failed: $platform"
     fi
   fi
 
@@ -184,15 +230,15 @@ for platform in $(echo "$MANIFEST" | jq -r '.assets | keys[]'); do
       fail "SBOM bundle missing: $SBOM_BUNDLE"
     else
       # Verify SBOM
-      if cosign verify-blob-attestation \
+      if verify_with_retry "SBOM $platform" verify-blob-attestation \
         --bundle "$TEMP_DIR/${FILENAME}.sbom.sigstore.json" \
         --type https://spdx.dev/Document \
         --certificate-oidc-issuer "$CERT_OIDC_ISSUER" \
         --certificate-identity-regexp "$CERT_IDENTITY_REGEXP" \
-        "$TEMP_DIR/$FILENAME" > /dev/null 2>&1; then
+        "$TEMP_DIR/$FILENAME"; then
         pass "SBOM verified: $platform"
       else
-        fail "SBOM verification failed: $platform"
+        fail_verify "SBOM verification failed: $platform"
       fi
     fi
   fi
@@ -207,14 +253,14 @@ echo "=== Container Image Validation ==="
 ECR_URI=$(echo "$MANIFEST" | jq -r '.images.ecrPublic.uri // empty')
 if [[ -n "$ECR_URI" ]]; then
   info "Validating ECR Public image: $ECR_URI"
-  if cosign verify-attestation \
+  if verify_with_retry "ECR Public image attestation" verify-attestation \
     --type https://slsa.dev/provenance/v1 \
     --certificate-oidc-issuer "$CERT_OIDC_ISSUER" \
     --certificate-identity-regexp "$CERT_IDENTITY_REGEXP" \
-    "$ECR_URI" > /dev/null 2>&1; then
+    "$ECR_URI"; then
     pass "ECR Public image attestation verified"
   else
-    fail "ECR Public image attestation verification failed"
+    fail_verify "ECR Public image attestation verification failed"
   fi
 else
   warn "No ECR Public image in manifest (docker may have been skipped)"
@@ -228,26 +274,26 @@ MANIFEST_CERT_URL="${RELEASE_BASE_URL}/manifest.json.cert"
 MANIFEST_BUNDLE_URL="${RELEASE_BASE_URL}/manifest.json.sigstore.json"
 
 if curl -sfL "$MANIFEST_BUNDLE_URL" -o "$TEMP_DIR/manifest.json.sigstore.json" 2>/dev/null; then
-  if cosign verify-blob \
+  if verify_with_retry "manifest bundle" verify-blob \
     --bundle "$TEMP_DIR/manifest.json.sigstore.json" \
     --certificate-oidc-issuer "$CERT_OIDC_ISSUER" \
     --certificate-identity-regexp "$CERT_IDENTITY_REGEXP" \
-    "$TEMP_DIR/manifest.json" > /dev/null 2>&1; then
+    "$TEMP_DIR/manifest.json"; then
     pass "Manifest Sigstore bundle verified"
   else
-    fail "Manifest Sigstore bundle verification failed"
+    fail_verify "Manifest Sigstore bundle verification failed"
   fi
 elif curl -sfL "$MANIFEST_SIG_URL" -o "$TEMP_DIR/manifest.json.sig" 2>/dev/null && \
    curl -sfL "$MANIFEST_CERT_URL" -o "$TEMP_DIR/manifest.json.cert" 2>/dev/null; then
-  if cosign verify-blob \
+  if verify_with_retry "manifest signature" verify-blob \
     --signature "$TEMP_DIR/manifest.json.sig" \
     --certificate "$TEMP_DIR/manifest.json.cert" \
     --certificate-oidc-issuer "$CERT_OIDC_ISSUER" \
     --certificate-identity-regexp "$CERT_IDENTITY_REGEXP" \
-    "$TEMP_DIR/manifest.json" > /dev/null 2>&1; then
+    "$TEMP_DIR/manifest.json"; then
     pass "Manifest signature verified"
   else
-    fail "Manifest signature verification failed"
+    fail_verify "Manifest signature verification failed"
   fi
 else
   fail "Manifest signature files not found"
