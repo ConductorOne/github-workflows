@@ -147,6 +147,11 @@ All signatures use Sigstore's keyless signing:
 - No long-lived keys to manage or rotate
 - Identity based on GitHub Actions OIDC token
 - Signatures recorded in Rekor transparency log
+- Workflow signing and attestation steps run cosign through
+  `scripts/cosign-retry.sh`: three attempts with a 10 s then 20 s wait
+  (`COSIGN_RETRY_ATTEMPTS`, `COSIGN_RETRY_DELAY`), since the OIDC token
+  endpoint and Fulcio fail transiently under load and a repeated signing
+  call is harmless
 
 ### Provenance Attestations
 
