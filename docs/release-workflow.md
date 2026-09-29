@@ -99,7 +99,9 @@ Finalizes distributable release artifacts:
 Records release metadata in the connector registry API:
 
 - Reuses the exact manifest uploaded to S3
-- Includes documentation and changelog data when present
+- Includes documentation and changelog data when present; commit entries that
+  repeat a subject within a heading section (routine automation sweeps) are
+  folded into one line with a count before the changelog is recorded
 - Includes `config_schema.json` and `baton_capabilities.json` when present
 - Sends release timestamp, commit SHA, and workflow run metadata
 
