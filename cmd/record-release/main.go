@@ -11,6 +11,7 @@ import (
 	"os"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"google.golang.org/protobuf/encoding/protojson"
 
@@ -57,10 +58,44 @@ type ReleaseAsset struct {
 	Metadata map[string]string `json:"metadata,omitempty"`
 }
 
-// updaterSignatureMetadataKey is the well-known registry metadata key under
-// which a Tauri auto-update bundle's base64 minisign signature is stored
-// (registry.v1.Asset.metadata["updater.signature"]).
-const updaterSignatureMetadataKey = "updater.signature"
+const (
+	// updaterSignatureMetadataKey is the well-known registry metadata key under
+	// which a Tauri auto-update bundle's base64 minisign signature is stored
+	// (registry.v1.Asset.metadata["updater.signature"]).
+	updaterSignatureMetadataKey = "updater.signature"
+
+	// changelogMaxChars mirrors the registry API's validation of the
+	// changelog field (registry.v1 RecordReleaseRequest.changelog,
+	// `string.max_len = 10000`), counted in Unicode characters as
+	// protovalidate does. A release that ships a long backlog carries a
+	// commit list well past it; the registry field is a summary, and the
+	// full notes stay on the GitHub release.
+	changelogMaxChars = 10000
+)
+
+// truncateChangelog fits changelog under changelogMaxChars, counted in Unicode
+// characters, ending with a note that it was cut. The cut prefers the last
+// line break before the limit so a commit entry is not split mid-line; if the
+// notes have no line break in range, it cuts at the last character that fits.
+// Input at or under the limit is returned unchanged.
+func truncateChangelog(changelog string) string {
+	if utf8.RuneCountInString(changelog) <= changelogMaxChars {
+		return changelog
+	}
+	suffix := "\n\n… truncated to the registry's " + fmt.Sprint(changelogMaxChars) + "-character limit."
+	budget := changelogMaxChars - utf8.RuneCountInString(suffix)
+	// Advance rune by rune so the cut never lands inside a multibyte sequence.
+	cut := 0
+	for i := 0; i < budget && cut < len(changelog); i++ {
+		_, size := utf8.DecodeRuneInString(changelog[cut:])
+		cut += size
+	}
+	head := changelog[:cut]
+	if nl := strings.LastIndex(head, "\n"); nl > 0 {
+		head = head[:nl]
+	}
+	return strings.TrimRight(head, "\r\n") + suffix
+}
 
 // ReleaseImage is the transformed image for the registry API.
 type ReleaseImage struct {
@@ -212,6 +247,11 @@ func main() {
 		} else {
 			changelog = string(changelogBytes)
 		}
+	}
+	if full := utf8.RuneCountInString(changelog); full > changelogMaxChars {
+		changelog = truncateChangelog(changelog)
+		fmt.Fprintf(os.Stderr, "record-release: changelog truncated from %d to %d characters (registry limit %d)\n",
+			full, utf8.RuneCountInString(changelog), changelogMaxChars)
 	}
 
 	// Read optional config_schema.json (committed to connector repo by CI)

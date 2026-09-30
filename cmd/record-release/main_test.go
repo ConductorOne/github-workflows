@@ -2,9 +2,11 @@ package main
 
 import (
 	"encoding/json"
+	"fmt"
 	"reflect"
 	"strings"
 	"testing"
+	"unicode/utf8"
 
 	pb "github.com/ConductorOne/github-workflows/pb/artifacts/v1"
 )
@@ -203,6 +205,92 @@ func TestRecordReleaseRequestMarshalsAttestations(t *testing.T) {
 	}
 	if got.Images["ecrPublic"].Attestations[0].URL != "" {
 		t.Fatalf("image attestation URL = %q, want empty", got.Images["ecrPublic"].Attestations[0].URL)
+	}
+}
+
+// TestTruncateChangelogFitsRegistryLimit: a release body far past the
+// registry's 10000-character limit (a year of goreleaser commit lines, as
+// baton-sap-grc v0.3.0 shipped at 15972) comes back under the limit, cut on a
+// line boundary, ending with the truncation note.
+func TestTruncateChangelogFitsRegistryLimit(t *testing.T) {
+	var b strings.Builder
+	b.WriteString("## Changelog\n")
+	for i := 0; i < 300; i++ {
+		fmt.Fprintf(&b, "* %040x chore: update dependency & Go versions — entry %d\n", i, i)
+	}
+	body := b.String()
+	if utf8.RuneCountInString(body) <= changelogMaxChars {
+		t.Fatalf("fixture must exceed the limit, has %d characters", utf8.RuneCountInString(body))
+	}
+	got := truncateChangelog(body)
+	if n := utf8.RuneCountInString(got); n > changelogMaxChars {
+		t.Fatalf("truncated changelog has %d characters, limit %d", n, changelogMaxChars)
+	}
+	if !strings.HasSuffix(got, "truncated to the registry's 10000-character limit.") {
+		t.Fatalf("truncation note missing or not last:\n%s", got[len(got)-200:])
+	}
+	// The kept part ends on a whole input line, not mid-commit.
+	kept := strings.TrimSuffix(got, got[strings.LastIndex(got, "\n\n… truncated"):])
+	lines := strings.Split(body, "\n")
+	last := kept[strings.LastIndex(kept, "\n")+1:]
+	found := false
+	for _, l := range lines {
+		if l == last {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatalf("kept text ends mid-line: %q", last)
+	}
+	if !utf8.ValidString(got) {
+		t.Fatalf("truncated changelog is not valid UTF-8")
+	}
+}
+
+// TestTruncateChangelogLeavesShortAndExactAlone: at or under the limit the
+// body is returned as is, including one that is exactly at the limit.
+func TestTruncateChangelogLeavesShortAndExactAlone(t *testing.T) {
+	for _, body := range []string{"", "## Changelog\n* one line\n", strings.Repeat("é", changelogMaxChars)} {
+		if got := truncateChangelog(body); got != body {
+			t.Fatalf("changelog of %d characters was changed", utf8.RuneCountInString(body))
+		}
+	}
+}
+
+// TestTruncateChangelogHandlesCRLF: a body with Windows line endings (GitHub
+// keeps them when a release is edited in the browser) still ends on a whole
+// line, with no stray carriage return before the note.
+func TestTruncateChangelogHandlesCRLF(t *testing.T) {
+	var b strings.Builder
+	for i := 0; i < 300; i++ {
+		fmt.Fprintf(&b, "* %040x chore: update dependency & Go versions\r\n", i)
+	}
+	got := truncateChangelog(b.String())
+	if n := utf8.RuneCountInString(got); n > changelogMaxChars {
+		t.Fatalf("truncated changelog has %d characters, limit %d", n, changelogMaxChars)
+	}
+	if strings.Contains(got, "\r\n\n…") || strings.Contains(got, "\r\n…") {
+		t.Fatalf("carriage return left before the truncation note")
+	}
+	if !strings.Contains(got, "\n\n… truncated") {
+		t.Fatalf("truncation note missing")
+	}
+}
+
+// TestTruncateChangelogCountsCharactersNotBytes: multibyte text is cut on rune
+// boundaries and measured the way protovalidate measures max_len.
+func TestTruncateChangelogCountsCharactersNotBytes(t *testing.T) {
+	body := strings.Repeat("é", changelogMaxChars+500) // no line breaks at all
+	got := truncateChangelog(body)
+	if !utf8.ValidString(got) {
+		t.Fatalf("cut landed inside a multibyte sequence")
+	}
+	if n := utf8.RuneCountInString(got); n > changelogMaxChars {
+		t.Fatalf("truncated changelog has %d characters, limit %d", n, changelogMaxChars)
+	}
+	if !strings.HasSuffix(got, "-character limit.") {
+		t.Fatalf("truncation note missing")
 	}
 }
 
