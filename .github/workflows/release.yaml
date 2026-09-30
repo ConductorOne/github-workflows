@@ -466,7 +466,7 @@ jobs:
 
             BASENAME=$(basename "$artifact")
             echo "Generating provenance for: $BASENAME"
-            cosign attest-blob \
+            ./scripts/cosign-retry.sh attest-blob \
               --yes \
               --predicate "${GENERATED_DIR}/predicate.json" \
               --type slsaprovenance1 \
@@ -515,7 +515,7 @@ jobs:
             fi
 
             echo "Signing SBOM for: $(basename "$ARCHIVE")"
-            cosign attest-blob \
+            ./scripts/cosign-retry.sh attest-blob \
               --yes \
               --predicate "$sbom" \
               --type https://spdx.dev/Document \
@@ -787,7 +787,7 @@ jobs:
 
             BASENAME=$(basename "$artifact")
             echo "Generating provenance for: $BASENAME"
-            cosign attest-blob \
+            bash ./scripts/cosign-retry.sh attest-blob \
               --yes \
               --predicate "_generated/predicate.json" \
               --type slsaprovenance1 \
@@ -827,7 +827,7 @@ jobs:
             fi
 
             echo "Signing SBOM for: $(basename "$artifact")"
-            cosign attest-blob \
+            bash ./scripts/cosign-retry.sh attest-blob \
               --yes \
               --predicate "$SBOM" \
               --type https://spdx.dev/Document \
@@ -1206,7 +1206,7 @@ jobs:
             URI="${IMAGE_BASE}@${DIGEST}"
 
             echo "Attesting image: $URI"
-            cosign attest \
+            ./scripts/cosign-retry.sh attest \
               --yes \
               --type https://slsa.dev/provenance/v1 \
               --predicate "${GENERATED_DIR}/predicate.json" \
@@ -1311,7 +1311,7 @@ jobs:
 
           # Sign the checksums file
           echo "Signing checksums file..."
-          cosign sign-blob --yes "./${CHECKSUMS_FILE}" \
+          ../scripts/cosign-retry.sh sign-blob --yes "./${CHECKSUMS_FILE}" \
             --output-signature "./${CHECKSUMS_FILE}.sig" \
             --output-certificate "./${CHECKSUMS_FILE}.cert"
 
@@ -1338,7 +1338,7 @@ jobs:
           EOF
 
           # Generate provenance for checksums
-          cosign attest-blob \
+          ../scripts/cosign-retry.sh attest-blob \
             --yes \
             --predicate "$PREDICATE_FILE" \
             --type slsaprovenance1 \
@@ -1374,7 +1374,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          cosign sign-blob --yes "manifest.json" \
+          ../scripts/cosign-retry.sh sign-blob --yes "manifest.json" \
             --output-signature "manifest.json.sig" \
             --output-certificate "manifest.json.cert" \
             --bundle "manifest.json.sigstore.json"
