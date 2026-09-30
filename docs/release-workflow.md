@@ -297,6 +297,12 @@ The `scripts/validate-release-artifacts.sh` script validates:
 
 Exit codes: `0` = all passed, `1` = failures
 
+Each cosign verification is retried on failure, three attempts with a 10 s
+then 20 s wait by default (`COSIGN_VERIFY_ATTEMPTS`, `COSIGN_VERIFY_DELAY`),
+since Rekor and the certificate transparency log time out and rate-limit
+under load. cosign's stderr from the final attempt is printed under a failed
+check.
+
 ### Manual Verification
 
 ```bash
