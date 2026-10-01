@@ -1,4 +1,4 @@
-FROM gcr.io/distroless/static-debian11:nonroot
+FROM gcr.io/distroless/static-debian13:nonroot
 ARG TARGETPLATFORM
 ENTRYPOINT ["/${REPO_NAME}"]
 COPY ${TARGETPLATFORM}/${REPO_NAME} /${REPO_NAME}
