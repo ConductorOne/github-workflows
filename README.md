@@ -195,7 +195,7 @@ Your custom Dockerfile must:
 Example for a Java-based connector:
 
 ```dockerfile
-FROM gcr.io/distroless/java17-debian11:nonroot
+FROM gcr.io/distroless/java17-debian13:nonroot
 ARG TARGETPLATFORM
 ENTRYPOINT ["/baton-example"]
 
