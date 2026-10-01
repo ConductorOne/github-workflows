@@ -111,6 +111,9 @@ Post-release validation (non-blocking):
 
 - Validates all artifacts are accessible
 - Verifies all attestations with cosign
+- Logs in to Public ECR with the pull-only `GHA-PublicECRPull` role when the
+  release includes a Docker image, so the image attestation pull is not
+  subject to the anonymous rate limit
 - Triggers Datadog notification on failure
 
 ## Security Properties
