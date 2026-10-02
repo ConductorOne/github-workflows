@@ -10,7 +10,6 @@ concurrency:
   cancel-in-progress: true
 jobs:
   pr-review:
-    if: github.event_name != 'pull_request' || github.repository != 'ConductorOne/github-workflows'
     runs-on: ubuntu-latest
     permissions:
       actions: read
