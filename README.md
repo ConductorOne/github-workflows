@@ -6,7 +6,9 @@ Shared GitHub workflows and actions for ConductorOne connector repositories.
 
 Runs Claude-powered PR review for same-repository pull requests. Fork PRs are skipped
 because they do not receive automatic Claude review. Review jobs check out the exact PR
-head SHA so Claude can inspect the proposed source tree locally. The action builds its
+head SHA so Claude can inspect the proposed source tree locally. Pull requests to this
+repository are reviewed as well, by the workflow and action on `main` rather than the
+version a pull request proposes. The action builds its
 prompt from a shared base prompt plus optional built-in mixins. The default profile is
 `connector`, which adds the connector mixin for repos covered by connector required
 workflows or rulesets.
