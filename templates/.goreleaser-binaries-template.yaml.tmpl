@@ -92,7 +92,9 @@ brews:
       owner: conductorone
       name: "${BREW_TAP}"
     directory: Formula
-    skip_upload: "${BREW_SKIP_UPLOAD}"
+    # Rendered only. The workflow writes the formula to the tap itself so a
+    # concurrent release moving the tap's branch is retried, not fatal.
+    skip_upload: "true"
     homepage: https://conductorone.com
     test: |
       system "#{bin}/${REPO_NAME} -v"

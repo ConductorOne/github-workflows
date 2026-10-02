@@ -47,7 +47,6 @@ def verify_case(go_main_package: str, brew_tap: str) -> None:
         "GO_MAIN_PACKAGE": go_main_package,
         "WXS_PATH": "app.wxs",
         "BREW_TAP": brew_tap,
-        "BREW_SKIP_UPLOAD": "false",
         "DIST_DIR": "dist/test",
         "DOCKERFILE_PATH": "Dockerfile",
         "DOCKERFILE_LAMBDA_PATH": "Dockerfile.lambda",
@@ -61,6 +60,8 @@ def verify_case(go_main_package: str, brew_tap: str) -> None:
     assert_main(rendered["oci"], go_main_package, 1, "OCI template")
     assert_main(rendered["lambda"], go_main_package, 1, "Lambda template")
     assert_contains(rendered["binaries"], f'name: "{brew_tap}"', "binaries template")
+    # The workflow writes the formula itself; GoReleaser only renders it.
+    assert_contains(rendered["binaries"], 'skip_upload: "true"', "binaries template")
 
 
 def main() -> int:

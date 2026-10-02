@@ -53,6 +53,10 @@ Builds and signs binary archives for macOS and Linux:
 - Creates SLSA v1 provenance attestations
 - Signs SBOMs as attestation bundles
 - Uploads all artifacts to S3 with no-overwrite writes
+- Writes the Homebrew formula GoReleaser rendered to the `conductorone` tap
+  (`scripts/publish-homebrew-formula.sh`), re-reading and retrying when a
+  concurrent release moved the tap's branch; a formula already at the same
+  content is left alone
 
 **Outputs:** `*.zip` (macOS), `*.tar.gz` (Linux), `*.provenance.sigstore.json`, `*.sbom.sigstore.json`
 
