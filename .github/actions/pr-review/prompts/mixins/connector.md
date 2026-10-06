@@ -48,7 +48,11 @@ These file patterns indicate what kind of connector code you are reviewing:
 - R7: Missing API permissions in a resource-producing method → **return the error**. A full
   sync is authoritative current state: C1 buckets whatever the sync does not emit as deleted,
   for grants as well as resources, so a `List`, `Entitlements` or `Grants` that swallows a
-  401/403/404 and returns an empty result deletes what the customer had. An empty `Grants()`
+  401 or 403 and returns an empty result deletes what the customer had. A 404 counts too when
+  it means the endpoint or the permission is gone — but **not** when it means the record is:
+  a per-item fetch 404ing because the resource was deleted between `List` and the child call
+  is the one error safely skipped with `continue`, since emitting without it is the correct
+  state. Failing the sync on that race is the opposite failure mode. An empty `Grants()`
   revokes every principal's access to that resource. Return the error and the sync fails with
   prior state intact. "Degrade gracefully", "skip if 403", "return empty if the account lacks
   permission" and "log a warning and continue past a failed page" are the same data loss under
