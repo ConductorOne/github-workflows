@@ -387,6 +387,7 @@ jobs:
           WORKFLOWS_REF: ${{ needs.determine-workflows-ref.outputs.ref }}
           RELEASE_TAG: ${{ inputs.tag }}
         run: |
+          set -o pipefail
           mkdir -p "${GENERATED_DIR}"
           export BUILD_STARTED_ON=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
 
@@ -1004,6 +1005,7 @@ jobs:
           # Extra files to include in Docker build context (comma-separated)
           DOCKER_EXTRA_FILES: ${{ inputs.docker_extra_files }}
         run: |
+          set -o pipefail
           mkdir -p "${GENERATED_DIR}"
           export BUILD_STARTED_ON=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
 
@@ -1055,6 +1057,7 @@ jobs:
           DOCKERFILE_LAMBDA_PATH: ../_workflows/_generated/Dockerfile.lambda
           DIST_DIR: dist/lambda
         run: |
+          set -o pipefail
           mkdir -p "${GENERATED_DIR}"
           envsubst '$REPO_NAME' < templates/.Dockerfile-lambda-template.tmpl | tee "${GENERATED_DIR}/Dockerfile.lambda"
           envsubst < templates/.goreleaser-docker-lambda-template.yaml.tmpl | tee "${GENERATED_DIR}/.goreleaser.lambda.yaml"
@@ -1276,6 +1279,7 @@ jobs:
           IMAGES_MANIFEST: ${{ needs.goreleaser-docker.outputs.images_manifest }}
           OUTPUT_DIR: _output
         run: |
+          set -o pipefail
           mkdir -p "${OUTPUT_DIR}"
           go run ./cmd/merge-manifests \
             -binaries-manifest "$BINARIES_MANIFEST" \
