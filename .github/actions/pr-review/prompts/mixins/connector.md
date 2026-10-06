@@ -52,14 +52,16 @@ These file patterns indicate what kind of connector code you are reviewing:
   it means the endpoint or the permission is gone — but **not** when it means the record is:
   a per-item fetch 404ing because the resource was deleted between `List` and the child call
   is the one error safely skipped with `continue`, since emitting without it is the correct
-  state. Failing the sync on that race is the opposite failure mode. An empty `Grants()`
-  revokes every principal's access to that resource. Return the error and the sync fails with
+  state. Failing the sync on that race is the opposite failure mode. Where it is not clear which
+  a 404 means — GitHub, GitLab and several SCIM APIs answer 404 for permission denial — return
+  it; an unproven `NotFound` is not skippable. An empty `Grants()`
+  revokes every principal's access to that resource. Return the error and the sync typically fails with
   prior state intact. "Degrade gracefully", "skip if 403", "return empty if the account lacks
   permission" and "log a warning and continue past a failed page" are the same data loss under
   different names — there is no partial-sync signal in C1's model.
   For a feature not every customer has (paid tier, add-on), annotate the resource type
-  `&v2.OptInRequired{}`. That is a **design-time** decision — a static annotation read once at
-  capability registration — not something to reach for when a call comes back 403 mid-sync.
+  `&v2.OptInRequired{}`. That is a **design-time** decision — a static annotation on the resource type, not something
+  to reach for when a call comes back 403 mid-sync.
 - R8: Pagination uses SDK pagination bags and never hardcodes tokens or buffers all pages
 - R9: User resources include status, email, profile, and login when available
 - R10: Resource IDs are stable immutable API IDs, never emails or mutable fields
@@ -173,7 +175,7 @@ Do not flag these patterns without clear repo-specific evidence:
 |-|-|
 | No nil check before `connectorbuilder.NewConnector` | The SDK validates internally |
 | No status code check after `uhttp.BaseHttpClient.Do()` | The SDK maps non-2xx responses to gRPC errors |
-| No guard for principal types *outside* `WithGrantableTo` | C1 only offers the Grant task for the listed types, so a guard for the rest is optional. **This does not extend to the listed types:** `builder.Grant` picks the provisioner from the *entitlement's* resource type and passes the principal through unchanged, so nothing validates it — a Grant that sends a user-shaped call for a group principal is a real finding |
+| No guard for principal types *outside* `WithGrantableTo` | The C1 UI only offers the Grant task for the listed types, so a guard for the rest is optional. **This does not extend to the listed types:** `builder.Grant` picks the provisioner from the *entitlement's* resource type and passes the principal through unchanged, so nothing validates it — a Grant that sends a user-shaped call for a group principal is a real finding |
 | No ActiveSync annotations in List calls | Middleware adds them automatically |
 | `StaticEntitlements` passing nil resource | The SDK associates them with resources at sync time |
 | `GrantAlreadyExists`/`GrantAlreadyRevoked` without merging other annotations | This is standard convention |
