@@ -102,6 +102,7 @@ jobs:
 
       - name: Install MDX lint dependencies
         run: |
+          set -o pipefail
           npm ci --ignore-scripts --silent --prefix _workflow/tools/mdx-lint 2>&1 | tail -n 1
 
       - name: Checkout caller repo
