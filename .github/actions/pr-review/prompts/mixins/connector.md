@@ -144,8 +144,11 @@ the PR description, and paired with documentation updates.
 
 - F1: Do not conditionally register resource builders from startup API probes. If a paid-feature
   endpoint temporarily returns 403/404, conditional registration can make previously synced
-  resource types disappear and be interpreted as deletions. Always register supported builders
-  and handle unavailable endpoints inside each builder.
+  resource types disappear and be interpreted as deletions. Always register supported builders.
+  Inside the builder, **return the error** (R7) — "handle it" never means returning an empty
+  result, which is the same deletion by a slower route. If the feature is genuinely not
+  available to every customer, mark the resource type `&v2.OptInRequired{}` rather than probing
+  for it or emitting nothing.
 - F2: Do not fetch all pages inside a connector List, Entitlements, Grants, or HTTP client method.
   The SDK should drive pagination one page at a time for checkpointing, rate limits, and cancellation.
   Client methods should accept a token or cursor and return one page.
