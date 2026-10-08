@@ -48,20 +48,25 @@ These file patterns indicate what kind of connector code you are reviewing:
 - R7: Missing API permissions in a resource-producing method → **return the error**. A full
   sync is authoritative current state: C1 buckets whatever the sync does not emit as deleted,
   for grants as well as resources, so a `List`, `Entitlements` or `Grants` that swallows a
-  401 or 403 and returns an empty result deletes what the customer had. A 404 counts too when
-  it means the endpoint or the permission is gone — but **not** when it means the record is:
-  a per-item fetch 404ing because the resource was deleted between `List` and the child call
-  is the one error safely skipped with `continue`, since emitting without it is the correct
-  state. Failing the sync on that race is the opposite failure mode. Where it is not clear which
-  a 404 means — GitHub, GitLab and several SCIM APIs answer 404 for permission denial — return
-  it; an unproven `NotFound` is not skippable. An empty `Grants()`
-  revokes every principal's access to that resource. Return the error and the sync typically fails with
-  prior state intact. "Degrade gracefully", "skip if 403", "return empty if the account lacks
-  permission" and "log a warning and continue past a failed page" are the same data loss under
-  different names — there is no partial-sync signal in C1's model.
+  401 or 403 and returns an empty result deletes what the customer had — an empty `Grants()`
+  revokes every principal's access to that resource, an empty `List` deletes every resource
+  of its type. Return the error and the sync typically fails with prior state intact.
+  "Degrade gracefully", "skip if 403", "return empty if the account lacks permission" and
+  "log a warning and continue past a failed page" are the same data loss under different
+  names — there is no partial-sync signal in C1's model.
+
+  A 404 counts too when it means the endpoint or the permission is gone, but **not** when it
+  means the record is: a per-item fetch 404ing because the resource was deleted between
+  `List` and the child call is the one error safely skipped with `continue`, since emitting
+  without it is the correct state. Failing the sync on that race is the opposite failure
+  mode. Where it is not clear which a 404 means — GitHub, GitLab and several SCIM APIs
+  answer 404 for permission denial — return it. **Proven** means the client method that
+  makes the call carries a doc comment stating whether this vendor's 404 means absent or
+  not permitted; absent that comment, treat the `NotFound` as unproven and return it.
+
   For a feature not every customer has (paid tier, add-on), annotate the resource type
-  `&v2.OptInRequired{}`. That is a **design-time** decision — a static annotation on the resource type, not something
-  to reach for when a call comes back 403 mid-sync.
+  `&v2.OptInRequired{}`. That is a **design-time** decision — a static annotation on the
+  resource type, not something to reach for when a call comes back 403 mid-sync.
 - R8: Pagination uses SDK pagination bags and never hardcodes tokens or buffers all pages
 - R9: User resources include status, email, profile, and login when available
 - R10: Resource IDs are stable immutable API IDs, never emails or mutable fields
