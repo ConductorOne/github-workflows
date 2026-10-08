@@ -55,14 +55,15 @@ These file patterns indicate what kind of connector code you are reviewing:
   "log a warning and continue past a failed page" are the same data loss under different
   names — there is no partial-sync signal in C1's model.
 
-  A 404 counts too when it means the endpoint or the permission is gone, but **not** when it
-  means the record is: a per-item fetch 404ing because the resource was deleted between
-  `List` and the child call is the one error safely skipped with `continue`, since emitting
-  without it is the correct state. Failing the sync on that race is the opposite failure
-  mode. Where it is not clear which a 404 means — GitHub, GitLab and several SCIM APIs
-  answer 404 for permission denial — return it. **Proven** means the client method that
-  makes the call carries a doc comment stating whether this vendor's 404 means absent or
-  not permitted; absent that comment, treat the `NotFound` as unproven and return it.
+  A 404 is the one error that may be skipped with `continue` — a per-item fetch 404ing
+  because the resource was deleted between `List` and the child call, where emitting without
+  it is the correct state, and failing the sync on that race is the opposite failure mode.
+  **That skip is allowed only when the 404 is proven to mean absence**, because GitHub,
+  GitLab and several SCIM APIs answer 404 for permission denial, and there the same skip
+  drops every item a missing scope touches. Proven means the client method that makes the
+  call carries a doc comment saying which this vendor's 404 is. No comment, no skip: return
+  the error. This applies to the race above as well — from inside the loop the two are
+  indistinguishable.
 
   For a feature not every customer has (paid tier, add-on), annotate the resource type
   `&v2.OptInRequired{}`. That is a **design-time** decision — a static annotation on the
