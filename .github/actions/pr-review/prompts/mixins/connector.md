@@ -45,7 +45,29 @@ These file patterns indicate what kind of connector code you are reviewing:
 - R4: Errors use `%w` and include the baton service prefix with `uhttp.WrapErrors` where appropriate
 - R5: Use static entitlements for uniform entitlements
 - R6: Use skip annotations appropriately
-- R7: Missing API permissions should degrade gracefully when possible
+- R7: Missing API permissions in a resource-producing method → **return the error**. A full
+  sync is authoritative current state: C1 buckets whatever the sync does not emit as deleted,
+  for grants as well as resources, so a `List`, `Entitlements` or `Grants` that swallows a
+  401 or 403 and returns an empty result deletes what the customer had — an empty `Grants()`
+  revokes every principal's access to that resource, an empty `List` deletes every resource
+  of its type. Return the error and the sync typically fails with prior state intact.
+  "Degrade gracefully", "skip if 403", "return empty if the account lacks permission" and
+  "log a warning and continue past a failed page" are the same data loss under different
+  names — there is no partial-sync signal in C1's model.
+
+  A 404 is the one error that may be skipped with `continue` — a per-item fetch 404ing
+  because the resource was deleted between `List` and the child call, where emitting without
+  it is the correct state, and failing the sync on that race is the opposite failure mode.
+  **That skip is allowed only when the 404 is proven to mean absence**, because GitHub,
+  GitLab and several SCIM APIs answer 404 for permission denial, and there the same skip
+  drops every item a missing scope touches. Proven means the client method that makes the
+  call carries a doc comment saying which this vendor's 404 is. No comment, no skip: return
+  the error. This applies to the race above as well — from inside the loop the two are
+  indistinguishable.
+
+  For a feature not every customer has (paid tier, add-on), annotate the resource type
+  `&v2.OptInRequired{}`. That is a **design-time** decision — a static annotation on the
+  resource type, not something to reach for when a call comes back 403 mid-sync.
 - R8: Pagination uses SDK pagination bags and never hardcodes tokens or buffers all pages
 - R9: User resources include status, email, profile, and login when available
 - R10: Resource IDs are stable immutable API IDs, never emails or mutable fields
@@ -128,8 +150,11 @@ the PR description, and paired with documentation updates.
 
 - F1: Do not conditionally register resource builders from startup API probes. If a paid-feature
   endpoint temporarily returns 403/404, conditional registration can make previously synced
-  resource types disappear and be interpreted as deletions. Always register supported builders
-  and handle unavailable endpoints inside each builder.
+  resource types disappear and be interpreted as deletions. Always register supported builders.
+  Inside the builder, **return the error** (R7) — "handle it" never means returning an empty
+  result, which is the same deletion by a slower route. If the feature is genuinely not
+  available to every customer, mark the resource type `&v2.OptInRequired{}` rather than probing
+  for it or emitting nothing.
 - F2: Do not fetch all pages inside a connector List, Entitlements, Grants, or HTTP client method.
   The SDK should drive pagination one page at a time for checkpointing, rate limits, and cancellation.
   Client methods should accept a token or cursor and return one page.
@@ -159,7 +184,7 @@ Do not flag these patterns without clear repo-specific evidence:
 |-|-|
 | No nil check before `connectorbuilder.NewConnector` | The SDK validates internally |
 | No status code check after `uhttp.BaseHttpClient.Do()` | The SDK maps non-2xx responses to gRPC errors |
-| No type validation in Grant/Revoke methods | The SDK guarantees correct types from the entitlement definition |
+| No guard for principal types *outside* `WithGrantableTo` | The C1 UI only offers the Grant task for the listed types, so a guard for the rest is optional. **This does not extend to the listed types:** `builder.Grant` picks the provisioner from the *entitlement's* resource type and passes the principal through unchanged, so nothing validates it — a Grant that sends a user-shaped call for a group principal is a real finding |
 | No ActiveSync annotations in List calls | Middleware adds them automatically |
 | `StaticEntitlements` passing nil resource | The SDK associates them with resources at sync time |
 | `GrantAlreadyExists`/`GrantAlreadyRevoked` without merging other annotations | This is standard convention |
