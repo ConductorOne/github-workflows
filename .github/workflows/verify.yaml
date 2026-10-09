@@ -43,8 +43,9 @@ jobs:
     - name: Run linters
       uses: golangci/golangci-lint-action@v9
       with:
-       # Floor for go 1.27 callers: a linter built with an older Go can't load the config.
-       version: v2.13.2
+       # Floor for go 1.27.2 callers: older linters cannot read its export data
+       # (version 5), and v2.14.0 still lints callers on earlier Go unchanged.
+       version: v2.14.0
        args: --timeout=6m
        working-directory: _caller
   test:
