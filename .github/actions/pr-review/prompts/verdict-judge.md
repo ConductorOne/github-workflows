@@ -25,7 +25,7 @@ row is as load-bearing as the count.
 | --- | --- | --- |
 | `**Verdict: APPROVE**` | You reviewed the entire diff and found nothing blocking. Requires `N == 0`. | `APPROVE` |
 | `**Verdict: REQUEST CHANGES**` | At least one blocking finding, or a non-defect reason the author must act on before merge. | `REQUEST_CHANGES` |
-| `**Verdict: DEFER**` | You cannot stand behind either of the above for the whole PR. | `COMMENT` |
+| `**Verdict: DEFER**` | You cannot stand behind either of the above for the whole PR. | `COMMENT` at `N == 0`, `REQUEST_CHANGES` above |
 
 **The replacement.** The base prompt says CI derives the review from the count
 (`--request-changes` when N > 0, `--comment` when N == 0). In judge mode it
@@ -50,15 +50,18 @@ most repos and says nothing about your coverage of the diff. Defer on a
 criteria line that reports the file was unavailable or invalid, which means
 rules you should have applied are missing.
 
-Be deliberate about reaching for it. `DEFER` submits a neutral comment, and a
-comment never clears an earlier `CHANGES_REQUESTED` — so deferring by habit
-re-creates exactly the stuck state judge mode exists to fix.
+Be deliberate about reaching for it. At `N == 0`, `DEFER` submits a neutral
+comment, and a comment never clears an earlier `CHANGES_REQUESTED` — so
+deferring by habit re-creates exactly the stuck state judge mode exists to fix.
+
+`DEFER` is a statement about your coverage, not about severity, so it cannot
+be used to unblock: if your count row is above zero, CI submits
+`REQUEST_CHANGES` regardless. You do not get to list confirmed blockers and
+then decline to block.
 
 `REQUEST CHANGES` does not require `N > 0`. A PR can need author action for a
 reason that is not a defect in the diff — a missing migration note, an
-unanswered prior thread. Say so in the summary when you use it that way. Note
-that `DEFER` over a positive count is accepted and leaves the PR unblocked; if
-the blockers are real and should hold the merge, write `REQUEST CHANGES`.
+unanswered prior thread. Say so in the summary when you use it that way.
 
 An `APPROVE` over a positive blocking count is a contradiction, not a verdict:
 your own summary calls something blocking while the verdict clears it. CI

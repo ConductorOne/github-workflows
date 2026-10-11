@@ -106,6 +106,12 @@ review.
 | --- | --- | --- |
 | `baseline` (default) | The `**Blocking Issues: N**` count | `REQUEST_CHANGES` when N > 0, `COMMENT` when N == 0 |
 | `judge` | An explicit `**Verdict: ...**` row the reviewer writes under the count | `APPROVE` / `REQUEST_CHANGES` / `COMMENT` |
+
+In judge mode `APPROVE` and `REQUEST CHANGES` map straight through. `DEFER`
+declines to answer, so it falls back to the baseline mapping of its own count
+row: a neutral comment at zero blockers, request-changes above. Judge is
+therefore never less blocking than baseline would have been for the same
+summary — deferring is a statement about coverage, not a way to unblock.
 | `none` | — | nothing; the report is published alone |
 
 Baseline deliberately has no `APPROVE` path. On GitHub a `COMMENT` review never
@@ -128,11 +134,9 @@ is the only structural proof the agent finished its summary, so without it a
 truncated run would publish as completed state and silently retire commits nobody
 reviewed.
 
-Judge mode is additive in what it asks for, but not strictly additive in outcome:
-`DEFER` maps to `COMMENT` at any blocking count, so a judge run that reports
-blockers and defers leaves the PR unblocked where `baseline` would have blocked it.
-That is the deliberate price of giving the reviewer a way to decline the whole
-question.
+The one outcome judge mode adds over baseline is `APPROVE`. Everything else is
+baseline's mapping or stricter: `REQUEST CHANGES` can block at a zero count,
+and `DEFER` resolves to whatever baseline would have submitted.
 
 #### Before enabling judge mode
 

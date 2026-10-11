@@ -341,7 +341,10 @@ class JudgeVerdictParsingTest(unittest.TestCase):
             ("REQUEST CHANGES", 3, "REQUEST_CHANGES"),
             ("REQUEST CHANGES", 0, "REQUEST_CHANGES"),
             ("DEFER", 0, "COMMENT"),
-            ("DEFER", 2, "COMMENT"),
+            # Deferring is a coverage statement, not a way to unblock: over a
+            # positive count it resolves to what baseline would have said.
+            ("DEFER", 2, "REQUEST_CHANGES"),
+            ("DEFER", 9, "REQUEST_CHANGES"),
         ):
             with self.subTest(verdict=verdict, n=n):
                 mapping = pub.verdict_to_review("judge", judge_body(n, verdict), HEADING)
@@ -799,6 +802,21 @@ class PublishMainTest(unittest.TestCase):
         self.assertEqual(len(review_posts), 1)
         self.assertEqual(review_posts[0]["event"], "COMMENT")
         self.assertIn("DEFER", review_posts[0]["body"])
+
+    def test_judge_never_submits_less_than_baseline_would(self):
+        # The invariant behind DEFER's fallback: for any summary, judge mode
+        # must not leave a PR unblocked that baseline would have blocked.
+        for verdict in ("REQUEST CHANGES", "DEFER"):
+            for n in (1, 4):
+                with self.subTest(verdict=verdict, n=n):
+                    working = comment(2, judge_body(n, verdict))
+                    code, calls = self._run_main(
+                        [working], env_extra={"VERDICT_MODE": "judge"}
+                    )
+                    self.assertEqual(code, 0)
+                    posts = _posts(calls, "pulls/42/reviews")
+                    self.assertEqual(len(posts), 1)
+                    self.assertEqual(posts[0]["event"], "REQUEST_CHANGES")
 
     def test_judge_mode_without_a_verdict_row_fails_closed(self):
         # The agent posted a baseline-shaped summary under judge mode. Publish

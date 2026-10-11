@@ -36,8 +36,10 @@ agent run, this trusted CI step finalizes the run:
 4. Submits the formal PR review with an explicit commit_id, linking directly
    to the new report. The submitted event comes from the verdict mode (see
    verdict_to_review): "baseline" maps the count — N > 0 -> REQUEST_CHANGES,
-   N == 0 -> COMMENT — and never approves; "judge" maps the verdict row —
-   APPROVE / REQUEST CHANGES / DEFER -> APPROVE / REQUEST_CHANGES / COMMENT;
+   N == 0 -> COMMENT — and never approves; "judge" maps the verdict row:
+   APPROVE -> APPROVE, REQUEST CHANGES -> REQUEST_CHANGES, and DEFER falls
+   back to the baseline mapping of its own count, so it can never unblock a
+   PR baseline would have blocked;
    "none" submits nothing and stops after step 3. The live head is re-checked immediately
    before the vote. An existing review is recognized as this run's formal
    result ONLY by exact binding — host identity marker + report_comment_id +
@@ -321,7 +323,9 @@ def parse_judge_verdict(body: str, heading: str) -> tuple[str, int] | None:
     position, or ambiguous, or when the two rows contradict each other: an
     APPROVE over a positive blocking count is never a valid verdict. The
     converse is not a contradiction — a judge may REQUEST CHANGES or DEFER at
-    zero blockers for reasons that are not defects.
+    zero blockers for reasons that are not defects. DEFER over a positive
+    count is not a contradiction either, and is not rejected: verdict_to_review
+    resolves it to the count's own verdict rather than costing the run.
     """
     blocking = parse_blocking_count(body, heading)
     if blocking is None:
@@ -378,10 +382,14 @@ PARSE_REQUIREMENT = {
 def verdict_to_review(mode: str, body: str, heading: str) -> tuple[str, str] | None:
     """Map a summary body to (review event, lead sentence).
 
-    judge:    APPROVE -> APPROVE, REQUEST CHANGES -> REQUEST_CHANGES,
-              DEFER -> COMMENT. DEFER is the escape hatch for a review that
-              cannot stand behind approving the whole PR — it asks for a human
-              rather than granting or withholding approval.
+    judge:    APPROVE -> APPROVE, REQUEST CHANGES -> REQUEST_CHANGES.
+              DEFER declines to answer, so it falls back to the baseline
+              mapping of its own count row: COMMENT at zero blockers,
+              REQUEST_CHANGES above. DEFER is the escape hatch for a review
+              that cannot stand behind approving the WHOLE PR — a coverage
+              statement, not a severity one — so it must never clear findings
+              the same summary calls blocking. Judge is therefore never less
+              blocking than baseline would have been for the same summary.
     baseline: blocking N > 0 -> REQUEST_CHANGES, N == 0 -> COMMENT. The
               baseline reviewer deliberately has no APPROVE path, so its
               REQUEST_CHANGES can only be cleared by a human dismissal.
@@ -398,11 +406,19 @@ def verdict_to_review(mode: str, body: str, heading: str) -> tuple[str, str] | N
         parsed = parse_judge_verdict(body, heading)
         if parsed is None:
             return None
-        verdict, _blocking = parsed
+        verdict, blocking = parsed
         if verdict == "APPROVE":
             return "APPROVE", "Judge verdict: APPROVE"
         if verdict == "REQUEST CHANGES":
             return "REQUEST_CHANGES", "Judge verdict: REQUEST CHANGES"
+        if blocking > 0:
+            # Deferring is not a way to unblock. A hedging reviewer that lists
+            # confirmed blockers and then declines to decide gets the verdict
+            # its own count row implies.
+            return (
+                "REQUEST_CHANGES",
+                "Judge verdict: DEFER over unresolved blocking issues",
+            )
         return "COMMENT", "Judge verdict: DEFER — a human review is needed"
     if mode == "baseline":
         blocking = parse_blocking_count(body, heading)
