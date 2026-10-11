@@ -104,9 +104,23 @@ review.
 
 | Mode | How the event is chosen | Submits |
 | --- | --- | --- |
-| `baseline` (default) | The `**Blocking Issues: N**` count | `REQUEST_CHANGES` when N > 0, `COMMENT` when N == 0 |
+| `baseline` | The `**Blocking Issues: N**` count | `REQUEST_CHANGES` when N > 0, `COMMENT` when N == 0 |
 | `judge` | An explicit `**Verdict: ...**` row the reviewer writes under the count | `APPROVE` / `REQUEST_CHANGES` / `COMMENT` |
 | `none` | — | nothing; the report is published alone |
+
+Which one you get depends on how the review reaches you:
+
+| Entry point | Mode | Why |
+| --- | --- | --- |
+| `pr-review.yaml` (the connector profile) | `judge` | Connector repos require 0 approving reviews, so an approval grants nothing there — its only effect is clearing the bot's own block, which is the whole point |
+| `general-pr-review.yaml` | `baseline` | It passes no `verdict_mode`, so the action's own conservative default applies |
+| the action called directly | `baseline` | Same |
+
+That split is deliberate. `github-workflows` itself requires one approving
+review and is reviewed by `general-pr-review.yaml`, so the bot never gets a
+vote that could satisfy a human review requirement. Any repo that starts
+requiring approvals should be moved off the connector profile, or pinned to
+`baseline` explicitly, before that stops being true.
 
 In judge mode `APPROVE` and `REQUEST CHANGES` map straight through. `DEFER`
 declines to answer, so it falls back to the baseline mapping of its own count
@@ -138,23 +152,26 @@ The one outcome judge mode adds over baseline is `APPROVE`. Everything else is
 baseline's mapping or stricter: `REQUEST CHANGES` can block at a zero count,
 and `DEFER` resolves to whatever baseline would have submitted.
 
-#### Before enabling judge mode
+#### What judge mode costs, and why it is acceptable on connector repos
 
-`judge` is off by default and should stay off until the repo enabling it has
-accepted three consequences. None of them are new code paths — they are what an
-approving review means on GitHub.
+None of the below are new code paths — they are what an approving review means
+on GitHub. They are listed because the connector profile now defaults to
+`judge`, and because they are exactly what changes if a repo on that profile
+ever starts requiring approvals.
 
 - **The bot gets a vote.** The review is submitted with `GITHUB_TOKEN`, so an
   `APPROVE` is recorded as an approving review by `github-actions[bot]` and
-  counts toward a classic "required approving reviews" rule. A repo that relies
-  on that count for human sign-off should keep `baseline`.
+  counts toward a "required approving reviews" rule. On every connector repo
+  that count is 0, so the approval satisfies nothing — its only effect is
+  clearing the bot's own `CHANGES_REQUESTED`. A repo that relies on that count
+  for human sign-off must be pinned to `baseline`.
 - **Approvals are not self-retracting.** Nothing in this action dismisses a
   review. Once an `APPROVE` lands for commit A it stays the bot's latest review
   until some later run submits a different event — and no later run submits one
   if the review step fails, is cancelled, or the caller switches to `none`.
-  Judge mode therefore assumes the repo has "dismiss stale pull request
-  approvals when new commits are pushed" enabled; the action does not enforce
-  it.
+  Connector repos do not have "dismiss stale pull request approvals when new
+  commits are pushed" enabled, so a stale approval does persist; at 0 required
+  approvals it is inert, but it would not be on a repo that required any.
 - **It raises the ceiling on an existing weakness.** The verdict is parsed out
   of a comment, and publication selects that comment by author login, heading,
   and freshness — not by an id bound before the agent ran. A user with write
@@ -164,11 +181,13 @@ approving review means on GitHub.
   suppressing a block (editing the count to 0 downgrades to `COMMENT`). Under
   `judge` the same edit manufactures an `APPROVE`. The same is true of prompt
   injection from PR file content, which the base prompt treats as untrusted for
-  the title and body but not for the diff. Closing this means refusing a
-  summary whose last editor was not the bot (GraphQL exposes `editor` and
-  `lastEditedAt` on an issue comment); until that lands, judge mode should only
-  be enabled where every contributor already has write access and the approval
-  is a convenience, not a control.
+  the title and body but not for the diff. On a connector repo that buys the
+  editor nothing they lack — anyone with write can already dismiss the bot's
+  review by hand, which is how every such block has been cleared so far. It
+  would buy them something real on a repo requiring approvals, which is the
+  second reason such a repo belongs on `baseline`. Closing it properly means
+  refusing a summary whose last editor was not the bot (GraphQL exposes
+  `editor` and `lastEditedAt` on an issue comment).
 
 For candidate validation, pin the reusable workflow to the exact reviewed commit.
 Keep the test caller on a disposable same-repository draft branch; the normal

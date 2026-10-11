@@ -14,9 +14,9 @@ on:
         default: ""
         type: string
       verdict_mode:
-        description: "How CI turns the review summary into a formal PR review: 'baseline' (default, never approves), 'judge' (the reviewer writes an APPROVE / REQUEST CHANGES / DEFER verdict), or 'none' (report only)."
+        description: "How CI turns the review summary into a formal PR review: 'judge' (the default here — the reviewer writes an APPROVE / REQUEST CHANGES / DEFER verdict), 'baseline' (count-driven, never approves), or 'none' (report only)."
         required: false
-        default: baseline
+        default: judge
         type: string
     secrets:
       ANTHROPIC_API_KEY:
@@ -62,5 +62,9 @@ jobs:
           head_sha: ${{ github.event.pull_request.head.sha }}
           review_prompt: ${{ inputs.review_prompt || 'connector' }}
           summary_marker: ${{ inputs.summary_marker }}
-          verdict_mode: ${{ inputs.verdict_mode || 'baseline' }}
+          # Also the fallback for the direct `pull_request` trigger, where
+          # `inputs` is empty: connector repos run this workflow from an org
+          # rule, not as a workflow_call, so the input default above never
+          # applies to them and this is what selects their mode.
+          verdict_mode: ${{ inputs.verdict_mode || 'judge' }}
     timeout-minutes: 30
