@@ -18,10 +18,15 @@ agent run, this trusted CI step finalizes the run:
    order) makes this attempt obsolete: it fails closed. Legacy reports
    without started_at never obsolete an attempt; an unparseable started_at
    is left untouched.
-2. Validates the baseline canonical fields: exactly one canonical count row
-   (`**Blocking Issues: N** | **Suggestions: M** | **Threads Resolved: R**`)
-   in its prescribed top-level position (CommonMark fence rules), and that
-   the live PR head still equals the checked-out HEAD the agent reviewed.
+2. Validates the canonical fields for the run's verdict mode: in every mode,
+   exactly one canonical count row (`**Blocking Issues: N** |
+   **Suggestions: M** | **Threads Resolved: R**`) in its prescribed top-level
+   position (CommonMark fence rules); in "judge", additionally exactly one
+   canonical verdict row below the heading. Even "none", which submits no
+   review, requires the count row — it is the proof that the agent finished
+   its summary, and without it a truncated run would publish as completed
+   state. Also validates that the live PR head still equals the checked-out
+   HEAD the agent reviewed.
 3. POSTs a NEW report comment: the working body plus a visible
    reviewed-commit link and CI-owned review-state metadata
    {last_reviewed_sha, base_sha, workflow_ref, run_id, run_attempt,
@@ -29,8 +34,11 @@ agent run, this trusted CI step finalizes the run:
    working comment is NOT publication — the report is a separate comment, so
    the previous completed report survives every failure before this point.
 4. Submits the formal PR review with an explicit commit_id, linking directly
-   to the new report. Baseline mode only: N > 0 -> REQUEST_CHANGES,
-   N == 0 -> COMMENT. Never approves. The live head is re-checked immediately
+   to the new report. The submitted event comes from the verdict mode (see
+   verdict_to_review): "baseline" maps the count — N > 0 -> REQUEST_CHANGES,
+   N == 0 -> COMMENT — and never approves; "judge" maps the verdict row —
+   APPROVE / REQUEST CHANGES / DEFER -> APPROVE / REQUEST_CHANGES / COMMENT;
+   "none" submits nothing and stops after step 3. The live head is re-checked immediately
    before the vote. An existing review is recognized as this run's formal
    result ONLY by exact binding — host identity marker + report_comment_id +
    GitHub's commit_id + the expected submitted state; an identity-matching
@@ -41,8 +49,11 @@ agent run, this trusted CI step finalizes the run:
    never landed stays pending: preserved (and reconciled by identity) for a
    same-attempt retry, but never the next run's completed-state baseline and
    never a model-mutable working slot. The transition retains the report's
-   original snapshot metadata and flips only the publication status.
-6. ONLY after the report is completed and the formal review exists,
+   original snapshot metadata and flips only the publication status. Mode
+   "none" has no formal result to wait for, so its report is composed as
+   "completed" in step 3 and this transition is a no-op.
+6. ONLY after the report is completed (and, in the modes that submit one, the
+   formal review exists),
    supersedes the exact previous owned reports OLDER than the new one
    (including any pending leftover from an interrupted publication — a
    replay never retires newer output) and the exact consumed working
@@ -67,6 +78,8 @@ intentional new run/attempt gets a new report.
 Any gate failure exits nonzero — a broken review is a loud red check, never
 silent green.
 """
+
+from __future__ import annotations
 
 import json
 import os
@@ -286,12 +299,23 @@ def parse_blocking_count(body: str, heading: str) -> int | None:
 def parse_judge_verdict(body: str, heading: str) -> tuple[str, int] | None:
     """Extract (verdict, blocking count) from a judge-mode summary.
 
-    Judge mode adds one row to the baseline template rather than reordering
-    it: the count row stays the first non-empty line after the heading and
-    the verdict row is the second. (ductone's judge prompt puts the verdict
-    first, but it ships a whole separate prompt file; our judge prompt is a
-    mixin appended to the shared base, so leaving the base template's first
-    row alone is what lets one template serve both modes.)
+    Judge mode ADDS a row to the baseline template rather than reordering it,
+    so the count row keeps its prescribed slot and is read by
+    parse_blocking_count exactly as baseline reads it — one rule, one
+    implementation, so the two modes can never disagree about the same
+    summary. (ductone's judge prompt puts the verdict row first, but it ships
+    a whole separate prompt file; ours is a mixin appended to the shared base,
+    so leaving the base template's first row alone is what lets one template
+    serve both modes.)
+
+    The verdict row is accepted anywhere at top level after the heading, not
+    at a fixed offset. Pinning it to the second row would make judge mode
+    depend on the agent dropping it ABOVE the base template's `**Criteria:**`
+    row — a position the base prompt itself still teaches — and the cost of
+    guessing wrong is a red run that throws away a completed review. Position
+    was never what made this safe: the row must be a whole canonical line at
+    top level (fenced example text is stripped, and the PR title shares the
+    heading's line), and exactly one may exist in the whole summary.
 
     Returns None — reject — when either row is absent, malformed, out of
     position, or ambiguous, or when the two rows contradict each other: an
@@ -299,20 +323,18 @@ def parse_judge_verdict(body: str, heading: str) -> tuple[str, int] | None:
     converse is not a contradiction — a judge may REQUEST CHANGES or DEFER at
     zero blockers for reasons that are not defects.
     """
+    blocking = parse_blocking_count(body, heading)
+    if blocking is None:
+        return None
     lines = _top_level_lines(body)
-    count_rows = [line for line in lines if COUNT_ROW_PATTERN.match(line)]
     verdict_rows = [line for line in lines if VERDICT_ROW_PATTERN.match(line)]
-    if len(count_rows) != 1 or len(verdict_rows) != 1:
+    if len(verdict_rows) != 1:
         return None
-    following = _rows_after_heading(lines, heading)
-    if len(following) < 2:
+    if not any(VERDICT_ROW_PATTERN.match(r) for r in _rows_after_heading(lines, heading)):
+        # The only canonical row sits above the summary heading, so it is not
+        # part of this summary.
         return None
-    count_match = COUNT_ROW_PATTERN.match(following[0])
-    verdict_match = VERDICT_ROW_PATTERN.match(following[1])
-    if not count_match or not verdict_match:
-        return None
-    blocking = int(count_match.group(1))
-    verdict = verdict_match.group(1)
+    verdict = VERDICT_ROW_PATTERN.match(verdict_rows[0]).group(1)
     if verdict == "APPROVE" and blocking > 0:
         # A contradiction, not a verdict: the summary approves over findings
         # it itself calls blocking. Reject rather than pick a side.
@@ -320,21 +342,35 @@ def parse_judge_verdict(body: str, heading: str) -> tuple[str, int] | None:
     return verdict, blocking
 
 
+# The event for mode "none": the summary still has to be valid, but nothing is
+# submitted to GitHub. A distinct sentinel rather than None keeps "no review to
+# submit" separate from "this summary does not parse", which must stay fatal.
+# The value is deliberately not a GitHub review event, so it can never be
+# mistaken for one or looked up in REVIEW_STATE_FOR_EVENT.
+NO_REVIEW = "none:no-review"
+
 # What each mode needs to find in the summary, quoted in the rejection message
 # so a red run says which row the agent failed to write.
 PARSE_REQUIREMENT = {
+    "none": (
+        "need exactly one canonical count row — "
+        "'**Blocking Issues: N** | **Suggestions: M** | **Threads Resolved: R**' "
+        "— as the first non-empty line after the summary heading; this mode "
+        "submits no review, but an unparseable summary still fails the run "
+        "rather than publishing as completed state"
+    ),
     "baseline": (
         "need exactly one canonical count row — "
         "'**Blocking Issues: N** | **Suggestions: M** | **Threads Resolved: R**' "
         "— as the first non-empty line after the summary heading"
     ),
     "judge": (
-        "need exactly one canonical count row — "
-        "'**Blocking Issues: N** | **Suggestions: M** | **Threads Resolved: R**' "
-        "— as the first non-empty line after the summary heading, followed by "
-        "exactly one canonical verdict row — '**Verdict: APPROVE**', "
-        "'**Verdict: REQUEST CHANGES**', or '**Verdict: DEFER**' — as the "
-        "second, and APPROVE requires a zero blocking count"
+        "need the baseline count row as the first non-empty line after the "
+        "summary heading, plus exactly one canonical verdict row — "
+        "'**Verdict: APPROVE**', '**Verdict: REQUEST CHANGES**', or "
+        "'**Verdict: DEFER**' — somewhere below that heading; and APPROVE "
+        "requires a zero blocking count, so an APPROVE written over a "
+        "positive count is rejected as a contradiction rather than resolved"
     ),
 }
 
@@ -349,9 +385,14 @@ def verdict_to_review(mode: str, body: str, heading: str) -> tuple[str, str] | N
     baseline: blocking N > 0 -> REQUEST_CHANGES, N == 0 -> COMMENT. The
               baseline reviewer deliberately has no APPROVE path, so its
               REQUEST_CHANGES can only be cleared by a human dismissal.
-    Returns None when the mode's canonical row(s) do not parse unambiguously.
-    "none" has no mapping and is handled by the caller, which submits no
-    formal review at all.
+    none:     no event. The caller submits no formal review — but the count
+              row is still REQUIRED to parse, because it is the only
+              structural proof that the agent finished its summary rather
+              than being cut off mid-run. Without that check a truncated
+              summary would publish as a completed report and become the next
+              run's incremental baseline, silently retiring commits nobody
+              reviewed.
+    Returns None when the mode's required row(s) do not parse unambiguously.
     """
     if mode == "judge":
         parsed = parse_judge_verdict(body, heading)
@@ -370,6 +411,10 @@ def verdict_to_review(mode: str, body: str, heading: str) -> tuple[str, str] | N
         if blocking > 0:
             return "REQUEST_CHANGES", "Blocking issues found"
         return "COMMENT", "No blocking issues found"
+    if mode == "none":
+        if parse_blocking_count(body, heading) is None:
+            return None
+        return NO_REVIEW, "No formal review is submitted in this mode"
     return None
 
 
@@ -978,17 +1023,15 @@ def _run() -> None:
             f"Finalization replay: reusing published report {report['id']} "
             f"for run {identity['run_id']} attempt {identity['run_attempt']}."
         )
-        mapping = None
-        if mode != "none":
-            mapping = verdict_to_review(mode, report.get("body", ""), marker)
-            if mapping is None:
-                print(
-                    "Refusing to finalize: the published report's canonical "
-                    f"verdict row(s) no longer parse unambiguously ({mode} "
-                    f"mode: {PARSE_REQUIREMENT[mode]}).",
-                    file=sys.stderr,
-                )
-                sys.exit(1)
+        mapping = verdict_to_review(mode, report.get("body", ""), marker)
+        if mapping is None:
+            print(
+                "Refusing to finalize: the published report's canonical "
+                f"row(s) no longer parse unambiguously ({mode} mode: "
+                f"{PARSE_REQUIREMENT[mode]}).",
+                file=sys.stderr,
+            )
+            sys.exit(1)
     else:
         # Obsolete-attempt guard, BEFORE any new publication: a concurrent or
         # intentionally-rerun later attempt already completed. Chronology is
@@ -1024,17 +1067,15 @@ def _run() -> None:
             sys.exit(1)
 
         body = working.get("body", "")
-        mapping = None
-        if mode != "none":
-            mapping = verdict_to_review(mode, body, marker)
-            if mapping is None:
-                print(
-                    "Could not parse an unambiguous verdict from the working "
-                    f"summary ({mode} mode: {PARSE_REQUIREMENT[mode]}; fenced "
-                    "code blocks are ignored).",
-                    file=sys.stderr,
-                )
-                sys.exit(1)
+        mapping = verdict_to_review(mode, body, marker)
+        if mapping is None:
+            print(
+                "Could not parse an unambiguous summary "
+                f"({mode} mode: {PARSE_REQUIREMENT[mode]}; fenced code blocks "
+                "are ignored).",
+                file=sys.stderr,
+            )
+            sys.exit(1)
 
         # Bind publication to the LIVE PR head: a push during the run stops
         # it. The prompt's head guard covers the agent's own posts; this
@@ -1051,7 +1092,7 @@ def _run() -> None:
 
         # "none" submits no formal review, so there is no pending result to
         # wait for: the report is complete the moment it exists.
-        publication = "completed" if mode == "none" else "pending"
+        publication = "completed" if mapping[0] == NO_REVIEW else "pending"
         report = create_report(
             repo, pr_number,
             compose_report_body(
@@ -1064,12 +1105,11 @@ def _run() -> None:
             f"({publication})"
         )
 
-    if mode == "none":
+    event, lead = mapping
+    if event == NO_REVIEW:
         print("verdict_mode=none: report published, no formal review submitted.")
         _collapse_superseded(repo, comments, report, head, identity)
         return
-
-    event, lead = mapping
 
     reviews = _gh.rest_paginate(f"repos/{repo}/pulls/{pr_number}/reviews")
     matched_review, conflict_review = find_verdict_review(

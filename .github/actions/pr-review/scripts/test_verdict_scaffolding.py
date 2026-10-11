@@ -74,6 +74,10 @@ ENV = {
     "GITHUB_RUN_ID": RUN_ID,
     "GITHUB_RUN_ATTEMPT": RUN_ATTEMPT,
     "GITHUB_SERVER_URL": "https://github.com",
+    # Pinned, not inherited: patch.dict() here does not clear the environment,
+    # so without this an ambient VERDICT_MODE would silently reclassify every
+    # baseline entry-point test below.
+    "VERDICT_MODE": "baseline",
 }
 
 IDENTITY = {
@@ -110,27 +114,13 @@ def verdict_row(verdict: str) -> str:
     return f"**Verdict: {verdict}**"
 
 
-def judge_body(
-    n: int,
-    verdict: str,
-    *,
-    title: str = "gate: some PR",
-    heading: str = HEADING,
-) -> str:
-    """A judge-mode working summary: heading, canonical count row, then the
-    canonical verdict row — the order the judge prompt mixin prescribes."""
-    return "\n".join(
-        [
-            f"{heading} {title}",
-            "",
-            count_row(n),
-            verdict_row(verdict),
-            "",
-            "### Review Summary",
-            "did things",
-            "",
-        ]
-    )
+def judge_body(n: int, verdict: str, **kwargs) -> str:
+    """A judge-mode working summary: the baseline body with the canonical
+    verdict row added under the count row, which is what the judge prompt
+    mixin asks for. Derived from working_body so the two fixtures cannot
+    drift apart when the shared template changes."""
+    base = working_body(n, **kwargs)
+    return base.replace(count_row(n), count_row(n) + "\n" + verdict_row(verdict), 1)
 
 
 def new_style_state(**overrides) -> dict:
@@ -370,14 +360,35 @@ class JudgeVerdictParsingTest(unittest.TestCase):
         # A baseline-shaped summary under judge mode has no verdict to submit.
         self.assertIsNone(pub.verdict_to_review("judge", working_body(0), HEADING))
 
-    def test_rows_out_of_order_rejected(self):
-        # The mixin prescribes count first, verdict second. A summary that
-        # inverts them is not the template, so it does not parse.
-        inverted = judge_body(0, "APPROVE").replace(
-            count_row(0) + "\n" + verdict_row("APPROVE"),
-            verdict_row("APPROVE") + "\n" + count_row(0),
+    def test_verdict_row_accepted_below_its_prescribed_slot(self):
+        # The count row keeps its prescribed position; the verdict row does
+        # not have one. The base prompt still teaches a template whose second
+        # row is `**Criteria:**`, so requiring the verdict row at exactly
+        # offset 2 would turn a reasonable summary into a red run that throws
+        # away a completed review.
+        body = judge_body(0, "APPROVE").replace(
+            verdict_row("APPROVE") + "\n",
+            "**Criteria:** none loaded\n",
+        ).replace(
+            "### Review Summary",
+            verdict_row("APPROVE") + "\n\n### Review Summary",
         )
-        self.assertIsNone(pub.parse_judge_verdict(inverted, HEADING))
+        self.assertEqual(pub.parse_judge_verdict(body, HEADING), ("APPROVE", 0))
+
+    def test_count_row_still_has_to_be_first(self):
+        # Relaxing the verdict row's position must not relax the count row's:
+        # judge and baseline read that row through the same code.
+        body = judge_body(0, "APPROVE").replace(
+            count_row(0), "Some preamble line.\n\n" + count_row(0)
+        )
+        self.assertIsNone(pub.parse_judge_verdict(body, HEADING))
+        self.assertIsNone(pub.parse_blocking_count(body, HEADING))
+
+    def test_verdict_row_above_the_heading_is_not_this_summary(self):
+        body = verdict_row("APPROVE") + "\n\n" + judge_body(0, "DEFER").replace(
+            verdict_row("DEFER") + "\n", ""
+        )
+        self.assertIsNone(pub.parse_judge_verdict(body, HEADING))
 
     def test_malformed_verdict_values_rejected(self):
         for bad in ("APPROVED", "approve", "Approve", "REQUEST_CHANGES", "LGTM", ""):
@@ -414,9 +425,20 @@ class JudgeVerdictParsingTest(unittest.TestCase):
         event, _ = pub.verdict_to_review("baseline", judge_body(0, "APPROVE"), HEADING)
         self.assertEqual(event, "COMMENT")
 
-    def test_none_mode_has_no_mapping(self):
-        self.assertIsNone(pub.verdict_to_review("none", judge_body(0, "APPROVE"), HEADING))
-        self.assertIsNone(pub.verdict_to_review("none", working_body(0), HEADING))
+    def test_none_mode_maps_to_the_no_review_sentinel(self):
+        # "none" submits nothing, but that is a distinct outcome from "this
+        # summary does not parse" — which must stay fatal in every mode.
+        for body in (judge_body(0, "APPROVE"), working_body(0), working_body(7)):
+            with self.subTest(body=body[:40]):
+                event, _ = pub.verdict_to_review("none", body, HEADING)
+                self.assertEqual(event, pub.NO_REVIEW)
+
+    def test_none_mode_still_requires_the_count_row(self):
+        # The regression this guards: without the count row there is no proof
+        # the agent finished its summary. A truncated run must not publish as
+        # completed state and retire commits nobody reviewed.
+        truncated = f"{HEADING} gate: some PR\n\nthe model got cut off mid-sent"
+        self.assertIsNone(pub.verdict_to_review("none", truncated, HEADING))
 
 
 class VerdictModeInputTest(unittest.TestCase):
@@ -437,11 +459,10 @@ class VerdictModeInputTest(unittest.TestCase):
 
     def test_unknown_mode_fails_closed(self):
         # Never silently fall back: a typo would submit a verdict under a mode
-        # the caller did not ask for.
-        for bad in ("Judge", "approve", "baselin", "none "):
+        # the caller did not ask for. ("none " is NOT in this list — it strips
+        # to a known mode and is covered by the whitespace test above.)
+        for bad in ("Judge", "approve", "baselin", "APPROVE", "judge none"):
             with self.subTest(bad=bad), mock.patch.dict(os.environ, {"VERDICT_MODE": bad}):
-                if bad.strip() in pub.VERDICT_MODES:
-                    continue
                 with self.assertRaises(pub._gh.TerminalError):
                     pub.verdict_mode()
 
@@ -827,6 +848,64 @@ class PublishMainTest(unittest.TestCase):
         self.assertEqual(code, 0)
         patched = {int(path.rsplit("/", 1)[1]) for method, path, _ in calls if method == "PATCH"}
         self.assertIn(2, patched)
+
+    def test_none_mode_rejects_a_truncated_summary_end_to_end(self):
+        # The whole point of validating in "none": publishing this would mark
+        # it completed, advance last_reviewed_sha, and leave the skipped
+        # commits permanently out of the next run's incremental diff.
+        truncated = comment(2, f"{HEADING} gate: some PR\n\nthe model got cut")
+        code, calls = self._run_main([truncated], env_extra={"VERDICT_MODE": "none"})
+        self.assertEqual(code, 1)
+        self.assertEqual(_posts(calls, "issues/42/comments"), [])
+        self.assertEqual(_posts(calls, "pulls/42/reviews"), [])
+
+    def test_judge_replay_reuses_an_existing_approval(self):
+        # REVIEW_STATE_FOR_EVENT gained "APPROVE": "APPROVED". Without it a
+        # replayed finalization would not recognize its own approval and would
+        # submit a second one.
+        identity = dict(IDENTITY, verdict_mode="judge")
+        report = comment(
+            900,
+            report_body(
+                0,
+                state=new_style_state(verdict_mode="judge", publication="completed"),
+            ),
+        )
+        existing = {
+            "id": 77,
+            "user": {"login": "github-actions[bot]"},
+            "state": "APPROVED",
+            "commit_id": HEAD,
+            "body": "Judge verdict: APPROVE — see report.\n\n"
+            + "<!-- review-publication: "
+            + json.dumps({**identity, "report_comment_id": 900})
+            + " -->",
+        }
+        matched, conflict = pub.find_verdict_review(
+            [existing], identity, report, HEAD, "APPROVE"
+        )
+        self.assertIsNotNone(matched)
+        self.assertIsNone(conflict)
+
+    def test_approved_review_conflicts_when_a_comment_was_expected(self):
+        # The inverse binding: an APPROVED review under an identity whose
+        # verdict maps to COMMENT is an inconsistent result, not a match.
+        identity = dict(IDENTITY, verdict_mode="judge")
+        report = comment(900, report_body(0, state=new_style_state(verdict_mode="judge")))
+        existing = {
+            "id": 77,
+            "user": {"login": "github-actions[bot]"},
+            "state": "APPROVED",
+            "commit_id": HEAD,
+            "body": "<!-- review-publication: "
+            + json.dumps({**identity, "report_comment_id": 900})
+            + " -->",
+        }
+        matched, conflict = pub.find_verdict_review(
+            [existing], identity, report, HEAD, "COMMENT"
+        )
+        self.assertIsNone(matched)
+        self.assertIsNotNone(conflict)
 
     def test_unknown_verdict_mode_publishes_nothing(self):
         working = comment(2, working_body(0))

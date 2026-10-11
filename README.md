@@ -56,13 +56,17 @@ the publisher still validates the live head and report finality at completion.
 After a successful run, CI publishes the report as a NEW
 comment carrying a visible reviewed-commit link and CI-owned review-state
 metadata (reviewed SHA, base, workflow, run, attempt, summary marker, verdict
-mode), then submits a commit-bound request-changes review for blockers or a
-neutral comment otherwise, linking directly to the report. This reviewer never
-approves. Only after the formal review exists does CI mark the report
+mode), then submits a commit-bound formal review linking directly to the
+report. Which event that is depends on the `verdict_mode` input (see Verdict
+Modes below); on the default `baseline` it is request-changes for blockers or
+a neutral comment otherwise, and never an approval. Only after the formal
+review exists does CI mark the report
 `publication: completed` — a completed report is the report PLUS its formal
 result, so a report whose review never landed stays `pending`: preserved and
 reconciled by identity for a same-attempt retry, but never the next run's
-review-state baseline and never a comment the agent can edit. Only after
+review-state baseline and never a comment the agent can edit. (`verdict_mode:
+none` submits no review, so it has no formal result to wait for and its report
+is published `completed` directly.) Only after
 completion are the previous report (including any pending leftover) and the
 consumed working comment collapsed — bodies retained, linked to the new
 report — so a failed run leaves the previous report untouched.
@@ -96,7 +100,7 @@ isolate all inline review feedback or grant additional permissions.
 ### Verdict Modes
 
 The `verdict_mode` input decides how CI turns the review summary into a formal PR
-review. The review itself is identical in all three; only the submitted event differs.
+review.
 
 | Mode | How the event is chosen | Submits |
 | --- | --- | --- |
@@ -118,7 +122,49 @@ approving by default. An `APPROVE` over a positive blocking count is rejected as
 contradiction and fails the run.
 
 `none` is for callers that want the report and the inline findings without the bot
-holding a review state at all.
+holding a GitHub reviewer state at all. It still writes the `review-state` marker
+that drives incremental review, and still requires a parseable count row: that row
+is the only structural proof the agent finished its summary, so without it a
+truncated run would publish as completed state and silently retire commits nobody
+reviewed.
+
+Judge mode is additive in what it asks for, but not strictly additive in outcome:
+`DEFER` maps to `COMMENT` at any blocking count, so a judge run that reports
+blockers and defers leaves the PR unblocked where `baseline` would have blocked it.
+That is the deliberate price of giving the reviewer a way to decline the whole
+question.
+
+#### Before enabling judge mode
+
+`judge` is off by default and should stay off until the repo enabling it has
+accepted three consequences. None of them are new code paths — they are what an
+approving review means on GitHub.
+
+- **The bot gets a vote.** The review is submitted with `GITHUB_TOKEN`, so an
+  `APPROVE` is recorded as an approving review by `github-actions[bot]` and
+  counts toward a classic "required approving reviews" rule. A repo that relies
+  on that count for human sign-off should keep `baseline`.
+- **Approvals are not self-retracting.** Nothing in this action dismisses a
+  review. Once an `APPROVE` lands for commit A it stays the bot's latest review
+  until some later run submits a different event — and no later run submits one
+  if the review step fails, is cancelled, or the caller switches to `none`.
+  Judge mode therefore assumes the repo has "dismiss stale pull request
+  approvals when new commits are pushed" enabled; the action does not enforce
+  it.
+- **It raises the ceiling on an existing weakness.** The verdict is parsed out
+  of a comment, and publication selects that comment by author login, heading,
+  and freshness — not by an id bound before the agent ran. A user with write
+  access can edit a `github-actions[bot]` comment, and on a same-repo PR the
+  author has write access by construction; an edit refreshes `updated_at`, so
+  it passes the freshness gate. Under `baseline` the most that buys is
+  suppressing a block (editing the count to 0 downgrades to `COMMENT`). Under
+  `judge` the same edit manufactures an `APPROVE`. The same is true of prompt
+  injection from PR file content, which the base prompt treats as untrusted for
+  the title and body but not for the diff. Closing this means refusing a
+  summary whose last editor was not the bot (GraphQL exposes `editor` and
+  `lastEditedAt` on an issue comment); until that lands, judge mode should only
+  be enabled where every contributor already has write access and the approval
+  is a convenience, not a control.
 
 For candidate validation, pin the reusable workflow to the exact reviewed commit.
 Keep the test caller on a disposable same-repository draft branch; the normal

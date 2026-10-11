@@ -92,8 +92,19 @@ runs:
       # Validated here as well as in publish-review-report.py: a typo should
       # fail before the review burns a model run, and the publish step must
       # not depend on this step having screened its input.
+      #
+      # Empty normalizes to baseline rather than failing, and must: a
+      # composite action's `default:` does NOT apply to an input that is
+      # explicitly passed as an empty string, so a caller forwarding its own
+      # optional input (`verdict_mode: ${{ inputs.verdict_mode }}`) sends "".
+      # Failing there would break the compatibility path verdict_mode() in
+      # publish-review-report.py documents and the review_prompt case above
+      # already honours.
       case "${VERDICT_MODE}" in
-        "judge"|"baseline"|"none") ;;
+        ""|"baseline")
+          VERDICT_MODE="baseline"
+          ;;
+        "judge"|"none") ;;
         *)
           echo "::error::verdict_mode must be 'judge', 'baseline', or 'none'"
           exit 1
@@ -228,17 +239,25 @@ runs:
     #    and never output already consumed by a published report), refusing
     #    as obsolete when a later attempt already completed (actual attempt
     #    start times, never run-ID order),
-    # 2. validates the baseline count row and that the live PR head still
-    #    equals the reviewed checkout,
+    # 2. validates the canonical rows the run's verdict_mode requires — the
+    #    count row in every mode (including "none", where it is the only
+    #    proof the agent finished rather than being cut off), plus the
+    #    verdict row under "judge" — and that the live PR head still equals
+    #    the reviewed checkout,
     # 3. POSTs a NEW report comment (publication: pending) carrying a visible
     #    reviewed-commit link and CI-owned review-state metadata identifying
     #    the publication (workflow + marker + mode + run + attempt + head),
     # 4. submits the formal PR review with an explicit commit_id, linking
-    #    directly to the report — baseline mode only: request changes on
-    #    blocking findings, neutral comment otherwise, never approves,
+    #    directly to the report, with the event taken from verdict_mode:
+    #    "baseline" from the count (request changes on blocking findings,
+    #    neutral comment otherwise, never approves), "judge" from the
+    #    verdict row (APPROVE / REQUEST CHANGES / DEFER), "none" submits no
+    #    review at all and stops after step 3,
     # 5. transitions the report to publication: completed — a completed
     #    report is the report PLUS its formal result, so a report whose
-    #    review never landed stays pending and never becomes review state,
+    #    review never landed stays pending and never becomes review state
+    #    ("none" has no formal result to wait for, so its report is born
+    #    completed),
     # 6. only then collapses the superseded previous report(s) and the
     #    consumed working comment (bodies retained, linked to the new
     #    report).
