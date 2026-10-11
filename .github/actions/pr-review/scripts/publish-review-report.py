@@ -78,17 +78,44 @@ from datetime import datetime, timezone
 import _gh
 import _review_state
 
-VERDICT_MODE = "baseline"
+VERDICT_MODES = ("judge", "baseline", "none")
+
+
+def verdict_mode() -> str:
+    """The run's verdict mode, host-owned (the action's `verdict_mode` input).
+
+    An unset value means "baseline" — the only mode this action had before the
+    input existed — so a caller that has not upgraded keeps exactly its current
+    behavior. An unrecognized value is a configuration error and fails closed:
+    silently falling back would submit a verdict under a mode the caller did
+    not ask for.
+    """
+    mode = os.environ.get("VERDICT_MODE", "").strip() or "baseline"
+    if mode not in VERDICT_MODES:
+        raise _gh.TerminalError(
+            f"VERDICT_MODE must be one of {', '.join(VERDICT_MODES)} (got {mode!r})"
+        )
+    return mode
+
 PR_CONTEXT_PATH = os.path.join(".github", "pr-context.json")
 
-# The canonical verdict row from the summary template, on its own line, with
-# all three counts and closing bold markers. Anchoring to the full row means a
-# PR title (which precedes the row in the template), quoted findings, or code
-# blocks cannot supply the verdict, and malformed values ("0-2") do not parse.
+# The canonical count row from the summary template, on its own line, with all
+# three counts and closing bold markers. Anchoring to the full row means a PR
+# title (which precedes the row in the template), quoted findings, or code
+# blocks cannot supply the count, and malformed values ("0-2") do not parse.
 COUNT_ROW_PATTERN = re.compile(
     r"^\*\*Blocking Issues: (\d+)\*\* \| "
     r"\*\*Suggestions: \d+\*\* \| "
     r"\*\*Threads Resolved: \d+\*\*\s*$",
+    re.MULTILINE,
+)
+
+# The canonical judge verdict row, on its own line. Anchored to the full row
+# for the same reason as the count row: quoted findings, a PR title, or fenced
+# example text must never be able to supply a verdict, and a malformed value
+# ("APPROVED", "approve") does not parse.
+VERDICT_ROW_PATTERN = re.compile(
+    r"^\*\*Verdict: (APPROVE|REQUEST CHANGES|DEFER)\*\*\s*$",
     re.MULTILINE,
 )
 
@@ -220,10 +247,23 @@ def _top_level_lines(body: str) -> list[str]:
     return lines
 
 
+def _rows_after_heading(lines: list[str], heading: str) -> list[str]:
+    """The non-empty top-level lines following the summary heading, in order.
+
+    The heading and the rows that carry the verdict must all be top-level: a
+    summary quoted inside a fenced block is example text, not this run's
+    output. Returns [] when the heading is not present at top level.
+    """
+    for i, line in enumerate(lines):
+        if line.startswith(heading):
+            return [nxt for nxt in lines[i + 1:] if nxt.strip()]
+    return []
+
+
 def parse_blocking_count(body: str, heading: str) -> int | None:
     """Extract the blocking-issue count from the summary's metadata row.
 
-    The verdict is accepted ONLY from exactly one canonical count row sitting
+    The count is accepted ONLY from exactly one canonical count row sitting
     in its prescribed top-level position: the first non-empty line after the
     summary heading, where both the heading and the row are top-level lines
     (never inside a fenced code block, per CommonMark fence rules). Returns
@@ -234,31 +274,103 @@ def parse_blocking_count(body: str, heading: str) -> int | None:
     rows = [line for line in lines if COUNT_ROW_PATTERN.match(line)]
     if len(rows) != 1:
         return None
-    for i, line in enumerate(lines):
-        if line.startswith(heading):
-            for nxt in lines[i + 1:]:
-                if not nxt.strip():
-                    continue
-                if COUNT_ROW_PATTERN.match(nxt):
-                    return int(COUNT_ROW_PATTERN.match(nxt).group(1))
-                return None
-            return None
-    return None
+    following = _rows_after_heading(lines, heading)
+    if not following:
+        return None
+    match = COUNT_ROW_PATTERN.match(following[0])
+    if not match:
+        return None
+    return int(match.group(1))
 
 
-def verdict_to_review(body: str, heading: str) -> tuple[str, str] | None:
+def parse_judge_verdict(body: str, heading: str) -> tuple[str, int] | None:
+    """Extract (verdict, blocking count) from a judge-mode summary.
+
+    Judge mode adds one row to the baseline template rather than reordering
+    it: the count row stays the first non-empty line after the heading and
+    the verdict row is the second. (ductone's judge prompt puts the verdict
+    first, but it ships a whole separate prompt file; our judge prompt is a
+    mixin appended to the shared base, so leaving the base template's first
+    row alone is what lets one template serve both modes.)
+
+    Returns None — reject — when either row is absent, malformed, out of
+    position, or ambiguous, or when the two rows contradict each other: an
+    APPROVE over a positive blocking count is never a valid verdict. The
+    converse is not a contradiction — a judge may REQUEST CHANGES or DEFER at
+    zero blockers for reasons that are not defects.
+    """
+    lines = _top_level_lines(body)
+    count_rows = [line for line in lines if COUNT_ROW_PATTERN.match(line)]
+    verdict_rows = [line for line in lines if VERDICT_ROW_PATTERN.match(line)]
+    if len(count_rows) != 1 or len(verdict_rows) != 1:
+        return None
+    following = _rows_after_heading(lines, heading)
+    if len(following) < 2:
+        return None
+    count_match = COUNT_ROW_PATTERN.match(following[0])
+    verdict_match = VERDICT_ROW_PATTERN.match(following[1])
+    if not count_match or not verdict_match:
+        return None
+    blocking = int(count_match.group(1))
+    verdict = verdict_match.group(1)
+    if verdict == "APPROVE" and blocking > 0:
+        # A contradiction, not a verdict: the summary approves over findings
+        # it itself calls blocking. Reject rather than pick a side.
+        return None
+    return verdict, blocking
+
+
+# What each mode needs to find in the summary, quoted in the rejection message
+# so a red run says which row the agent failed to write.
+PARSE_REQUIREMENT = {
+    "baseline": (
+        "need exactly one canonical count row — "
+        "'**Blocking Issues: N** | **Suggestions: M** | **Threads Resolved: R**' "
+        "— as the first non-empty line after the summary heading"
+    ),
+    "judge": (
+        "need exactly one canonical count row — "
+        "'**Blocking Issues: N** | **Suggestions: M** | **Threads Resolved: R**' "
+        "— as the first non-empty line after the summary heading, followed by "
+        "exactly one canonical verdict row — '**Verdict: APPROVE**', "
+        "'**Verdict: REQUEST CHANGES**', or '**Verdict: DEFER**' — as the "
+        "second, and APPROVE requires a zero blocking count"
+    ),
+}
+
+
+def verdict_to_review(mode: str, body: str, heading: str) -> tuple[str, str] | None:
     """Map a summary body to (review event, lead sentence).
 
-    Baseline mode only: request changes on any blocking finding, otherwise
-    leave a neutral comment. Never approves. Returns None if the blocking
-    count could not be parsed unambiguously from the summary's metadata row.
+    judge:    APPROVE -> APPROVE, REQUEST CHANGES -> REQUEST_CHANGES,
+              DEFER -> COMMENT. DEFER is the escape hatch for a review that
+              cannot stand behind approving the whole PR — it asks for a human
+              rather than granting or withholding approval.
+    baseline: blocking N > 0 -> REQUEST_CHANGES, N == 0 -> COMMENT. The
+              baseline reviewer deliberately has no APPROVE path, so its
+              REQUEST_CHANGES can only be cleared by a human dismissal.
+    Returns None when the mode's canonical row(s) do not parse unambiguously.
+    "none" has no mapping and is handled by the caller, which submits no
+    formal review at all.
     """
-    blocking = parse_blocking_count(body, heading)
-    if blocking is None:
-        return None
-    if blocking > 0:
-        return "REQUEST_CHANGES", "Blocking issues found"
-    return "COMMENT", "No blocking issues found"
+    if mode == "judge":
+        parsed = parse_judge_verdict(body, heading)
+        if parsed is None:
+            return None
+        verdict, _blocking = parsed
+        if verdict == "APPROVE":
+            return "APPROVE", "Judge verdict: APPROVE"
+        if verdict == "REQUEST CHANGES":
+            return "REQUEST_CHANGES", "Judge verdict: REQUEST CHANGES"
+        return "COMMENT", "Judge verdict: DEFER — a human review is needed"
+    if mode == "baseline":
+        blocking = parse_blocking_count(body, heading)
+        if blocking is None:
+            return None
+        if blocking > 0:
+            return "REQUEST_CHANGES", "Blocking issues found"
+        return "COMMENT", "No blocking issues found"
+    return None
 
 
 def publication_identity() -> dict:
@@ -271,7 +383,7 @@ def publication_identity() -> dict:
         "run_id": os.environ.get("GITHUB_RUN_ID", ""),
         "run_attempt": os.environ.get("GITHUB_RUN_ATTEMPT", ""),
         "summary_marker": os.environ.get("SUMMARY_MARKER", ""),
-        "verdict_mode": VERDICT_MODE,
+        "verdict_mode": verdict_mode(),
     }
 
 
@@ -513,12 +625,19 @@ def recover_consumed_working(comments: list[dict], report: dict) -> dict | None:
 
 
 def compose_report_body(
-    working: dict, identity: dict, head: str, base: str | None, started_raw: str
+    working: dict,
+    identity: dict,
+    head: str,
+    base: str | None,
+    started_raw: str,
+    publication: str = "pending",
 ) -> str:
     """The completed report: the run's working output plus a visible
     reviewed-commit link and the CI-owned review-state marker. The marker is
     written as publication="pending": the host transitions it to "completed"
-    only after the required formal review exists. It also persists the exact
+    only after the required formal review exists. Mode "none" submits no
+    review, so there is nothing to wait for and it composes the report as
+    "completed" directly. It also persists the exact
     consumed working comment's identity (id + timestamp) so a replayed
     finalization collapses exactly that comment — and can never collapse a
     later run's reused slot — and the attempt's started_at so publication
@@ -526,7 +645,7 @@ def compose_report_body(
     server_url = os.environ.get("GITHUB_SERVER_URL", "https://github.com").rstrip("/")
     repo = os.environ.get("GITHUB_REPOSITORY", "")
     commit_url = f"{server_url}/{repo}/commit/{head}"
-    state = report_state(identity, head, base, publication="pending", started_at=started_raw)
+    state = report_state(identity, head, base, publication=publication, started_at=started_raw)
     state["working_comment_id"] = working.get("id")
     consumed_ts = working.get("updated_at") or working.get("created_at")
     if consumed_ts:
@@ -580,10 +699,14 @@ def create_report(
         raise
 
 
-# GitHub's submitted review state for each baseline event. The formal result
-# is recognized by EXACT binding — host identity marker + report link +
-# reviewed commit + submitted state — never by run identity alone.
-REVIEW_STATE_FOR_EVENT = {"REQUEST_CHANGES": "CHANGES_REQUESTED", "COMMENT": "COMMENTED"}
+# GitHub's submitted review state for each event. The formal result is
+# recognized by EXACT binding — host identity marker + report link + reviewed
+# commit + submitted state — never by run identity alone.
+REVIEW_STATE_FOR_EVENT = {
+    "APPROVE": "APPROVED",
+    "REQUEST_CHANGES": "CHANGES_REQUESTED",
+    "COMMENT": "COMMENTED",
+}
 
 
 def find_verdict_review(
@@ -796,6 +919,36 @@ def supersede_comment(
     return True
 
 
+def _collapse_superseded(
+    repo: str, comments: list[dict], report: dict, head: str, identity: dict
+) -> None:
+    """Collapse the output the new report supersedes.
+
+    Runs ONLY once the report is completed — which for every mode that
+    submits one means its formal review already exists: collapse the exact
+    previous owned reports OLDER than the new report (including any pending
+    leftover from an interrupted publication) and the exact consumed working
+    comment, recovered by the identity the report persisted — never a newer
+    report, never a later run's reused slot. Failure here warns but never
+    destroys the published output.
+    """
+    targets = previous_reports(comments, report, identity["workflow_ref"])
+    consumed = recover_consumed_working(comments, report)
+    if consumed is not None:
+        targets.append(consumed)
+    for target in targets:
+        try:
+            if supersede_comment(repo, target, report, head, identity):
+                print(f"Superseded comment {target['id']} -> report {report['id']}")
+        except _gh.GitHubError as e:
+            print(
+                f"::warning::Could not supersede comment {target['id']}: {e}. "
+                "The published report and verdict are unaffected; a later "
+                "finalization retries cleanup.",
+                file=sys.stderr,
+            )
+
+
 def _run() -> None:
     repo = os.environ.get("GITHUB_REPOSITORY", "")
     pr_number = os.environ.get("PR_NUMBER", "")
@@ -809,6 +962,7 @@ def _run() -> None:
 
     started = run_started_at()
     identity = publication_identity()
+    mode = identity["verdict_mode"]
     head = current_head_sha()
     base = current_base_sha()
 
@@ -824,14 +978,17 @@ def _run() -> None:
             f"Finalization replay: reusing published report {report['id']} "
             f"for run {identity['run_id']} attempt {identity['run_attempt']}."
         )
-        mapping = verdict_to_review(report.get("body", ""), marker)
-        if mapping is None:
-            print(
-                "Refusing to finalize: the published report's canonical "
-                "count row no longer parses unambiguously.",
-                file=sys.stderr,
-            )
-            sys.exit(1)
+        mapping = None
+        if mode != "none":
+            mapping = verdict_to_review(mode, report.get("body", ""), marker)
+            if mapping is None:
+                print(
+                    "Refusing to finalize: the published report's canonical "
+                    f"verdict row(s) no longer parse unambiguously ({mode} "
+                    f"mode: {PARSE_REQUIREMENT[mode]}).",
+                    file=sys.stderr,
+                )
+                sys.exit(1)
     else:
         # Obsolete-attempt guard, BEFORE any new publication: a concurrent or
         # intentionally-rerun later attempt already completed. Chronology is
@@ -867,17 +1024,17 @@ def _run() -> None:
             sys.exit(1)
 
         body = working.get("body", "")
-        mapping = verdict_to_review(body, marker)
-        if mapping is None:
-            print(
-                "Could not parse an unambiguous blocking-issue count from the "
-                "working summary (need exactly one canonical count row — "
-                "'**Blocking Issues: N** | **Suggestions: M** | **Threads Resolved: R**' — "
-                "as the first non-empty line after the summary heading; fenced "
-                "code blocks are ignored).",
-                file=sys.stderr,
-            )
-            sys.exit(1)
+        mapping = None
+        if mode != "none":
+            mapping = verdict_to_review(mode, body, marker)
+            if mapping is None:
+                print(
+                    "Could not parse an unambiguous verdict from the working "
+                    f"summary ({mode} mode: {PARSE_REQUIREMENT[mode]}; fenced "
+                    "code blocks are ignored).",
+                    file=sys.stderr,
+                )
+                sys.exit(1)
 
         # Bind publication to the LIVE PR head: a push during the run stops
         # it. The prompt's head guard covers the agent's own posts; this
@@ -892,12 +1049,25 @@ def _run() -> None:
             )
             sys.exit(1)
 
+        # "none" submits no formal review, so there is no pending result to
+        # wait for: the report is complete the moment it exists.
+        publication = "completed" if mode == "none" else "pending"
         report = create_report(
             repo, pr_number,
-            compose_report_body(working, identity, head, base, run_started_raw()),
+            compose_report_body(
+                working, identity, head, base, run_started_raw(), publication
+            ),
             identity, head,
         )
-        print(f"Published review report {report['id']} -> {head[:12]} (pending completion)")
+        print(
+            f"Published review report {report['id']} -> {head[:12]} "
+            f"({publication})"
+        )
+
+    if mode == "none":
+        print("verdict_mode=none: report published, no formal review submitted.")
+        _collapse_superseded(repo, comments, report, head, identity)
+        return
 
     event, lead = mapping
 
@@ -950,27 +1120,7 @@ def _run() -> None:
     if is_pending(report):
         complete_report(repo, report, identity, head)
 
-    # Cleanup ONLY after the report is completed and the formal review
-    # exists: collapse the exact previous owned reports OLDER than the new
-    # report (including any pending leftover from an interrupted publication)
-    # and the exact consumed working comment, recovered by the identity the
-    # report persisted — never a newer report, never a later run's reused
-    # slot. Failure here warns but never destroys the published output.
-    targets = previous_reports(comments, report, identity["workflow_ref"])
-    consumed = recover_consumed_working(comments, report)
-    if consumed is not None:
-        targets.append(consumed)
-    for target in targets:
-        try:
-            if supersede_comment(repo, target, report, head, identity):
-                print(f"Superseded comment {target['id']} -> report {report['id']}")
-        except _gh.GitHubError as e:
-            print(
-                f"::warning::Could not supersede comment {target['id']}: {e}. "
-                "The published report and verdict are unaffected; a later "
-                "finalization retries cleanup.",
-                file=sys.stderr,
-            )
+    _collapse_superseded(repo, comments, report, head, identity)
 
 
 def main() -> None:

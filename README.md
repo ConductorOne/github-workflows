@@ -22,6 +22,9 @@ Prompt layers are additive:
 3. A repo-local `.claude/skills/ci-review.md` can add project-specific rules on top
    of the selected profile.
 
+`verdict_mode: judge` adds `verdict-judge.md` between the base prompt and the
+mixins, so domain and repo-local criteria keep the last word on review content.
+
 Keep broadly shared connector criteria in the connector mixin. Use repo-local
 `ci-review.md` only for rules that are specific to one repo or a small set of repos.
 
@@ -89,6 +92,33 @@ The optional `summary_marker` input selects a single-line heading such as
 heading. Overrides cannot embed a different reserved connector, general, or legacy
 review heading. Custom headings keep summary/state selection separate; they do not
 isolate all inline review feedback or grant additional permissions.
+
+### Verdict Modes
+
+The `verdict_mode` input decides how CI turns the review summary into a formal PR
+review. The review itself is identical in all three; only the submitted event differs.
+
+| Mode | How the event is chosen | Submits |
+| --- | --- | --- |
+| `baseline` (default) | The `**Blocking Issues: N**` count | `REQUEST_CHANGES` when N > 0, `COMMENT` when N == 0 |
+| `judge` | An explicit `**Verdict: ...**` row the reviewer writes under the count | `APPROVE` / `REQUEST_CHANGES` / `COMMENT` |
+| `none` | — | nothing; the report is published alone |
+
+Baseline deliberately has no `APPROVE` path. On GitHub a `COMMENT` review never
+clears a reviewer's earlier `CHANGES_REQUESTED` — only a later `APPROVE` from that
+reviewer, or a human dismissal, does. So under baseline a blocking finding keeps the
+PR blocked after the author fixes it until someone dismisses the review by hand.
+Judge mode is what lets a clean re-run clear its own earlier block.
+
+Judge mode is not "baseline that can approve". It asks the reviewer for a verdict
+with three values, and `DEFER` is the one that makes approval safe: an `APPROVE`
+satisfies the PR's review requirement for the *whole* change, so a review that found
+nothing blocking but could not cover the whole diff defers to a human instead of
+approving by default. An `APPROVE` over a positive blocking count is rejected as a
+contradiction and fails the run.
+
+`none` is for callers that want the report and the inline findings without the bot
+holding a review state at all.
 
 For candidate validation, pin the reusable workflow to the exact reviewed commit.
 Keep the test caller on a disposable same-repository draft branch; the normal

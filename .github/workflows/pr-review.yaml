@@ -13,6 +13,11 @@ on:
         required: false
         default: ""
         type: string
+      verdict_mode:
+        description: "How CI turns the review summary into a formal PR review: 'baseline' (default, never approves), 'judge' (the reviewer writes an APPROVE / REQUEST CHANGES / DEFER verdict), or 'none' (report only)."
+        required: false
+        default: baseline
+        type: string
     secrets:
       ANTHROPIC_API_KEY:
         required: true
@@ -57,4 +62,5 @@ jobs:
           head_sha: ${{ github.event.pull_request.head.sha }}
           review_prompt: ${{ inputs.review_prompt || 'connector' }}
           summary_marker: ${{ inputs.summary_marker }}
+          verdict_mode: ${{ inputs.verdict_mode || 'baseline' }}
     timeout-minutes: 30
