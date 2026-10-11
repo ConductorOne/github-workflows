@@ -106,13 +106,13 @@ review.
 | --- | --- | --- |
 | `baseline` (default) | The `**Blocking Issues: N**` count | `REQUEST_CHANGES` when N > 0, `COMMENT` when N == 0 |
 | `judge` | An explicit `**Verdict: ...**` row the reviewer writes under the count | `APPROVE` / `REQUEST_CHANGES` / `COMMENT` |
+| `none` | — | nothing; the report is published alone |
 
 In judge mode `APPROVE` and `REQUEST CHANGES` map straight through. `DEFER`
 declines to answer, so it falls back to the baseline mapping of its own count
 row: a neutral comment at zero blockers, request-changes above. Judge is
 therefore never less blocking than baseline would have been for the same
 summary — deferring is a statement about coverage, not a way to unblock.
-| `none` | — | nothing; the report is published alone |
 
 Baseline deliberately has no `APPROVE` path. On GitHub a `COMMENT` review never
 clears a reviewer's earlier `CHANGES_REQUESTED` — only a later `APPROVE` from that
