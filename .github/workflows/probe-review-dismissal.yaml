@@ -1,0 +1,63 @@
+# TEMPORARY probe. Not for merge — deleted with its branch once it has run.
+# Answers three questions about what GITHUB_TOKEN may do to reviews on a PR
+# targeting a PROTECTED branch, which is the case every connector repo is in:
+#   1. can github-actions[bot] submit REQUEST_CHANGES?   (known yes; baseline)
+#   2. can it dismiss a CHANGES_REQUESTED it authored?   (the auto-dismiss option)
+#   3. can it submit APPROVE?                            (what judge mode needs)
+name: probe-review-dismissal
+on:
+  pull_request:
+    types: [opened, synchronize]
+permissions:
+  contents: read
+  pull-requests: write
+jobs:
+  probe:
+    if: startsWith(github.head_ref, 'felipe/probe-review-dismissal')
+    runs-on: ubuntu-latest
+    steps:
+    - name: Probe review verbs
+      env:
+        GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        PR: ${{ github.event.pull_request.number }}
+        REPO: ${{ github.repository }}
+        SHA: ${{ github.event.pull_request.head.sha }}
+      shell: bash
+      run: |
+        set +e
+        probe() {   # probe <label> <method> <path> [field...]
+          local label="$1"; shift
+          local method="$1"; shift
+          local path="$1"; shift
+          echo "::group::${label}"
+          echo "--> ${method} ${path}"
+          out=$(gh api -X "${method}" "${path}" "$@" 2>&1); rc=$?
+          echo "exit=${rc}"
+          echo "${out}" | head -40
+          echo "::endgroup::"
+          LAST_OUT="${out}"; LAST_RC="${rc}"
+        }
+
+        probe "1. submit REQUEST_CHANGES" POST "repos/${REPO}/pulls/${PR}/reviews" \
+          -f commit_id="${SHA}" -f event=REQUEST_CHANGES -f body="probe: request changes"
+        RID=$(printf '%s' "${LAST_OUT}" | jq -r '.id // empty' 2>/dev/null)
+        echo "RESULT 1 submit REQUEST_CHANGES: rc=${LAST_RC} review_id=${RID:-none}"
+
+        if [ -n "${RID}" ]; then
+          probe "2. dismiss OWN review ${RID}" PUT \
+            "repos/${REPO}/pulls/${PR}/reviews/${RID}/dismissals" \
+            -f message="probe: can the author of a review dismiss it?"
+          echo "RESULT 2 self-dismiss on protected base: rc=${LAST_RC}"
+          probe "2b. review state after dismissal" GET \
+            "repos/${REPO}/pulls/${PR}/reviews/${RID}"
+          echo "RESULT 2b state=$(printf '%s' "${LAST_OUT}" | jq -r '.state // "?"' 2>/dev/null)"
+        else
+          echo "RESULT 2 skipped: no review id from step 1"
+        fi
+
+        probe "3. submit APPROVE" POST "repos/${REPO}/pulls/${PR}/reviews" \
+          -f commit_id="${SHA}" -f event=APPROVE -f body="probe: approve"
+        echo "RESULT 3 submit APPROVE: rc=${LAST_RC}"
+
+        probe "4. final review states" GET "repos/${REPO}/pulls/${PR}/reviews"
+        echo "RESULT 4 states=$(printf '%s' "${LAST_OUT}" | jq -r '[.[]|{id,state,user:.user.login}]|tostring' 2>/dev/null)"
