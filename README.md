@@ -135,13 +135,26 @@ unprotected: protection that no ruleset explains could be a classic
 protection, so it reads as unknown.
 
 **The limit of the check**, stated plainly because it is not obvious: it sees
-rulesets. A classic branch protection requiring approvals *alongside* a
-ruleset rule that requires none would not be detected, and the bot could
-approve into it. Closing that would mean granting the review workflow
+rulesets. One shape escapes it — a classic branch protection requiring
+approvals *alongside* a ruleset `pull_request` rule that requires none. The
+ruleset's zero is read as the answer, and the bot can approve into the classic
+requirement. (A branch protected *only* by classic protection does not escape:
+with no ruleset rule to explain the protection, it reads as unknown and loses
+`judge`.)
+
+Closing that shape would mean granting the review workflow
 `administration: read` on every repo it runs in — a larger and more permanent
 privilege than the one it would be protecting — so the trade is deliberately
-refused. A repo that protects `main` with classic branch protection rather
-than a ruleset should be pinned to `baseline`.
+refused.
+
+A repo in that shape opts out by **expressing the requirement where the check
+can see it**: add a ruleset `pull_request` rule requiring at least one
+approval, and the next run downgrades itself to `baseline`. That is the whole
+opt-out, and it is the same action the repo would take to make the
+requirement apply uniformly anyway. Note that connector repos cannot opt out
+by passing an input — they run this workflow from an org rule rather than
+calling it, so `inputs` is empty and the `judge` fallback always applies. Only
+a repo that calls `pr-review.yaml` itself can pass `verdict_mode: baseline`.
 
 That is what lets the connector profile default to `judge` safely. It is also
 why `github-workflows` itself — the one repo here that requires an approving
@@ -190,8 +203,9 @@ ever starts requiring approvals.
   counts toward a "required approving reviews" rule. On every connector repo
   that count is 0, so the approval satisfies nothing — its only effect is
   clearing the bot's own `CHANGES_REQUESTED`. This is the cost the run-time
-  check above exists to contain: a repo relying on that count for human
-  sign-off gets `baseline` whether or not anyone remembered to pin it.
+  check above exists to contain: a repo that relies on that count for human
+  sign-off gets `baseline` from the moment it starts requiring one, without
+  anyone having to reconfigure the review.
 - **Approvals are not self-retracting.** Nothing in this action dismisses a
   review. Once an `APPROVE` lands for commit A it stays the bot's latest review
   until some later run submits a different event — and no later run submits one
