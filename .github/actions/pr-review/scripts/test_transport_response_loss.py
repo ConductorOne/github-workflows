@@ -36,8 +36,6 @@ if _SCRIPTS_DIR not in sys.path:
 
 import _gh  # noqa: E402
 import _review_state as rs  # noqa: E402
-import _review_result as rr  # noqa: E402
-from test_verdict_scaffolding import accepted_fixture, ARTIFACT  # noqa: E402
 
 
 def _load(name, filename):
@@ -110,14 +108,11 @@ class TransportServer:
         data = json.loads(req.data) if req.data else None
         self.attempts.append((method, path))
         if method == "GET" and path == "repos/example/repo/pulls/42":
-            return FakeResp(200, {"state": "open", "head": {"sha": HEAD, "repo": {"full_name": "example/repo"}},
-                                  "base": {"sha": BASE, "ref": "main"}})
+            return FakeResp(200, {"head": {"sha": HEAD}})
         if method == "GET" and path == "repos/example/repo/issues/42/comments":
             return FakeResp(200, sorted(self.comments.values(), key=lambda c: c["id"]))
         if method == "GET" and path == "repos/example/repo/pulls/42/reviews":
             return FakeResp(200, list(self.reviews))
-        if method == "GET" and path.startswith("repos/example/repo/issues/comments/"):
-            return FakeResp(200, self.comments[int(path.rsplit("/", 1)[1])])
         if method == "POST" and path == "repos/example/repo/issues/42/comments":
             cid = self.next_id
             self.next_id += 1
@@ -170,9 +165,6 @@ class TransportResponseLossTest(unittest.TestCase):
                 mock.patch.object(_gh.urllib.request, "urlopen", server.urlopen),
                 mock.patch.object(pub.subprocess, "run",
                                   lambda *a, **k: SimpleNamespace(stdout=HEAD + "\n", stderr="")),
-                mock.patch.object(rr, "load_current_result",
-                                  return_value=(accepted_fixture(working_body(0)), dict(ARTIFACT))),
-                mock.patch.object(rr, "reset_reviews"),
             ):
                 try:
                     pub.main()

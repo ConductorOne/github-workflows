@@ -38,91 +38,76 @@ Required audit subagents run in the foreground: this is a one-shot CI review,
 so their results must return before the parent finishes. Background task
 handoffs are disabled; the job cannot resume a later conversation turn.
 
-The model has a native `--tools` inventory of Read, Glob, Grep and Agent
-(the pinned SDK's Task tool), plus the two fixed-target comment MCP tools.
-Unlike `--allowedTools`, this limits which built-ins are available: there is
-no model shell, interpreter, file-edit tool or general GitHub write endpoint.
-The host prefetches the complete PR diff into `.github/pr-review.diff`;
-incremental suggestion work still uses the separate filtered compare diff.
-Project/local settings and repo-defined MCP servers remain disabled. The trusted
-action `settings` enables `permissions.blockReadsOutsideWorkingDirectories` and
-native Read denies for `.git` (including checkout credentials), `_workflow`,
-runner temp, hidden home configuration, and process/device/temp namespaces.
-Source files and host-prefetched `.github` context remain readable. This is bounded
-read-path hardening, not a filesystem sandbox or comprehensive credential isolation.
-Audit subagents are expected to inherit the read-only inventory and must return
-completed native results before the final result; missing, background or errored
-audits fail closed.
+The agent posts its verdict in a working summary comment and never writes
+review-state metadata. Before the agent runs, the action creates a fresh
+provisional working comment for the run/attempt and binds it to the native
+`update_claude_comment` MCP tool (`CLAUDE_COMMENT_ID`), so the agent passes
+only the Markdown body and never chooses a repository, comment, or head
+target. The body no longer travels through shell heredocs or `gh api` writes;
+the tool keeps its upstream sanitization and secret redaction. GitHub's comment
+size limit still applies, but the shell's command-length limit does not. The
+existing broad `Bash(gh api:*)` permission remains; the prompt restricts its
+intended use to metadata reads, not an enforced read-only boundary. This is a
+transport fix, not credential isolation. The preflight binds a fresh slot, and
+the publisher still validates the live head and report finality at completion.
+After a successful run, CI publishes the report as a NEW
+comment carrying a visible reviewed-commit link and CI-owned review-state
+metadata (reviewed SHA, base, workflow, run, attempt, summary marker, verdict
+mode), then submits a commit-bound request-changes review for blockers or a
+neutral comment otherwise, linking directly to the report. This reviewer never
+approves. Only after the formal review exists does CI mark the report
+`publication: completed` — a completed report is the report PLUS its formal
+result, so a report whose review never landed stays `pending`: preserved and
+reconciled by identity for a same-attempt retry, but never the next run's
+review-state baseline and never a comment the agent can edit. Only after
+completion are the previous report (including any pending leftover) and the
+consumed working comment collapsed — bodies retained, linked to the new
+report — so a failed run leaves the previous report untouched.
+Stale, provisional, foreign, or malformed working output cannot be published, and a
+push during the run stops publication. Working output already consumed by a
+published report is never republished without fresh model work, and an attempt
+whose start predates an already-completed later attempt (compared by the actual
+attempt start times recorded in each report, never run-ID order) is refused as
+obsolete before publishing. Publication is idempotent per workflow run
+and attempt: a repeated finalization reuses the already-published report and never
+submits a second formal review, while an intentional new run or attempt gets a new
+report. Completed reports are never handed back to the agent as update targets —
+every run/attempt writes to its own freshly created provisional working comment,
+while completed state is still selected independently for incremental review.
+Active findings appear once in their severity section, labeled `New` or
+`Prior — still present`. A compact resolved section records fixed/obsolete prior
+findings with evidence; it does not repeat the active findings.
 
-**Required before merge/enabling:** a separately authorized live smoke of this
-candidate on the pinned Claude Code 2.1.282 runner has **not run**. It must exercise
-`--tools` together with required `--json-schema`, Agent tool/settings inheritance,
-the final native tool/MCP inventory (unknown tools remain rejected), native output
-above 128 KiB, and CI-token access denial via actual Read/Grep/Glob, including
-absolute paths and symlink aliases into `.git`, host state and sensitive runner
-paths. Source contracts and unit fixtures are not evidence of live enforcement.
+### Clearing this reviewer's previous blocks
 
-Before the model runs, CI creates a fresh provisional working comment and binds
-it to `update_claude_comment` through `CLAUDE_COMMENT_ID`. That body-only tool and
-the fixed-PR inline tool retain upstream sanitization and secret redaction.
-Working comments are progress, never final verdict or obligation authority.
-The final result is the runner's native terminal `structured_output`: structured
-blockers, an exact current-run audit of every frozen prior obligation ID, and
-`report.summary` containing the full Markdown in the existing template. CI reads
-the bounded strict JSON execution file outside the checkout in `RUNNER_TEMP`;
-only short path/conclusion/session metadata crosses the validation step environment,
-not a duplicate large result body. It binds init/terminal session IDs to the current
-action's session output, checks terminal success and completed Agent/Task results,
-rejects model host markers and inconsistent counts, and preserves the pinned
-sanitizer/redactor when publishing artifact-backed Markdown. Redaction is
-pattern-based: arbitrary encodings or transformations of secrets can still evade
-it. Sanitization and source/unit proof do not establish runtime token isolation.
+Both profiles attempt self-dismissal by default, never approval. Before the
+model runs, CI freezes exact reviews positively owned by this workflow/profile,
+their original count-accounted blocking findings, and the existing prior-finding
+audit inputs. A successful terminal response may supply a compact JSON audit
+proof for those IDs with complete coverage, no blockers, and affirmative
+current-code evidence. It supplements, rather than replaces, the normal review.
+CI captures it from the runner execution file, sanitizes/redacts all persisted
+evidence, and uploads one accepted reset artifact using repository retention
+defaults. Editable summary prose is not reset authority.
 
-Accepted evidence and its frozen snapshot/completion receipts live outside the
-PR checkout. A required, immutable `pr-review-result-<run>-<attempt>-<namespace>`
-artifact upload precedes publication; it uses the existing repository/organization
-retention default, without changing settings. Reports and formal reviews record
-the artifact ID and ZIP digest. The seven-day `pr-review-context` upload remains
-diagnostics only, including separate reset receipts; it cannot substitute for
-failed accepted evidence persistence.
+Only after normal publication completes with a neutral COMMENT does CI recheck
+the PR head/base, frozen targets, original evidence, and competing/newer runs,
+then dismiss those exact blocking reviews. A failed preparation, absent/malformed
+proof, incomplete audit, failed upload, stale source, or ambiguous GitHub result
+retains blocks without suppressing ordinary publication or changing its state
+lifecycle. An incomplete review still keeps its provisional summary as before.
+Reset warnings are visible in the workflow log; ambiguous writes are reconciled
+by reading the exact review, never blindly retried.
 
-CI publishes a NEW pending report, submits a commit-bound REQUEST_CHANGES for
-structured blockers or COMMENT otherwise (never APPROVE), then marks publication
-completed. Only after those operations succeed may it dismiss exact snapshotted
-owned blocking reviews. This is default baseline behavior for both profiles,
-not a new opt-in. Every original obligation must be affirmatively reverified in
-the current completed run—even if an earlier run called it fixed. New blockers,
-unverified obligations, missing/expired/corrupt evidence, edited pointers, or
-uncertain ownership retain the whole reset. Original accepted artifacts, not
-mutable comments or resolved/deleted inline threads, supply the obligations;
-superseded reports remain addressable by their original IDs.
-
-Ownership reuses `(workflow_ref, summary_marker, baseline)` plus exact PR,
-review, commit, report, run/attempt and artifact consistency. Formal reviews
-must be unedited; report histories must have only visible bot edits. Missing,
-deleted or inconsistent API history fails closed. This uses the existing
-same-repository trust: other write-capable repository automation is trusted
-not to deliberately impersonate this reviewer. It is not authenticated proof
-that one exact publishing workflow issued a review POST.
-
-Head SHA, base ref, base SHA, open PR and the same-repository boundary are
-revalidated before report creation and formal review publication as well as reset.
-Newer owned attempts and exact target bindings are checked before each dismissal.
-Dismissal uses one PUT attempt and an exact-state reread; a lost response is
-reconciled, not blindly retried. Multiple targets are not atomic, and GitHub offers
-no compare-and-dismiss transaction.
-Partial success, denied resets and retained blocks are explicit in separate
-receipts/job summaries, with manual-dismiss guidance. Human and unrelated reviews
-never become reset targets; no stronger token or approval fallback is acquired.
-
-Automatic reset remains available only while the original accepted artifact and
-verifiable binding exist. Pre-rollout reviews without complete original evidence,
-expired/deleted artifacts (including evidence lost during a rerun), and uncertain
-history require a maintainer's manual dismissal after reviewing the current
-report. A clean completed review is not a claim of merge readiness or human approval.
-Publication remains idempotent per run/attempt, never recreates a deleted/dismissed
-historical verdict, and collapses only exact consumed/older reports with bodies
-retained. Current native evidence, not stale working-comment text, authorizes it.
+Human, foreign-profile, and unmarked legacy reviews are never targets.
+Missing, edited-by-human, deleted-history, or count-unaccounted original finding
+evidence requires manual handling; this is not a migration of every historical
+block. Unknown-severity context findings are conservatively required to resolve.
+An incomplete edit/competing-run inventory also retains the affected block
+(including more than 100 original edits or GitHub's capped run listing).
+No new permissions or caller opt-in are needed. The model retains its existing
+tools and write-capable GitHub token: this host ordering is not adversarial
+credential isolation and does not replace required human approval.
 
 ### Reusable Workflow Calls
 

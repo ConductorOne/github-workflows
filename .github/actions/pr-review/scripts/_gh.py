@@ -162,8 +162,6 @@ def request(
     max_delay_s: float = DEFAULT_MAX_DELAY_S,
     jitter_s: float = DEFAULT_JITTER_S,
     timeout_s: float = 30.0,
-    opener=None,
-    max_bytes: int | None = None,
     sleep=time.sleep,
     now=time.monotonic,
 ) -> tuple[int, dict, bytes]:
@@ -193,11 +191,8 @@ def request(
             break
         req = urllib.request.Request(url, data=data, method=method, headers=req_headers)
         try:
-            with (opener or urllib.request.urlopen)(req, timeout=min(timeout_s, remaining)) as resp:
-                raw = resp.read() if max_bytes is None else resp.read(max_bytes + 1)
-                if max_bytes is not None and len(raw) > max_bytes:
-                    raise TerminalError(f"response exceeds {max_bytes} bytes")
-                return resp.status, dict(resp.headers), raw
+            with urllib.request.urlopen(req, timeout=min(timeout_s, remaining)) as resp:
+                return resp.status, dict(resp.headers), resp.read()
         except urllib.error.HTTPError as e:
             body = ""
             try:
