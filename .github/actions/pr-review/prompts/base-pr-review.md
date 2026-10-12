@@ -404,11 +404,13 @@ template above.
 
 ### Optional terminal proof for clearing this reviewer's prior blocks
 
-If `.github/review-reset.json` is available, read its frozen `audit` entries in
-addition to Step 3. Recheck EACH entry against current code, including all
-original blocking report findings; duplicated entries still need their own
-audit IDs. Missing/deleted/edited original evidence is not proof of a fix.
+If `.github/review-reset.json` is available and its `targets` list is nonempty,
+read its frozen `audit` entries in addition to Step 3. Recheck EACH entry against
+current code, including all original blocking report findings; duplicated entries
+still need their own audit IDs. Missing/deleted/edited original evidence is not
+proof of a fix.
 Do not rely on resolved threads or earlier runs' “fixed” assertions.
+If there are no eligible targets, skip this optional proof and publish normally.
 
 Post the usual final Markdown summary through the native comment tool first.
 Then end your terminal response with one `review-reset-proof` fenced JSON block

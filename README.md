@@ -82,8 +82,14 @@ findings with evidence; it does not repeat the active findings.
 
 Both profiles attempt self-dismissal by default, never approval. Before the
 model runs, CI freezes exact reviews positively owned by this workflow/profile,
-their original count-accounted blocking findings, and the existing prior-finding
-audit inputs. A successful terminal response may supply a compact JSON audit
+their original count-accounted blocking findings, and ALL typed prior-finding
+audit inputs. Known suggestions may remain nonblocking; scraped deduplication
+context and fenced prompt bullets do not become reset obligations. Capture uses
+the authoritative frozen input in runner temporary storage; the workspace copy
+is model-readable input only. New reset writes replace destination entries
+atomically, and preparation clears stale reset snapshots without following file
+symlinks. If there are no eligible targets, proof capture/upload are skipped.
+A successful terminal response may supply a compact JSON audit
 proof for those IDs with complete coverage, no blockers, and affirmative
 current-code evidence. It supplements, rather than replaces, the normal review.
 CI captures it from the runner execution file, sanitizes/redacts all persisted
@@ -102,7 +108,7 @@ by reading the exact review, never blindly retried.
 Human, foreign-profile, and unmarked legacy reviews are never targets.
 Missing, edited-by-human, deleted-history, or count-unaccounted original finding
 evidence requires manual handling; this is not a migration of every historical
-block. Unknown-severity context findings are conservatively required to resolve.
+block.
 An incomplete edit/competing-run inventory also retains the affected block
 (including more than 100 original edits or GitHub's capped run listing).
 No new permissions or caller opt-in are needed. The model retains its existing

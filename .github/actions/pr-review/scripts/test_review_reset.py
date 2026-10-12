@@ -27,6 +27,7 @@ class ResetTest(unittest.TestCase):
         self.directory = Path(self.temp.name)
         self.env = dict(baseline.ENV, GITHUB_OUTPUT=str(self.directory / "outputs"),
                         REVIEW_RESET_FILE=str(self.directory / "accepted.json"),
+                        REVIEW_RESET_SNAPSHOT=str(self.directory / "host-snapshot.json"),
                         REVIEW_EXECUTION_FILE=str(self.directory / "execution.json"),
                         REVIEW_SESSION_ID="current-session")
         self.comments = {}
@@ -189,7 +190,7 @@ class ResetTest(unittest.TestCase):
     def test_complete_current_audit_dismisses_only_exact_targets_after_publication(self):
         self.add_old(11, 3)
         snapshot = self.freeze()
-        self.assertEqual({entry["id"] for entry in snapshot["audit"]}, {"review-10-0", "review-11-0", "prior-0", "prior-1", "context-0"})
+        self.assertEqual({entry["id"] for entry in snapshot["audit"]}, {"review-10-0", "review-11-0", "prior-0", "prior-1"})
         self.capture(snapshot)
         self.assertFalse(self.puts())
         self.publish()
@@ -204,8 +205,14 @@ class ResetTest(unittest.TestCase):
 
     def test_no_prior_block_is_noop(self):
         self.reviews.clear()
-        accepted = self.capture(self.freeze())
-        reset.dismiss(accepted)
+        snapshot = self.freeze()
+        self.assertEqual(snapshot["targets"], [])
+        self.assertIn("has_targets=false\n", Path(self.env["GITHUB_OUTPUT"]).read_text())
+        with self.assertRaises(_gh.TerminalError):
+            reset.capture()
+        self.assertFalse(Path(self.env["REVIEW_RESET_FILE"]).exists())
+        self.publish()
+        self.assertEqual(self.reviews[1000]["state"], "COMMENTED")
         self.assertFalse(self.puts())
 
     def test_reset_failures_do_not_break_ordinary_publication(self):
@@ -373,18 +380,23 @@ class ResetTest(unittest.TestCase):
         self.assertIn("[REDACTED_GITHUB_TOKEN]", raw)
         reset.validate_proof(accepted["proof"], snapshot)
 
-    def test_exact_known_context_suggestion_may_remain_but_unknown_context_cannot(self):
+    def test_scraped_suggestions_and_fenced_context_do_not_block_reset(self):
         suggestion = "- **Prior — still present** `file.go:12`: consider a test"
-        self.context["existing_findings"] = [suggestion]
+        self.context["existing_findings"] = [suggestion, "- Around line 12: Add a test in `file.go`."]
         reset.write_json(self.directory / "context.json", self.context)
-        self.comments[1]["body"] = self.comments[1]["body"].replace("### Suggestions\nNone.", "### Suggestions\n" + suggestion)
+        self.comments[1]["body"] = self.comments[1]["body"].replace(
+            "### Suggestions\nNone.", "### Suggestions\n" + suggestion
+            + "\n```\n- Around line 12: Add a test in `file.go`.\n```"
+        )
         snapshot = self.freeze()
+        self.assertEqual({entry["id"] for entry in snapshot["audit"]}, {"review-10-0", "prior-0", "prior-1"})
+        self.assertEqual(self.real_read(self.directory / "context.json")["existing_findings"], self.context["existing_findings"])
         proof = self.proof(snapshot)
-        proof["audit"][-1]["disposition"] = "still_present"
-        reset.validate_proof(proof, snapshot)
-        snapshot["audit"][-1]["blocking"] = True
-        with self.assertRaises(_gh.TerminalError):
-            reset.validate_proof(proof, snapshot)
+        next(item for item in proof["audit"] if item["id"] == "prior-1")["disposition"] = "still_present"
+        self.capture(snapshot, proof)
+        self.publish()
+        reset.reset()
+        self.assertEqual(self.reviews[10]["state"], "DISMISSED")
 
     def test_target_ownership_changed_after_freeze_is_retained(self):
         accepted = self.capture(self.freeze())
@@ -469,6 +481,56 @@ class ResetTest(unittest.TestCase):
             with mock.patch.object(_gh, "rest_paginate", return_value=pages[:1]), self.assertRaises(_gh.TerminalError):
                 reset.check_newer_runs("example/repo", "42", snapshot)
 
+    def test_new_json_writes_replace_symlink_without_touching_sentinel(self):
+        sentinel = self.directory / "sentinel.txt"
+        sentinel.write_text("must remain unchanged")
+        destination = self.directory / "owned.json"
+        destination.symlink_to(sentinel)
+        reset.write_json(destination, {"current": True})
+        self.assertEqual(sentinel.read_text(), "must remain unchanged")
+        self.assertFalse(destination.is_symlink())
+        self.assertEqual(self.real_read(destination), {"current": True})
+
+    def test_failed_atomic_write_preserves_existing_file_and_removes_temporary(self):
+        destination = self.directory / "owned.json"
+        destination.write_text("old contents")
+        before = set(self.directory.iterdir())
+        with mock.patch.object(reset.os, "replace", side_effect=OSError("replace failed")), self.assertRaises(OSError):
+            reset.write_json(destination, {"current": True})
+        self.assertEqual(destination.read_text(), "old contents")
+        self.assertEqual(set(self.directory.iterdir()), before)
+
+    def test_failed_prepare_clears_planted_snapshot_and_preserves_normal_context(self):
+        context = self.directory / "context.json"
+        original = context.read_bytes()
+        reset.SNAPSHOT.symlink_to(context)
+        host = Path(self.env["REVIEW_RESET_SNAPSHOT"])
+        reset.write_json(host, {"stale": True})
+        self.prior = None
+        with self.assertRaises(_gh.TerminalError):
+            self.freeze()
+        self.assertEqual(context.read_bytes(), original)
+        self.assertFalse(reset.SNAPSHOT.exists())
+        self.assertFalse(reset.SNAPSHOT.is_symlink())
+        self.assertFalse(host.exists())
+        # A new workspace-only fake cannot replace the absent host input.
+        reset.write_json(reset.SNAPSHOT, {"fake": True})
+        with self.assertRaises(FileNotFoundError):
+            reset.capture()
+        self.publish()
+        self.assertEqual(self.reviews[1000]["state"], "COMMENTED")
+        self.assertFalse(self.puts())
+
+    def test_capture_uses_host_snapshot_not_mutable_workspace_copy(self):
+        snapshot = self.freeze()
+        changed = copy.deepcopy(snapshot)
+        changed["audit"] = []
+        reset.write_json(reset.SNAPSHOT, changed)
+        with self.assertRaises(_gh.TerminalError):
+            self.capture(changed)
+        accepted = self.capture(snapshot)
+        self.assertEqual(accepted["snapshot"], snapshot)
+
 
 class ActionContractTest(unittest.TestCase):
     def test_original_model_options_and_reset_failure_split(self):
@@ -487,6 +549,8 @@ class ActionContractTest(unittest.TestCase):
         self.assertIn("steps.reset-upload.outcome == 'success'", dismiss)
         self.assertNotIn("reset-upload.conclusion", dismiss)
         self.assertNotIn("retention-days:", next(step for step in steps if step.startswith("Persist accepted")))
+        capture = next(step for step in steps if step.startswith("Capture optional"))
+        self.assertIn("steps.reset-prepare.outputs.has_targets == 'true'", capture)
 
 
 if __name__ == "__main__":

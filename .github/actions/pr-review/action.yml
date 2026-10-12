@@ -139,6 +139,7 @@ runs:
       PR_NUMBER: ${{ inputs.pr_number }}
       SUMMARY_MARKER: ${{ steps.review-config.outputs.summary_heading }}
       REVIEW_RUN_STARTED_AT: ${{ steps.review-config.outputs.review_run_started_at }}
+      REVIEW_RESET_SNAPSHOT: ${{ runner.temp }}/pr-review-reset-${{ steps.summary-transport.outputs.comment_id }}-snapshot.json
     run: python3 ${{ github.action_path }}/scripts/review-reset.py prepare
   - name: Run Claude PR Review
     id: claude_review
@@ -197,11 +198,12 @@ runs:
       prompt: ${{ env.REVIEW_PROMPT }}
   - name: Capture optional terminal reset proof
     id: reset-proof
-    if: steps.claude_review.outcome == 'success' && steps.reset-prepare.outcome == 'success'
+    if: steps.claude_review.outcome == 'success' && steps.reset-prepare.outcome == 'success' && steps.reset-prepare.outputs.has_targets == 'true'
     continue-on-error: true
     shell: bash
     env:
       SUMMARY_MARKER: ${{ steps.review-config.outputs.summary_heading }}
+      REVIEW_RESET_SNAPSHOT: ${{ runner.temp }}/pr-review-reset-${{ steps.summary-transport.outputs.comment_id }}-snapshot.json
       REVIEW_EXECUTION_FILE: ${{ steps.claude_review.outputs.execution_file }}
       REVIEW_SESSION_ID: ${{ steps.claude_review.outputs.session_id }}
       REVIEW_RESET_FILE: ${{ runner.temp }}/pr-review-reset-${{ steps.summary-transport.outputs.comment_id }}.json

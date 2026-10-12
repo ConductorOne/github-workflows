@@ -12,6 +12,7 @@ import os
 from pathlib import Path
 import re
 import sys
+import tempfile
 from urllib.parse import quote
 
 import _gh
@@ -45,8 +46,20 @@ def read_json(path, maximum=2 * 1024 * 1024):
 
 
 def write_json(path, value):
-    Path(path).parent.mkdir(parents=True, exist_ok=True)
-    Path(path).write_text(json.dumps(value, ensure_ascii=False, indent=2) + "\n")
+    """Replace only our destination entry, never follow a planted file symlink."""
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary = None
+    try:
+        with tempfile.NamedTemporaryFile(mode="w", encoding="utf-8", dir=path.parent,
+                                         prefix=f".{path.name}.", delete=False) as stream:
+            temporary = Path(stream.name)
+            json.dump(value, stream, ensure_ascii=False, indent=2)
+            stream.write("\n")
+        os.replace(temporary, path)
+    finally:
+        if temporary is not None:
+            temporary.unlink(missing_ok=True)
 
 
 def sanitize(text):
@@ -161,7 +174,6 @@ def target_evidence(review, report, identity, repo, pr_number):
     require(pub._parse_ts(state["started_at"]) < pub.run_started_at(), "target is not older")
     body = report["body"]
     rows = []
-    suggestions = []
     section = None
     seen = []
     for line in pub._top_level_lines(body):
@@ -172,14 +184,12 @@ def target_evidence(review, report, identity, repo, pr_number):
         elif section in ("### Security Issues", "### Correctness Issues") and line.strip():
             if line.strip() != "None found.":
                 rows.append(line.strip())
-        elif section == "### Suggestions" and line.strip().startswith("- ") and "`" in line:
-            suggestions.append(line.strip())
     require(sorted(seen) == ["### Correctness Issues", "### Security Issues"]
             and len(rows) > 0
             and pub.parse_blocking_count(body, identity["summary_marker"]) == len(rows),
             "original blocking findings missing or not count-accounted")
     return {"id": review["id"], "commit_id": review["commit_id"],
-            "marker": value, "report_id": report["id"], "findings": rows, "suggestions": suggestions}
+            "marker": value, "report_id": report["id"], "findings": rows}
 
 
 def check_pr(pr, snapshot):
@@ -193,6 +203,11 @@ def check_pr(pr, snapshot):
 
 
 def prepare():
+    # Clear only these new owned entries before any fallible preparation. A
+    # planted workspace snapshot must not masquerade as this run's input.
+    SNAPSHOT.unlink(missing_ok=True)
+    host_snapshot = Path(os.environ["REVIEW_RESET_SNAPSHOT"])
+    host_snapshot.unlink(missing_ok=True)
     context = read_json(pub.PR_CONTEXT_PATH)
     identity = pub.publication_identity()
     repo, number = context["repository"], context["pr_number"]
@@ -227,24 +242,18 @@ def prepare():
                                       "blocking": True})
     # Include every supplied prior entry, not only target-associated or unresolved ones.
     prior = read_json(".github/prior-findings.json")["prior_findings"]
-    require(isinstance(prior, list) and isinstance(context["existing_findings"], list),
-            "missing current prior-finding inventory")
+    require(isinstance(prior, list), "missing current prior-finding inventory")
     for index, finding in enumerate(prior):
         require(isinstance(finding, dict) and finding.get("excerpt") and finding.get("severity")
                 in ("security", "bug", "suggestion"), "incomplete prior finding")
         snapshot["audit"].append({"id": f"prior-{index}", "finding": finding,
                                   "blocking": finding["severity"] != "suggestion"})
-    blockers = {finding for target in snapshot["targets"] for finding in target["findings"]}
-    suggestions = {finding for target in snapshot["targets"] for finding in target["suggestions"]}
-    for index, finding in enumerate(context["existing_findings"]):
-        require(isinstance(finding, str) and finding.strip(), "incomplete existing finding")
-        # Only an exact, integrity-checked original suggestion is nonblocking.
-        blocking = finding not in suggestions or finding in blockers
-        snapshot["audit"].append({"id": f"context-{index}", "finding": finding, "blocking": blocking})
     snapshot = sanitized(snapshot)
     write_json(SNAPSHOT, snapshot)
+    write_json(host_snapshot, snapshot)
     name = hashlib.sha256(json.dumps(identity, sort_keys=True).encode()).hexdigest()[:16]
     with open(os.environ["GITHUB_OUTPUT"], "a") as output:
+        output.write(f"has_targets={'true' if snapshot['targets'] else 'false'}\n")
         output.write(f"artifact_name=pr-review-reset-{identity['run_id']}-{identity['run_attempt']}-{name}\n")
     print(f"Reset snapshot: {len(snapshot['targets'])} eligible, {len(snapshot['retained'])} retained; unmarked legacy reviews require manual dismissal")
 
@@ -278,7 +287,8 @@ def validate_proof(proof, snapshot):
 
 
 def capture():
-    snapshot = read_json(SNAPSHOT)
+    snapshot = read_json(os.environ["REVIEW_RESET_SNAPSHOT"])
+    require(snapshot["targets"], "no eligible targets need reset proof")
     require(snapshot["identity"] == pub.publication_identity(), "stale reset snapshot")
     messages = read_json(os.environ["REVIEW_EXECUTION_FILE"], 32 * 1024 * 1024)
     require(isinstance(messages, list) and messages and isinstance(messages[-1], dict), "missing terminal runner result")
