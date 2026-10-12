@@ -150,9 +150,10 @@ runs:
             #
             # This deliberately does NOT extend to a ruleset rule that says 0.
             # Classic protection could in principle sit alongside one and ask
-            # for more, and that case is genuinely not covered (see the README
-            # — the check reads rulesets, and cannot see classic protection at
-            # all). But a governing pull_request rule IS an explanation for
+            # for more, and that case is genuinely not covered (see "The
+            # limit of the check" in docs/pr-review.md — the check reads
+            # rulesets, and cannot see classic protection at all). But a
+            # governing pull_request rule IS an explanation for
             # the branch being protected, where the "none" case has none. And
             # the alternative is not a stricter check, it is no feature:
             # every connector repo reads exactly 0-from-a-ruleset plus
