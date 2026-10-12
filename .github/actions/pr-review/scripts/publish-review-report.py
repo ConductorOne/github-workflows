@@ -323,12 +323,12 @@ def parse_judge_verdict(body: str, heading: str) -> tuple[str, int] | None:
     Returns None — reject — when either row is absent, malformed or
     ambiguous, when the count row is out of its prescribed position, when the
     only verdict row sits above the heading, or when the two rows contradict
-    each other: an
-    APPROVE over a positive blocking count is never a valid verdict. The
-    converse is not a contradiction — a judge may REQUEST CHANGES or DEFER at
-    zero blockers for reasons that are not defects. DEFER over a positive
-    count is not a contradiction either, and is not rejected: verdict_to_review
-    resolves it to the count's own verdict rather than costing the run.
+    each other: an APPROVE over a positive blocking count is never a valid
+    verdict. The converse is not a contradiction — a judge may REQUEST CHANGES
+    or DEFER at zero blockers for reasons that are not defects. DEFER over a
+    positive count is not a contradiction either, and is not rejected:
+    verdict_to_review resolves it to the count's own verdict rather than
+    costing the run.
     """
     blocking = parse_blocking_count(body, heading)
     if blocking is None:
