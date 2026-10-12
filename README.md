@@ -112,7 +112,7 @@ Which one you get depends on how the review reaches you:
 
 | Entry point | Mode | Why |
 | --- | --- | --- |
-| `pr-review.yaml` (the connector profile) | `judge`, subject to the check below | Connector repos require 0 approving reviews, so an approval grants nothing there — its only effect is clearing the bot's own block, which is the whole point |
+| `pr-review.yaml` (the connector profile) | `judge`, subject to the check below | A bot approval cannot satisfy the human gate on a connector repo (below), so its only effect there is clearing the bot's own block, which is the whole point |
 | `general-pr-review.yaml` | `baseline` | It passes no `verdict_mode`, so the action's own conservative default applies |
 | the action called directly | `baseline` | Same |
 
@@ -200,16 +200,24 @@ on GitHub. They are listed because the connector profile now defaults to
 `judge`, and because they are exactly what changes if a repo on that profile
 ever starts requiring approvals.
 
-- **The bot gets a vote.** The review is submitted with `GITHUB_TOKEN`, so an
-  `APPROVE` is recorded as an approving review by `github-actions[bot]` and
-  counts toward a "required approving reviews" rule. On every connector repo
-  that count is 0, so the approval satisfies nothing — its only effect is
-  clearing the bot's own `CHANGES_REQUESTED`. This is the cost the run-time
-  check above exists to contain: a repo that relies on that count for human
-  sign-off gets `baseline` from the moment the requirement becomes visible to
-  the check, without anyone having to reconfigure the review — with the single
-  exception carved out in *The limit of the check* above, where the
-  requirement is invisible to it.
+- **The bot gets a vote — but not the deciding one.** The review is submitted
+  with `GITHUB_TOKEN`, so an `APPROVE` is recorded as an approving review by
+  `github-actions[bot]` and counts toward a `required_approving_review_count`
+  rule. Connector repos set that count to 0 and gate merges a different way:
+  their ruleset carries a `required_reviewers` entry naming a team, with
+  `minimum_approvals: 1`, over every file but `docs/connector.mdx`. A bot is
+  not a member of that team, so **its approval cannot satisfy the human gate**
+  — the only thing it can do is clear the bot's own `CHANGES_REQUESTED`. A
+  connector PR still needs a person from that team to approve it.
+
+  The run-time check above contains the other direction: a repo that *does*
+  put its requirement in `required_approving_review_count` gets `baseline`
+  from the moment the requirement becomes visible to the check, without anyone
+  having to reconfigure the review — with the single exception carved out in
+  *The limit of the check* above, where the requirement is invisible to it.
+  (The check reads that count and not `required_reviewers`, which is correct
+  rather than an oversight: a named-team requirement is one a bot cannot
+  satisfy in the first place, so there is nothing to withhold.)
 - **Approvals are not self-retracting.** Nothing in this action dismisses a
   review. Once an `APPROVE` lands for commit A it stays the bot's latest review
   until some later run submits a different event — and no later run submits one
