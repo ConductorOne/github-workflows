@@ -124,6 +124,16 @@ requiring approvals, and equally a requirement it could not read. So a repo
 that quietly starts requiring an approval stops getting bot approvals on its
 next run, with no one having to notice and reconfigure it.
 
+What counts as a confirmed zero is deliberately narrow, because the evidence
+available to `GITHUB_TOKEN` is narrow. It can read rulesets
+(`/rules/branches/{branch}`) but not classic branch protection
+(`/branches/{branch}/protection` answers 403), and several rulesets can apply
+to one branch at once, so the strictest requirement among them wins rather
+than the first one listed. A branch with no ruleset requirement is only a
+confirmed zero when it is also unprotected; a protected branch with no ruleset
+rule could be carrying a classic protection in the blind spot, so it is
+treated as unknown and loses `judge`.
+
 That is what lets the connector profile default to `judge` safely. It is also
 why `github-workflows` itself — the one repo here that requires an approving
 review — would fall back even if it were on that profile; as it happens it is

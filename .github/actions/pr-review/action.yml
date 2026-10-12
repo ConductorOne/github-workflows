@@ -122,15 +122,34 @@ runs:
       # unreadable answer included. The classic
       # /branches/{branch}/protection endpoint is NOT usable here: it answers
       # 403 "Resource not accessible by integration" for GITHUB_TOKEN. The
-      # rulesets endpoint below does answer it. A branch with no pull_request
-      # rule requires no approvals, so it reads as 0 and keeps judge.
+      # rulesets endpoint below does answer it.
+      #
+      # Every assignment below is guarded (`if`, or `|| true`): this step runs
+      # under `bash -eo pipefail`, where a bare `var=$(failing-cmd)` aborts the
+      # step instead of falling through to the unknown case.
       if [ "${VERDICT_MODE}" = "judge" ]; then
         approvals=""
         if [ -n "${BASE_REF}" ] \
           && rules=$(gh api "repos/${GITHUB_REPOSITORY}/rules/branches/${BASE_REF}" 2>/dev/null); then
+          # The response carries one entry per applicable ruleset, org- and
+          # repo-level mixed, so several pull_request rules can apply at once
+          # and the first one is not the governing one. Take the strictest.
           approvals=$(printf '%s' "${rules}" | jq -r '
-            ([.[] | select(.type == "pull_request")] | .[0].parameters.required_approving_review_count) // 0
-          ' 2>/dev/null)
+            [.[] | select(.type == "pull_request") | .parameters.required_approving_review_count // 0] as $counts
+            | if ($counts | length) == 0 then "none" else ($counts | max) end
+          ' 2>/dev/null || true)
+          if [ "${approvals}" = "none" ]; then
+            # No RULESET asks for approvals — but that endpoint returns only
+            # ruleset rules, and a classic branch protection could be asking
+            # where this token cannot look. An unprotected branch is the only
+            # one that can be called a confirmed zero on this evidence;
+            # anything protected stays unknown and loses judge.
+            if [ "$(gh api "repos/${GITHUB_REPOSITORY}/branches/${BASE_REF}" --jq '.protected' 2>/dev/null || true)" = "false" ]; then
+              approvals="0"
+            else
+              approvals=""
+            fi
+          fi
         fi
         case "${approvals}" in
           "0")
