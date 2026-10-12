@@ -44,22 +44,39 @@ Unlike `--allowedTools`, this limits which built-ins are available: there is
 no model shell, interpreter, file-edit tool or general GitHub write endpoint.
 The host prefetches the complete PR diff into `.github/pr-review.diff`;
 incremental suggestion work still uses the separate filtered compare diff.
-Project/local settings and repo-defined MCP servers remain disabled. Audit
-subagents inherit the read-only inventory and must return completed native
-results before the final result; missing, background or errored audits fail
-closed. Source/API contracts support this boundary; a separately authorized
-real pinned-runner isolation/output smoke is still needed for runtime proof.
+Project/local settings and repo-defined MCP servers remain disabled. The trusted
+action `settings` enables `permissions.blockReadsOutsideWorkingDirectories` and
+native Read denies for `.git` (including checkout credentials), `_workflow`,
+runner temp, hidden home configuration, and process/device/temp namespaces.
+Source files and host-prefetched `.github` context remain readable. This is bounded
+read-path hardening, not a filesystem sandbox or comprehensive credential isolation.
+Audit subagents are expected to inherit the read-only inventory and must return
+completed native results before the final result; missing, background or errored
+audits fail closed.
+
+**Required before merge/enabling:** a separately authorized live smoke of this
+candidate on the pinned Claude Code 2.1.282 runner has **not run**. It must exercise
+`--tools` together with required `--json-schema`, Agent tool/settings inheritance,
+the final native tool/MCP inventory (unknown tools remain rejected), native output
+above 128 KiB, and CI-token access denial via actual Read/Grep/Glob, including
+absolute paths and symlink aliases into `.git`, host state and sensitive runner
+paths. Source contracts and unit fixtures are not evidence of live enforcement.
 
 Before the model runs, CI creates a fresh provisional working comment and binds
 it to `update_claude_comment` through `CLAUDE_COMMENT_ID`. That body-only tool and
 the fixed-PR inline tool retain upstream sanitization and secret redaction.
 Working comments are progress, never final verdict or obligation authority.
-The final result is the runner's native `structured_output`: structured blockers,
-an exact current-run audit of every frozen prior obligation ID, and `report.summary`
-containing the full Markdown in the existing template. CI matches it against
-successful terminal metadata and completed Agent/Task results, rejects model
-host markers and inconsistent counts, and preserves the pinned sanitizer/redactor
-when publishing artifact-backed Markdown.
+The final result is the runner's native terminal `structured_output`: structured
+blockers, an exact current-run audit of every frozen prior obligation ID, and
+`report.summary` containing the full Markdown in the existing template. CI reads
+the bounded strict JSON execution file outside the checkout in `RUNNER_TEMP`;
+only short path/conclusion/session metadata crosses the validation step environment,
+not a duplicate large result body. It binds init/terminal session IDs to the current
+action's session output, checks terminal success and completed Agent/Task results,
+rejects model host markers and inconsistent counts, and preserves the pinned
+sanitizer/redactor when publishing artifact-backed Markdown. Redaction is
+pattern-based: arbitrary encodings or transformations of secrets can still evade
+it. Sanitization and source/unit proof do not establish runtime token isolation.
 
 Accepted evidence and its frozen snapshot/completion receipts live outside the
 PR checkout. A required, immutable `pr-review-result-<run>-<attempt>-<namespace>`
@@ -88,10 +105,12 @@ same-repository trust: other write-capable repository automation is trusted
 not to deliberately impersonate this reviewer. It is not authenticated proof
 that one exact publishing workflow issued a review POST.
 
-Head SHA, base ref, base SHA, open PR, newer owned attempts and target bindings
-are revalidated before each dismissal. Dismissal uses one PUT attempt and an
-exact-state reread; a lost response is reconciled, not blindly retried. Multiple
-targets are not atomic, and GitHub offers no compare-and-dismiss transaction.
+Head SHA, base ref, base SHA, open PR and the same-repository boundary are
+revalidated before report creation and formal review publication as well as reset.
+Newer owned attempts and exact target bindings are checked before each dismissal.
+Dismissal uses one PUT attempt and an exact-state reread; a lost response is
+reconciled, not blindly retried. Multiple targets are not atomic, and GitHub offers
+no compare-and-dismiss transaction.
 Partial success, denied resets and retained blocks are explicit in separate
 receipts/job summaries, with manual-dismiss guidance. Human and unrelated reviews
 never become reset targets; no stronger token or approval fallback is acquired.

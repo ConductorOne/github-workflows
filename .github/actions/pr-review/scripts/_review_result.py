@@ -530,12 +530,14 @@ def prepare():
         stream.write("json_schema=" + json.dumps(RESULT_SCHEMA, separators=(",", ":")) + "\n")
 
 
-def completion_receipt(messages, native):
-    require(isinstance(messages, list) and messages, "missing runner messages")
+def completion_receipt(messages, session_id):
+    require(isinstance(messages, list) and messages
+            and all(isinstance(message, dict) for message in messages), "missing runner messages")
     terminal = messages[-1]
     require(terminal.get("type") == "result" and terminal.get("subtype") == "success"
-            and terminal.get("is_error") is False and terminal.get("structured_output") == native,
-            "native output does not match successful terminal runner result")
+            and terminal.get("is_error") is False, "unsuccessful terminal runner result")
+    require(isinstance(terminal.get("structured_output"), dict) and terminal["structured_output"],
+            "missing terminal native structured output")
     require(type(terminal.get("num_turns")) is int and 0 < terminal["num_turns"] <= 100,
             "invalid terminal turn count")
     init = [m for m in messages if m.get("type") == "system" and m.get("subtype") == "init"]
@@ -544,9 +546,14 @@ def completion_receipt(messages, native):
             and "Read" in init[0]["tools"] and "Bash" not in init[0]["tools"],
             "runner did not use the constrained model tool inventory")
     require(init[0].get("permissionMode") == "default", "unexpected model permission mode")
+    # The pinned action exposes session_id directly from system.init. Bind the
+    # file to that small current-step output, not a duplicate of the large body.
+    require(isinstance(session_id, str) and 0 < len(session_id) <= 128
+            and init[0].get("session_id") == session_id
+            and terminal.get("session_id") == session_id, "native runner session mismatch")
     servers = init[0].get("mcp_servers")
     require(isinstance(servers, list)
-            and all(s.get("name") in {"github_comment", "github_inline_comment"}
+            and all(isinstance(s, dict) and s.get("name") in {"github_comment", "github_inline_comment"}
                     and s.get("status") == "connected" for s in servers), "unexpected MCP inventory")
     pending = {}
     finished = []
@@ -599,7 +606,7 @@ def completion_receipt(messages, native):
     require(not pending, "required spawned audits have not returned")
     require(set(native_tasks.values()).issubset({item["tool_use_id"] for item in finished}),
             "native spawned audit is still pending")
-    return {"terminal_success": True, "num_turns": terminal["num_turns"],
+    return {"terminal_success": True, "num_turns": terminal["num_turns"], "session_id": session_id,
             "tools": init[0]["tools"], "audits": finished}
 
 
@@ -664,14 +671,15 @@ def validate():
     require(os.environ.get("REVIEW_MODEL_CONCLUSION") == "success", "model step did not complete successfully")
     directory = result_dir()
     snapshot = read_json(directory / "snapshot.json")
-    raw = os.environ.get("REVIEW_STRUCTURED_OUTPUT", "")
-    require(bool(raw) and len(raw.encode()) <= MAX_RESULT_BYTES, "missing/oversize native structured output")
-    payload = strict_json(raw)
     execution_path = checked_path(os.environ["REVIEW_EXECUTION_FILE"])
     require(execution_path.is_relative_to(Path(os.environ["RUNNER_TEMP"]).resolve())
             and not execution_path.is_relative_to(Path(os.environ.get("GITHUB_WORKSPACE", os.getcwd())).resolve()),
             "native execution record outside trusted runner storage")
-    completion = completion_receipt(read_json(execution_path, MAX_EXECUTION_BYTES), payload)
+    messages = read_json(execution_path, MAX_EXECUTION_BYTES)
+    completion = completion_receipt(messages, os.environ.get("REVIEW_SESSION_ID", ""))
+    payload = messages[-1]["structured_output"]
+    require(len(json.dumps(payload, ensure_ascii=False).encode()) <= MAX_RESULT_BYTES,
+            "oversize native structured output")
     result = validate_payload(payload, snapshot)
     verify_source_references(result, snapshot)
     action_root = Path(__file__).parents[4]

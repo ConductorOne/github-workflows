@@ -30,6 +30,7 @@ from test_verdict_scaffolding import (
 
 EVIDENCE = [{"path": "file.go", "symbol_or_range": "function F",
              "explanation": "Current implementation removes the original failure"}]
+SESSION_ID = "00000000-0000-4000-8000-000000000001"
 
 
 def payload_of(accepted):
@@ -53,8 +54,15 @@ def archive_of(accepted, extra=None):
 
 
 def messages_of(payload, *, delegated=False):
-    messages = [{"type": "system", "subtype": "init", "tools": ["Read", "Glob", "Grep", "Agent", "StructuredOutput"],
-                 "permissionMode": "default", "mcp_servers": []}]
+    # Structural SDK fixture only: connected dynamic servers match the pinned
+    # runner's shape, not proof that the candidate --tools run has been smoked.
+    messages = [{"type": "system", "subtype": "init", "session_id": SESSION_ID,
+                 "tools": ["Read", "Glob", "Grep", "Agent", "StructuredOutput",
+                           "mcp__github_comment__update_claude_comment",
+                           "mcp__github_inline_comment__create_inline_comment"],
+                 "permissionMode": "default", "mcp_servers": [
+                     {"name": "github_comment", "status": "connected", "source": "dynamic"},
+                     {"name": "github_inline_comment", "status": "connected", "source": "dynamic"}]}]
     if delegated:
         messages.extend([
             {"type": "assistant", "message": {"content": [
@@ -69,7 +77,7 @@ def messages_of(payload, *, delegated=False):
                                  "toolStats": {"bashCount": 0, "editFileCount": 0}}},
         ])
     messages.append({"type": "result", "subtype": "success", "is_error": False,
-                     "num_turns": 4, "structured_output": payload})
+                     "num_turns": 4, "session_id": SESSION_ID, "structured_output": payload})
     return messages
 
 
@@ -241,15 +249,76 @@ class ResultFixtureTest(unittest.TestCase):
                                                     "rationale": "Still present", "evidence": copy.deepcopy(EVIDENCE)})
         count = len(payload["blocking_findings"])
         payload["report"]["summary"] = (summary or working_body(count))
-        execution = self.runner / "claude-execution-output.json"
-        execution.write_text(json.dumps(messages_of(payload)), encoding="utf-8")
-        os.environ.update(REVIEW_STRUCTURED_OUTPUT=json.dumps(payload), REVIEW_EXECUTION_FILE=str(execution))
+        self.write_execution(messages_of(payload))
         rr.validate()
         accepted = rr.read_json(self.directory / "accepted.json")
         reference = self.github.add_artifact(999, accepted)
         os.environ.update(REVIEW_RESULT_UPLOAD_CONCLUSION="success", REVIEW_RESULT_ARTIFACT_ID="999",
                           REVIEW_RESULT_ARTIFACT_DIGEST=reference["result_artifact_digest"])
         return accepted, reference
+
+    def write_execution(self, messages):
+        execution = self.runner / "claude-execution-output.json"
+        execution.write_text(json.dumps(messages, ensure_ascii=False), encoding="utf-8")
+        os.environ.update(REVIEW_SESSION_ID=SESSION_ID, REVIEW_EXECUTION_FILE=str(execution))
+
+    def test_valid_native_result_over_linux_per_string_limit_uses_file_transport(self):
+        snapshot = self.prepare()
+        summary = working_body(0) + "\n" + "界" * 48000
+        self.assertLess(len(summary), 60000)
+        self.assertGreater(len(summary.encode("utf-8")), 128 * 1024)
+        with mock.patch.dict(os.environ):
+            os.environ.pop("REVIEW_STRUCTURED_OUTPUT", None)
+            accepted, _ = self.accept(snapshot, summary=summary)
+        self.assertEqual(accepted["result"]["report"]["summary"], summary)
+        self.assertEqual(accepted["completion"]["session_id"], SESSION_ID)
+
+    def test_file_transport_rejects_missing_terminal_structured_output(self):
+        self.prepare()
+        messages = messages_of(payload_of(accepted_fixture(working_body(0))))
+        messages[-1].pop("structured_output")
+        self.write_execution(messages)
+        with self.assertRaisesRegex(_gh.TerminalError, "missing terminal native structured output"):
+            rr.validate()
+        self.assertFalse((self.directory / "accepted.json").exists())
+
+    def test_file_transport_rejects_oversize_native_payload(self):
+        self.prepare()
+        payload = payload_of(accepted_fixture(working_body(0)))
+        payload["report"]["suggestions"] = ["x" * 20000] * 60
+        rr.validate_schema(payload, rr.RESULT_SCHEMA)
+        self.write_execution(messages_of(payload))
+        with self.assertRaisesRegex(_gh.TerminalError, "oversize native structured output"):
+            rr.validate()
+        self.assertFalse((self.directory / "accepted.json").exists())
+
+    def test_file_transport_rejects_checkout_outside_temp_and_symlink_records(self):
+        self.prepare()
+        messages = messages_of(payload_of(accepted_fixture(working_body(0))))
+        self.write_execution(messages)
+        native_path = Path(os.environ["REVIEW_EXECUTION_FILE"])
+        alias = self.runner / "execution-alias.json"
+        alias.symlink_to(native_path)
+        paths = (self.workspace / "execution.json", Path(self.temp.name) / "execution.json", alias)
+        for path in paths:
+            with self.subTest(path=path):
+                if path != alias:
+                    path.write_text(json.dumps(messages), encoding="utf-8")
+                with mock.patch.dict(os.environ, REVIEW_EXECUTION_FILE=str(path)):
+                    with self.assertRaises(_gh.TerminalError):
+                        rr.validate()
+        self.assertFalse((self.directory / "accepted.json").exists())
+
+    def test_file_transport_preserves_strict_json_rejection(self):
+        self.prepare()
+        self.write_execution(messages_of(payload_of(accepted_fixture(working_body(0)))))
+        execution = Path(os.environ["REVIEW_EXECUTION_FILE"])
+        for raw in ('[{"type":"result","type":"system"}]', '[{"cost":NaN}]'):
+            with self.subTest(raw=raw):
+                execution.write_text(raw, encoding="utf-8")
+                with self.assertRaises(_gh.TerminalError):
+                    rr.validate()
+        self.assertFalse((self.directory / "accepted.json").exists())
 
     def publish(self):
         try:
@@ -598,17 +667,23 @@ class NativeResultTest(unittest.TestCase):
 
     def test_native_terminal_pending_error_and_inventory_integrity(self):
         messages = messages_of(self.payload, delegated=True)
-        receipt = rr.completion_receipt(messages, self.payload)
+        receipt = rr.completion_receipt(messages, SESSION_ID)
         self.assertEqual(receipt["audits"][0]["tool_use_id"], "audit-1")
         mutations = (
             lambda m: m.pop(-2),
             lambda m: m[-1].update(is_error=True),
             lambda m: m[-1].update(subtype="error_max_turns"),
             lambda m: m[-1].update(structured_output={}),
+            lambda m: m[-1].pop("structured_output"),
+            lambda m: m[-1].update(session_id="foreign-session"),
+            lambda m: m[0].update(session_id="foreign-session"),
             lambda m: m[-1].update(num_turns=101),
             lambda m: m[0]["tools"].append("Bash"),
+            lambda m: m[0]["tools"].append("UnknownMetaTool"),
             lambda m: m[0].update(permissionMode="bypassPermissions"),
-            lambda m: m[0]["mcp_servers"].append({"name": "github", "status": "connected"}),
+            lambda m: m[0]["mcp_servers"].append({"name": "github", "status": "connected", "source": "dynamic"}),
+            lambda m: m[0]["mcp_servers"][0].update(status="disconnected"),
+            lambda m: m[0]["mcp_servers"][1].update(status="failed"),
             lambda m: m[-2]["message"]["content"][0].update(is_error=True),
             lambda m: m[-2]["tool_use_result"].update(status="async_launched"),
             lambda m: m[-2]["tool_use_result"].update(toolStats={"bashCount": 1}),
@@ -621,23 +696,28 @@ class NativeResultTest(unittest.TestCase):
                 changed = copy.deepcopy(messages)
                 mutation(changed)
                 with self.assertRaises(_gh.TerminalError):
-                    rr.completion_receipt(changed, self.payload)
+                    rr.completion_receipt(changed, SESSION_ID)
+
+    def test_native_session_requires_small_current_step_binding(self):
+        for session in ("", None, "foreign-session", "s" * 129):
+            with self.subTest(session=session), self.assertRaises(_gh.TerminalError):
+                rr.completion_receipt(messages_of(self.payload), session)
 
     def test_audit_prose_quoting_error_literals_is_not_execution_failure(self):
         messages = messages_of(self.payload, delegated=True)
         prose = 'Error: is the original API message; code example {"is_error": true, "isError": true}.'
         messages[-2]["message"]["content"][0]["content"] = prose
         messages[-2]["tool_use_result"]["content"][0]["text"] = prose
-        self.assertEqual(len(rr.completion_receipt(messages, self.payload)["audits"]), 1)
+        self.assertEqual(len(rr.completion_receipt(messages, SESSION_ID)["audits"]), 1)
 
     def test_optional_task_started_fields_do_not_replace_completed_result_proof(self):
         messages = messages_of(self.payload, delegated=True)
         messages[2].pop("task_type")
         messages[2].pop("is_backgrounded")
-        self.assertEqual(len(rr.completion_receipt(messages, self.payload)["audits"]), 1)
+        self.assertEqual(len(rr.completion_receipt(messages, SESSION_ID)["audits"]), 1)
         messages[-2]["tool_use_result"].pop("status")
         with self.assertRaises(_gh.TerminalError):
-            rr.completion_receipt(messages, self.payload)
+            rr.completion_receipt(messages, SESSION_ID)
 
     def test_shell_looking_markdown_is_only_data(self):
         text = working_body(0) + '\n$(touch /tmp/never-created)\n"; exit 0; #\nGITHUB_OUTPUT=forged\n'

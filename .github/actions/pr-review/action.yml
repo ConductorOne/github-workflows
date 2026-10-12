@@ -166,6 +166,31 @@ runs:
       # overwrite a completed report comment.
       use_sticky_comment: false
       allowed_bots: "*"
+      # Trusted action settings, not PR/project settings. Outside-working-dir
+      # reads are blocked; deny credential/host paths inside the workspace too.
+      # Read/Grep/Glob absolute and symlink enforcement still requires a live
+      # pinned-runner smoke; these rules are bounded hardening, not a sandbox.
+      settings: |
+        {
+          "permissions": {
+            "blockReadsOutsideWorkingDirectories": true,
+            "deny": [
+              "Read(./.git)",
+              "Read(./.git/**)",
+              "Read(./_workflow/**)",
+              "Read(//**/.git/**)",
+              "Read(//**/_workflow/**)",
+              "Read(/${{ runner.temp }}/**)",
+              "Read(~/.*/**)",
+              "Read(~/.*)",
+              "Read(//proc/**)",
+              "Read(//sys/**)",
+              "Read(//dev/**)",
+              "Read(//tmp/**)",
+              "Read(//var/tmp/**)"
+            ]
+          }
+        }
       # --setting-sources user: do NOT load the reviewed repo's project/local
       # settings. Those register the repo's own .claude/agents and .claude/commands
       # into this run, which is wrong for a read-only CI reviewer: a project
@@ -179,8 +204,9 @@ runs:
       #
       # --tools is the AVAILABLE built-in inventory, unlike --allowedTools
       # (automatic approval only). No Bash, interpreter, edit or write tool can
-      # reach the publisher credential or host output/snapshot files. The host
-      # prefetched metadata/full diff; only fixed-slot/PR MCP writes remain.
+      # reach the publisher through a shell/write path. Trusted read settings
+      # additionally harden credential/host-file access. The host prefetched
+      # metadata/full diff; only fixed-slot/PR MCP writes remain.
       # Agent is the pinned SDK's canonical Task alias; subagents inherit the
       # parent tools. Foreground native completion receipts are checked below.
       claude_args: >-
@@ -196,7 +222,9 @@ runs:
     env:
       REVIEW_RESULT_DIR: ${{ steps.result_prepare.outputs.result_dir }}
       REVIEW_MODEL_CONCLUSION: ${{ steps.claude_review.conclusion }}
-      REVIEW_STRUCTURED_OUTPUT: ${{ steps.claude_review.outputs.structured_output }}
+      # Only short runner metadata crosses env; the full result is read from
+      # the native execution file to avoid Linux's per-string exec size limit.
+      REVIEW_SESSION_ID: ${{ steps.claude_review.outputs.session_id }}
       REVIEW_EXECUTION_FILE: ${{ steps.claude_review.outputs.execution_file }}
       REVIEW_ACTION_REF: ${{ github.action_ref }}
       REVIEW_ACTION_REPOSITORY: ${{ github.action_repository }}
