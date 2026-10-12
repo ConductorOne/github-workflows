@@ -40,7 +40,8 @@ agent run, this trusted CI step finalizes the run:
    APPROVE -> APPROVE, REQUEST CHANGES -> REQUEST_CHANGES, and DEFER falls
    back to the baseline mapping of its own count, so it can never unblock a
    PR baseline would have blocked;
-   "none" submits nothing and stops after step 3. The live head is re-checked immediately
+   "none" submits nothing, so it skips this step and step 5 — but not step
+   6, which still runs. The live head is re-checked immediately
    before the vote. An existing review is recognized as this run's formal
    result ONLY by exact binding — host identity marker + report_comment_id +
    GitHub's commit_id + the expected submitted state; an identity-matching
@@ -319,8 +320,10 @@ def parse_judge_verdict(body: str, heading: str) -> tuple[str, int] | None:
     top level (fenced example text is stripped, and the PR title shares the
     heading's line), and exactly one may exist in the whole summary.
 
-    Returns None — reject — when either row is absent, malformed, out of
-    position, or ambiguous, or when the two rows contradict each other: an
+    Returns None — reject — when either row is absent, malformed or
+    ambiguous, when the count row is out of its prescribed position, when the
+    only verdict row sits above the heading, or when the two rows contradict
+    each other: an
     APPROVE over a positive blocking count is never a valid verdict. The
     converse is not a contradiction — a judge may REQUEST CHANGES or DEFER at
     zero blockers for reasons that are not defects. DEFER over a positive

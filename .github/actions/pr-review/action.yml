@@ -30,8 +30,10 @@ inputs:
       can only be cleared by a human dismissal. "judge" additionally asks the
       reviewer for an explicit APPROVE / REQUEST CHANGES / DEFER verdict row
       and submits APPROVE / REQUEST_CHANGES / COMMENT from it, which lets a
-      clean re-run clear its own earlier block. "none" publishes the report
-      and submits no formal review at all.
+      clean re-run clear its own earlier block — granted only when the base
+      branch's rulesets confirm 0 required approving reviews, and downgraded
+      to "baseline" otherwise, including when that cannot be read. "none"
+      publishes the report and submits no formal review at all.
     required: false
     default: baseline
 
@@ -318,7 +320,7 @@ runs:
     #    "baseline" from the count (request changes on blocking findings,
     #    neutral comment otherwise, never approves), "judge" from the
     #    verdict row (APPROVE / REQUEST CHANGES / DEFER), "none" submits no
-    #    review at all and stops after step 3,
+    #    review at all, skipping this step and step 5 (but not step 6),
     # 5. transitions the report to publication: completed — a completed
     #    report is the report PLUS its formal result, so a report whose
     #    review never landed stays pending and never becomes review state

@@ -14,7 +14,7 @@ on:
         default: ""
         type: string
       verdict_mode:
-        description: "How CI turns the review summary into a formal PR review: 'judge' (the default here — the reviewer writes an APPROVE / REQUEST CHANGES / DEFER verdict), 'baseline' (count-driven, never approves), or 'none' (report only)."
+        description: "How CI turns the review summary into a formal PR review: 'judge' (the default here — the reviewer writes an APPROVE / REQUEST CHANGES / DEFER verdict, and the action grants it only where the base branch's rulesets confirm 0 required approving reviews), 'baseline' (count-driven, never approves), or 'none' (report only)."
         required: false
         default: judge
         type: string
@@ -66,5 +66,13 @@ jobs:
           # `inputs` is empty: connector repos run this workflow from an org
           # rule, not as a workflow_call, so the input default above never
           # applies to them and this is what selects their mode.
+          #
+          # Note the asymmetry this creates with the action, which normalizes
+          # an explicit "" to baseline: here "" is falsy and lands on judge.
+          # That is the right answer for this workflow — "" and "omitted" both
+          # mean "whatever the connector profile runs", and that is judge —
+          # but a workflow_call caller forwarding its own empty optional input
+          # gets judge rather than the action's conservative default. Pass
+          # `verdict_mode: baseline` explicitly to opt out.
           verdict_mode: ${{ inputs.verdict_mode || 'judge' }}
     timeout-minutes: 30
