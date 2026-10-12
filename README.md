@@ -121,8 +121,10 @@ request, and the action grants it only after reading the base branch's
 `required_approving_review_count` at the start of the run. Anything other than
 a confirmed zero runs `baseline` instead and says so in the job log — a branch
 requiring approvals, and equally a requirement it could not read. So a repo
-that quietly starts requiring an approval stops getting bot approvals on its
-next run, with no one having to notice and reconfigure it.
+that starts requiring an approval in a ruleset stops getting bot approvals on
+its next run, with no one having to notice and reconfigure it. A requirement
+the check cannot see is the one exception, and it has its own paragraph below;
+read that before relying on this one.
 
 What counts as a confirmed zero is deliberately narrow, because the evidence
 available to `GITHUB_TOKEN` is narrow. It can read rulesets
@@ -204,8 +206,10 @@ ever starts requiring approvals.
   that count is 0, so the approval satisfies nothing — its only effect is
   clearing the bot's own `CHANGES_REQUESTED`. This is the cost the run-time
   check above exists to contain: a repo that relies on that count for human
-  sign-off gets `baseline` from the moment it starts requiring one, without
-  anyone having to reconfigure the review.
+  sign-off gets `baseline` from the moment the requirement becomes visible to
+  the check, without anyone having to reconfigure the review — with the single
+  exception carved out in *The limit of the check* above, where the
+  requirement is invisible to it.
 - **Approvals are not self-retracting.** Nothing in this action dismisses a
   review. Once an `APPROVE` lands for commit A it stays the bot's latest review
   until some later run submits a different event — and no later run submits one
