@@ -42,9 +42,11 @@ runs:
     id: review-config
     shell: bash
     env:
+      GH_TOKEN: ${{ inputs.github_token }}
       REVIEW_PROMPT: ${{ inputs.review_prompt }}
       SUMMARY_MARKER: ${{ inputs.summary_marker }}
       VERDICT_MODE: ${{ inputs.verdict_mode }}
+      BASE_REF: ${{ github.event.pull_request.base.ref }}
     run: |
       # Captured before any review work: the publication gates require the
       # working summary comment to have been created/updated at or after this
@@ -110,6 +112,39 @@ runs:
           exit 1
           ;;
       esac
+      # Judge mode is only safe where a bot APPROVE cannot satisfy a human
+      # review requirement, so that precondition is CHECKED rather than
+      # documented: "connector repos require 0 approving reviews" is a fact
+      # about today, and a repo that quietly starts requiring one would hand
+      # the bot a vote nobody decided to give it.
+      #
+      # Anything other than a confirmed zero downgrades to baseline — an
+      # unreadable answer included. The classic
+      # /branches/{branch}/protection endpoint is NOT usable here: it answers
+      # 403 "Resource not accessible by integration" for GITHUB_TOKEN. The
+      # rulesets endpoint below does answer it. A branch with no pull_request
+      # rule requires no approvals, so it reads as 0 and keeps judge.
+      if [ "${VERDICT_MODE}" = "judge" ]; then
+        approvals=""
+        if [ -n "${BASE_REF}" ] \
+          && rules=$(gh api "repos/${GITHUB_REPOSITORY}/rules/branches/${BASE_REF}" 2>/dev/null); then
+          approvals=$(printf '%s' "${rules}" | jq -r '
+            ([.[] | select(.type == "pull_request")] | .[0].parameters.required_approving_review_count) // 0
+          ' 2>/dev/null)
+        fi
+        case "${approvals}" in
+          "0")
+            ;;
+          ""|*[!0-9]*)
+            echo "::warning::Could not read the approving-review requirement for '${BASE_REF}'; running verdict_mode=baseline instead of judge, so this review cannot submit an approval."
+            VERDICT_MODE="baseline"
+            ;;
+          *)
+            echo "::notice::'${BASE_REF}' requires ${approvals} approving review(s); running verdict_mode=baseline instead of judge, so a bot approval cannot satisfy that requirement."
+            VERDICT_MODE="baseline"
+            ;;
+        esac
+      fi
       echo "verdict_mode=${VERDICT_MODE}" >> "${GITHUB_OUTPUT}"
   - name: Fetch PR context
     shell: bash
