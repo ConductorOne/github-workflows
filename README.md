@@ -126,13 +126,22 @@ next run, with no one having to notice and reconfigure it.
 
 What counts as a confirmed zero is deliberately narrow, because the evidence
 available to `GITHUB_TOKEN` is narrow. It can read rulesets
-(`/rules/branches/{branch}`) but not classic branch protection
-(`/branches/{branch}/protection` answers 403), and several rulesets can apply
-to one branch at once, so the strictest requirement among them wins rather
-than the first one listed. A branch with no ruleset requirement is only a
-confirmed zero when it is also unprotected; a protected branch with no ruleset
-rule could be carrying a classic protection in the blind spot, so it is
-treated as unknown and loses `judge`.
+(`/rules/branches/{branch}`) but **not** classic branch protection
+(`/branches/{branch}/protection` answers 403 for this token). Several rulesets
+can apply to one branch at once — org- and repo-level — so the strictest
+requirement among them wins rather than the first one listed. A branch with no
+ruleset requirement at all is a confirmed zero only when it is also
+unprotected: protection that no ruleset explains could be a classic
+protection, so it reads as unknown.
+
+**The limit of the check**, stated plainly because it is not obvious: it sees
+rulesets. A classic branch protection requiring approvals *alongside* a
+ruleset rule that requires none would not be detected, and the bot could
+approve into it. Closing that would mean granting the review workflow
+`administration: read` on every repo it runs in — a larger and more permanent
+privilege than the one it would be protecting — so the trade is deliberately
+refused. A repo that protects `main` with classic branch protection rather
+than a ruleset should be pinned to `baseline`.
 
 That is what lets the connector profile default to `judge` safely. It is also
 why `github-workflows` itself — the one repo here that requires an approving

@@ -139,11 +139,23 @@ runs:
             | if ($counts | length) == 0 then "none" else ($counts | max) end
           ' 2>/dev/null || true)
           if [ "${approvals}" = "none" ]; then
-            # No RULESET asks for approvals — but that endpoint returns only
-            # ruleset rules, and a classic branch protection could be asking
-            # where this token cannot look. An unprotected branch is the only
-            # one that can be called a confirmed zero on this evidence;
-            # anything protected stays unknown and loses judge.
+            # NO ruleset governs pull requests on this branch, yet something
+            # may still be protecting it, and a classic branch protection can
+            # require approvals where this token cannot look. Protection with
+            # no ruleset rule to explain it is unexplained, so it is unknown
+            # and loses judge; an unprotected branch requires nothing and is a
+            # real zero.
+            #
+            # This deliberately does NOT extend to a ruleset rule that says 0.
+            # Classic protection could in principle sit alongside one and ask
+            # for more, and that case is genuinely not covered (see the README
+            # — the check reads rulesets, and cannot see classic protection at
+            # all). But a governing pull_request rule IS an explanation for
+            # the branch being protected, where the "none" case has none. And
+            # the alternative is not a stricter check, it is no feature:
+            # every connector repo reads exactly 0-from-a-ruleset plus
+            # protected=true, so treating that as unknown would downgrade all
+            # of them and judge would never run anywhere.
             if [ "$(gh api "repos/${GITHUB_REPOSITORY}/branches/${BASE_REF}" --jq '.protected' 2>/dev/null || true)" = "false" ]; then
               approvals="0"
             else
