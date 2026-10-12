@@ -314,8 +314,12 @@ def check_newer_runs(repo, number, snapshot):
     identity = snapshot["identity"]
     run = _gh.rest("GET", f"repos/{repo}/actions/runs/{identity['run_id']}")
     require(str(run.get("run_attempt")) == identity["run_attempt"], "newer attempt supersedes this run")
+    workflow_url = run.get("workflow_url")
+    expected = re.escape(f"{_gh.API_ROOT}/repos/{repo}/actions/") + r"(?:workflows|required_workflows)/[0-9]+"
+    require(isinstance(workflow_url, str) and re.fullmatch(expected, workflow_url),
+            "missing or foreign workflow inventory URL")
     branch = quote(snapshot["context"]["head_ref"], safe="")
-    pages = _gh.rest_paginate(f"repos/{repo}/actions/workflows/{run['workflow_id']}/runs?branch={branch}")
+    pages = _gh.rest_paginate(f"{workflow_url}/runs?branch={branch}")
     require(pages and all(isinstance(page, dict) and isinstance(page.get("workflow_runs"), list)
                          and type(page.get("total_count")) is int for page in pages),
             "missing competing-run inventory")

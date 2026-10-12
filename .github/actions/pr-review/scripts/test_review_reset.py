@@ -40,6 +40,7 @@ class ResetTest(unittest.TestCase):
         self.runs = []
         self.inventory_incomplete = False
         self.run_attempt = baseline.RUN_ATTEMPT
+        self.workflow_url = f"{_gh.API_ROOT}/repos/example/repo/actions/workflows/50"
         self.context = {"repository": "example/repo", "pr_number": "42", "current_sha": baseline.HEAD,
                         "current_base_sha": baseline.BASE, "current_base_ref": "main",
                         "workflow_ref": baseline.WORKFLOW_REF, "summary_heading": baseline.HEADING,
@@ -96,7 +97,7 @@ class ResetTest(unittest.TestCase):
             return copy.deepcopy(list(self.comments.values()))
         if path.endswith("/reviews"):
             return copy.deepcopy(list(self.reviews.values()))
-        if "/actions/workflows/" in path:
+        if "/actions/workflows/" in path or "/actions/required_workflows/" in path:
             return [{"workflow_runs": copy.deepcopy(self.runs),
                      "total_count": len(self.runs) + int(self.inventory_incomplete)}]
         self.fail(path)
@@ -108,7 +109,7 @@ class ResetTest(unittest.TestCase):
             if path.endswith("/pulls/42"):
                 return copy.deepcopy(self.pr)
             if "/actions/runs/" in path:
-                return {"workflow_id": 50, "run_attempt": self.run_attempt}
+                return {"workflow_id": 50, "workflow_url": self.workflow_url, "run_attempt": self.run_attempt}
             if "/actions/workflows/" in path:
                 return {"workflow_runs": copy.deepcopy(self.runs)}
             if "/issues/comments/" in path:
@@ -431,6 +432,42 @@ class ResetTest(unittest.TestCase):
         reset.reset()
         self.assertEqual(self.reviews[10]["state"], "DISMISSED")
         self.assertEqual(self.reviews[11]["state"], "CHANGES_REQUESTED")
+
+    def test_required_workflow_inventory_supports_late_exact_dismissal(self):
+        self.capture(self.freeze())
+        self.publish()
+        self.workflow_url = f"{_gh.API_ROOT}/repos/example/repo/actions/required_workflows/50"
+        reset.reset()
+        self.assertEqual(self.reviews[10]["state"], "DISMISSED")
+        self.assertIn(("LIST", self.workflow_url + "/runs?branch=topic", None), self.calls)
+
+    def test_workflow_inventory_url_must_be_exact_api_and_repository(self):
+        snapshot = self.freeze()
+        prefix = f"{_gh.API_ROOT}/repos/example/repo/actions/"
+        for url in (None, "", "https://github.com/example/repo/actions/workflows/50",
+                    "https://api.github.com.evil/repos/example/repo/actions/workflows/50",
+                    "https://foreign.example/repos/example/repo/actions/workflows/50",
+                    f"{_gh.API_ROOT}/repos/foreign/repo/actions/workflows/50",
+                    prefix + "workflows/not-numeric", prefix + "required_workflows/50?repo=foreign",
+                    prefix + "required_workflows/50#fragment", prefix + "workflows/50/runs",
+                    prefix + "workflows/../50"):
+            self.workflow_url = url
+            first_call = len(self.calls)
+            with self.subTest(url=url), self.assertRaises(_gh.TerminalError):
+                reset.check_newer_runs("example/repo", "42", snapshot)
+            self.assertFalse(any(call[0] == "LIST" for call in self.calls[first_call:]))
+
+    def test_both_workflow_url_shapes_preserve_complete_pagination_accounting(self):
+        snapshot = self.freeze()
+        for kind in ("workflows", "required_workflows"):
+            self.workflow_url = f"{_gh.API_ROOT}/repos/example/repo/actions/{kind}/50"
+            pages = [{"total_count": 2, "workflow_runs": [{"id": 1, "run_started_at": baseline.T1}]},
+                     {"total_count": 2, "workflow_runs": [{"id": 2, "run_started_at": baseline.T1}]}]
+            with self.subTest(kind=kind), mock.patch.object(_gh, "rest_paginate", return_value=pages) as paginate:
+                reset.check_newer_runs("example/repo", "42", snapshot)
+                paginate.assert_called_once_with(self.workflow_url + "/runs?branch=topic")
+            with mock.patch.object(_gh, "rest_paginate", return_value=pages[:1]), self.assertRaises(_gh.TerminalError):
+                reset.check_newer_runs("example/repo", "42", snapshot)
 
 
 class ActionContractTest(unittest.TestCase):
