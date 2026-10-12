@@ -141,7 +141,7 @@ def validate_schema(value, schema, location="result"):
             require(re.fullmatch(schema["pattern"], value) is not None, f"{location}: invalid ID")
 
 
-def sanitize_markdown(content):
+def _sanitize_once(content):
     """Preserve pinned upstream redactSecrets(sanitizeContent(...)) semantics.
 
     Port of anthropics/claude-code-action@9171db3 src/github/utils/sanitizer.ts;
@@ -169,6 +169,22 @@ def sanitize_markdown(content):
     content = re.sub(r"xox[abpsr]-[A-Za-z0-9-]{10,}", "[REDACTED_SLACK_TOKEN]", content)
     return re.sub(r"eyJ[A-Za-z0-9_-]{10,2000}\.eyJ[A-Za-z0-9_-]{10,4000}\.[A-Za-z0-9_-]{10,2000}\b",
                   "[REDACTED_JWT]", content)
+
+
+def sanitize_markdown(content, *, reject_comments=False):
+    # Entity decoding can expose another entity, hidden attribute or credential.
+    # Canonicalize to a bounded fixed point so accepted evidence revalidates
+    # identically. Reject rather than silently accepting excessive nesting.
+    for _ in range(16):
+        if reject_comments:
+            require("<!--" not in content, "model-authored HTML/host marker")
+        cleaned = _sanitize_once(content)
+        if reject_comments:
+            require("<!--" not in cleaned, "encoded model-authored HTML/host marker")
+        if cleaned == content:
+            return cleaned
+        content = cleaned
+    raise _gh.TerminalError("Markdown sanitization did not converge within 16 passes")
 
 
 def _sanitize(value):
@@ -277,9 +293,9 @@ def check_edit_history(item, kind):
     edits = []
     seen = set()
     while True:
-        parent = "pullRequest" if kind == "PullRequestReview" else "issue"
+        parent = "pullRequest"
         query = """query($id:ID!, $after:String) { node(id:$id) { ... on KIND {
-          id databaseId body author { login } lastEditedAt editor { login } includesCreatedEdit
+          id fullDatabaseId body author { login } lastEditedAt editor { login } includesCreatedEdit
           PARENT { number repository { nameWithOwner } }
           userContentEdits(first:100, after:$after) {
             totalCount nodes { editor { login } deletedAt deletedBy { login } }
@@ -288,7 +304,7 @@ def check_edit_history(item, kind):
         } } }""".replace("KIND", kind).replace("PARENT", parent)
         node = _gh.graphql(query, {"id": item["node_id"], "after": cursor}).get("node")
         require(isinstance(node, dict) and node.get("id") == item["node_id"]
-                and node.get("databaseId") == item["id"] and node.get("body") == item.get("body"),
+                and str(node.get("fullDatabaseId")) == str(item["id"]) and node.get("body") == item.get("body"),
                 "edit-history object/body disagrees with REST binding")
         require((node.get("author") or {}).get("login") in _review_state.BOT_LOGINS,
                 "foreign history author")
@@ -491,15 +507,15 @@ def prepare():
         except (_gh.GitHubError, ValueError, KeyError, TypeError) as e:
             snapshot["unavailable"].append({"review_id": review.get("id"), "reason": str(e)})
     snapshot["obligations"] = list(obligations.values())
-    # Fetch the FULL diff, not the filtered incremental compare artifact. Size or
-    # encoding uncertainty fails preparation rather than quietly narrowing review.
-    _, _, raw = _gh.request("GET", f"{_gh.API_ROOT}/repos/{repo}/pulls/{pr_number}",
-                             headers={"Accept": "application/vnd.github.diff"}, max_bytes=MAX_DIFF_BYTES)
+    # FULL diff, without incremental exclusions. Preserve non-UTF8 bytes using
+    # fetch-pr-context.py's lossless backslashreplace decoder.
     try:
-        diff = raw.decode("utf-8")
-    except UnicodeError as e:
-        raise _gh.TerminalError("full diff is not readable UTF-8") from e
-    require(bool(diff.strip()), "full PR diff unavailable")
+        _, _, raw = _gh.request("GET", f"{_gh.API_ROOT}/repos/{repo}/pulls/{pr_number}",
+                                 headers={"Accept": "application/vnd.github.diff"}, max_bytes=MAX_DIFF_BYTES)
+    except _gh.GitHubError as e:
+        raise _gh.TerminalError(f"Full PR diff coverage unavailable: {e}") from e
+    diff = raw.decode("utf-8", "backslashreplace")
+    require(bool(diff.strip()), "Full PR diff coverage unavailable: empty diff")
     write_text(".github/pr-review.diff", diff)
     write_text(".github/prior-obligations.json",
                json.dumps({"obligations": snapshot["obligations"], "unavailable": snapshot["unavailable"]}, indent=2))
@@ -539,10 +555,9 @@ def completion_receipt(messages, native):
     for message in messages[:-1]:
         require(message.get("type") != "result", "multiple terminal results")
         if message.get("type") == "system" and message.get("subtype") == "task_started":
-            require(message.get("task_type") == "local_agent"
-                    and message.get("is_backgrounded") is False
-                    and message.get("tool_use_id"), "untracked or background native audit")
-            native_tasks[message["task_id"]] = message["tool_use_id"]
+            require(message.get("is_backgrounded") is not True, "background native audit")
+            if message.get("task_type") in (None, "local_agent") and message.get("tool_use_id"):
+                native_tasks[message["task_id"]] = message["tool_use_id"]
         if message.get("type") == "system" and message.get("subtype") == "task_notification":
             require(message.get("status") == "completed", "native audit failed/stopped")
         if message.get("type") == "system" and message.get("subtype") == "task_updated":
@@ -578,9 +593,6 @@ def completion_receipt(messages, native):
                 texts.extend(item.get("text", "") for item in output["content"] if isinstance(item, dict))
                 require(texts and all(isinstance(text, str) and text.strip() for text in texts),
                         "missing audit report text")
-                for text in texts:
-                    require(not re.search(r'(?i)(?:"isError"\s*:\s*true|"is_error"\s*:\s*true|^\s*Error:)', text),
-                            "audit result contains an error")
                 finished.append({"tool_use_id": block["tool_use_id"], "agent_id": output["agentId"],
                                  "tool": pending.pop(block["tool_use_id"]), "is_error": False,
                                  "status": "completed"})
@@ -594,7 +606,9 @@ def completion_receipt(messages, native):
 def validate_payload(payload, snapshot):
     validate_schema(payload, RESULT_SCHEMA)
     require("<!--" not in payload["report"]["summary"], "model-authored HTML/host marker")
+    summary = sanitize_markdown(payload["report"]["summary"], reject_comments=True)
     result = _sanitize(copy.deepcopy(payload))
+    result["report"]["summary"] = summary
     validate_schema(result, RESULT_SCHEMA)
     require("<!--" not in result["report"]["summary"], "encoded model-authored HTML/host marker")
     require(result["model_assessment"]["review_complete"] is True

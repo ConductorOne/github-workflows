@@ -36,6 +36,7 @@ if _SCRIPTS_DIR not in sys.path:
 # must be caught by publish-review-report.py's own `except`).
 import _gh  # noqa: E402
 import _review_state as rs  # noqa: E402
+import _review_result as rr  # noqa: E402
 
 
 def _load(name: str, filename: str):
@@ -84,6 +85,40 @@ IDENTITY = {
     "verdict_mode": "baseline",
 }
 
+ARTIFACT = {"result_artifact_id": "999", "result_artifact_digest": "a" * 64}
+
+
+def accepted_fixture(body, *, context=None, identity=None, snapshot=None):
+    """Prepared native-result fixture, independent of GitHub comment transport.
+
+    Publication tests reuse their summary text as model output; result/history
+    tests separately exercise actual validation, uploads and mutable-comment attacks.
+    """
+    identity = identity or dict(IDENTITY)
+    context = context or {
+        "repository": "example/repo", "pr_number": "42", "current_sha": HEAD,
+        "current_base_sha": BASE, "current_base_ref": "main", "workflow_ref": WORKFLOW_REF,
+        "summary_heading": identity["summary_marker"], "summary_comment_id": 2,
+    }
+    snapshot = snapshot or {"context": context, "identity": identity, "repository_id": 123,
+                            "started_at": RUN_START, "targets": [], "obligations": [], "unavailable": []}
+    count = pub.parse_blocking_count(body, context["summary_heading"])
+    rr.require(count is not None, "missing canonical native-result count")
+    payload = {
+        "schema_version": 1, "model_assessment": {"review_complete": True, "coverage_gaps": []},
+        "blocking_findings": [{"prior_finding_id": None, "title": f"Finding {index}",
+                               "rationale": "Concrete original failure",
+                               "evidence": [{"path": "file.go", "symbol_or_range": "function F",
+                                             "explanation": "Current source demonstrates this failure"}]}
+                              for index in range(count)],
+        "prior_finding_audit": [],
+        "report": {"summary": body, "suggestions": []},
+    }
+    result = rr.validate_payload(payload, snapshot)
+    return {"schema_version": 1, "context": context, "identity": identity, "snapshot": snapshot,
+            "completion": {"terminal_success": True, "num_turns": 1, "tools": ["Read", "Agent"],
+                           "audits": []}, "result": result}
+
 
 def count_row(n: int, m: int = 0, r: int = 0) -> str:
     return (
@@ -119,6 +154,7 @@ def new_style_state(**overrides) -> dict:
         "publication": "completed",
         "started_at": RUN_START,
     }
+    state.update(ARTIFACT)
     state.update(overrides)
     return state
 
@@ -177,6 +213,7 @@ def verdict_review(
         "verdict_mode": "baseline",
         "report_comment_id": report_id,
     }
+    marker.update(ARTIFACT)
     marker.update(marker_overrides)
     return {
         "id": rid,
@@ -606,12 +643,41 @@ class PublishMainTest(unittest.TestCase):
                     return {"id": int(path.rsplit("/", 1)[1])}
                 raise AssertionError(f"unexpected REST call {method} {path}")
 
+        original_dispatch = dispatch
+
+        def fixture_dispatch(method, path, **kw):
+            if method == "GET" and path.startswith("repos/example/repo/issues/comments/"):
+                cid = int(path.rsplit("/", 1)[1])
+                return next(c for c in comments if c["id"] == cid)
+            response = original_dispatch(method, path, **kw)
+            if method == "GET" and path == "repos/example/repo/pulls/42":
+                response = dict(response, state="open", base={"sha": BASE, "ref": "main"})
+                response["head"] = dict(response["head"], repo={"full_name": "example/repo"})
+            return response
+
+        def native_result():
+            identity = pub.publication_identity()
+            selected = pub.find_published_report(comments, identity, head)
+            if selected is None:
+                selected, _ = pub.select_working_output(
+                    pub.summary_comments(comments, env["SUMMARY_MARKER"]), pub.run_started_at(),
+                    identity["workflow_ref"], pub.consumed_working_ids(comments, identity["workflow_ref"]))
+            rr.require(selected is not None, "fixture has no completed native model output")
+            body = selected["body"].split("\n---\nReviewed commit:", 1)[0]
+            state = rs.marker_state(selected["body"]) or {}
+            context = {"repository": "example/repo", "pr_number": "42", "current_sha": head,
+                       "current_base_sha": BASE, "current_base_ref": "main", "workflow_ref": WORKFLOW_REF,
+                       "summary_heading": env["SUMMARY_MARKER"],
+                       "summary_comment_id": state.get("working_comment_id", selected["id"])}
+            return accepted_fixture(body, context=context, identity=identity), dict(ARTIFACT)
         with (
             mock.patch.dict(os.environ, env),
             mock.patch.object(pub._gh, "rest_paginate", side_effect=paginate),
-            mock.patch.object(pub._gh, "rest", side_effect=dispatch),
+            mock.patch.object(pub._gh, "rest", side_effect=fixture_dispatch),
             mock.patch.object(pub.subprocess, "run", _git_fake(head)),
             mock.patch.object(pub, "current_base_sha", return_value=BASE),
+            mock.patch.object(rr, "load_current_result", side_effect=native_result),
+            mock.patch.object(rr, "reset_reviews"),
         ):
             try:
                 pub.main()
@@ -1112,11 +1178,10 @@ class PublishMainTest(unittest.TestCase):
         self.assertEqual(transitioned["publication"], "completed")
         self.assertEqual(transitioned["summary_marker"], unicode_heading)
 
-    def test_replay_preserves_recovered_reports_original_base(self):
-        # The pending report was recorded against base B1. The workspace now
-        # reports base B2 (pr-context.json refreshed, same head/run/attempt).
-        # Completion must retain the report's original B1 snapshot — the
-        # review never covered B2 — and flip only the publication status.
+    def test_replay_refuses_recovered_report_from_different_base(self):
+        # Native evidence is bound to B2; a pending report from B1 cannot be
+        # completed using it. The direct completion tests still prove that a
+        # legitimate transition flips only publication, retaining its snapshot.
         original_base = "b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1"
         pending = comment(
             5,
@@ -1133,14 +1198,9 @@ class PublishMainTest(unittest.TestCase):
         working = comment(2, working_body(0))
         reviews = [verdict_review(60, report_id=5)]
         code, calls = self._run_main([working, pending], reviews=reviews)
-        self.assertEqual(code, 0)
-        patches = _patches(calls)
-        self.assertEqual([cid for cid, _ in patches], [5, 2])
-        transitioned = json.loads(rs.REVIEW_STATE_PATTERN.search(patches[0][1]).group(1))
-        self.assertEqual(transitioned["publication"], "completed")
-        self.assertEqual(transitioned["base_sha"], original_base)
-        self.assertEqual(transitioned["started_at"], RUN_START)
-        self.assertEqual(transitioned["working_comment_id"], 2)
+        self.assertEqual(code, 1)
+        self.assertEqual(_patches(calls), [])
+        self.assertEqual(_posts(calls, "pulls/42/reviews"), [])
 
     def test_ambiguous_report_post_reconciles_by_identity(self):
         working = comment(2, working_body(0))

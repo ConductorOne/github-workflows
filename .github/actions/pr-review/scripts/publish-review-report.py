@@ -1,33 +1,17 @@
 #!/usr/bin/env python3
 """Publish the completed review report and submit the commit-bound verdict.
 
-The review agent records its verdict in a WORKING summary comment (provisional
-first, final last) and never writes review-state metadata. After a successful
-agent run, this trusted CI step finalizes the run:
+The model writes provisional progress only. Its native structured final result
+is validated against runner terminal/audit receipts and the frozen obligation
+snapshot, sanitized/redacted, and uploaded in a REQUIRED host step. This
+publisher consumes that run-local accepted result, never mutable comment prose.
 
-1. Selects this run's FRESH, FINAL working output — a bot summary comment
-   matching the summary heading that was created/updated at or after
-   REVIEW_RUN_STARTED_AT, is not provisional, carries no foreign or
-   malformed marker, and was not already consumed by a published report
-   (republishing consumed output would fabricate a verdict without fresh
-   model work). Completed reports and superseded comments are never working
-   output; a successful agent step is not evidence a summary was posted, so
-   stale-only output fails here. Before any NEW publication, an owned
-   completed report whose attempt started LATER than this one (comparing
-   actual attempt start times from the persisted started_at, never run-ID
-   order) makes this attempt obsolete: it fails closed. Legacy reports
-   without started_at never obsolete an attempt; an unparseable started_at
-   is left untouched.
-2. Validates the baseline canonical fields: exactly one canonical count row
-   (`**Blocking Issues: N** | **Suggestions: M** | **Threads Resolved: R**`)
-   in its prescribed top-level position (CommonMark fence rules), and that
-   the live PR head still equals the checked-out HEAD the agent reviewed.
-3. POSTs a NEW report comment: the working body plus a visible
-   reviewed-commit link and CI-owned review-state metadata
-   {last_reviewed_sha, base_sha, workflow_ref, run_id, run_attempt,
-   summary_marker, verdict_mode, publication: "pending"}. Editing the
-   working comment is NOT publication — the report is a separate comment, so
-   the previous completed report survives every failure before this point.
+1. Requires this run's accepted evidence and successful immutable upload.
+   Rejects obsolete attempts using actual persisted attempt start times.
+2. Derives the blocking count from structured findings; the artifact-backed
+   Markdown must agree. Revalidates the open PR, head, base ref and base SHA.
+3. POSTs a NEW pending report using the existing composition and working-slot
+   cleanup binding, with accepted artifact ID/digest and reviewed-commit link.
 4. Submits the formal PR review with an explicit commit_id, linking directly
    to the new report. Baseline mode only: N > 0 -> REQUEST_CHANGES,
    N == 0 -> COMMENT. Never approves. The live head is re-checked immediately
@@ -52,6 +36,10 @@ agent run, this trusted CI step finalizes the run:
    comments and inline threads are never touched. Cleanup failure warns but
    does not fail the run and never destroys a useful report; re-running is
    safe (already-superseded comments are skipped).
+7. Only after completed publication, conservatively revalidates and dismisses
+   exact snapshotted owned change requests whose EVERY original obligation was
+   affirmatively reverified in this completed run. Reset receipts are separate
+   diagnostics; API uncertainty, stale state or missing evidence retains blocks.
 
 Idempotency: the report's metadata identifies its publication (workflow +
 summary marker + verdict mode + run + attempt + head). A repeated
@@ -77,6 +65,7 @@ from datetime import datetime, timezone
 
 import _gh
 import _review_state
+import _review_result
 
 VERDICT_MODE = "baseline"
 PR_CONTEXT_PATH = os.path.join(".github", "pr-context.json")
@@ -513,7 +502,8 @@ def recover_consumed_working(comments: list[dict], report: dict) -> dict | None:
 
 
 def compose_report_body(
-    working: dict, identity: dict, head: str, base: str | None, started_raw: str
+    working: dict, identity: dict, head: str, base: str | None, started_raw: str,
+    artifact: dict | None = None,
 ) -> str:
     """The completed report: the run's working output plus a visible
     reviewed-commit link and the CI-owned review-state marker. The marker is
@@ -527,6 +517,8 @@ def compose_report_body(
     repo = os.environ.get("GITHUB_REPOSITORY", "")
     commit_url = f"{server_url}/{repo}/commit/{head}"
     state = report_state(identity, head, base, publication="pending", started_at=started_raw)
+    if artifact is not None:
+        state.update(artifact)
     state["working_comment_id"] = working.get("id")
     consumed_ts = working.get("updated_at") or working.get("created_at")
     if consumed_ts:
@@ -602,6 +594,7 @@ def find_verdict_review(
     """
     expected_state = REVIEW_STATE_FOR_EVENT.get(event)
     conflict = None
+    matched = None
     for r in reviews:
         if (r.get("user") or {}).get("login") not in _review_state.BOT_LOGINS:
             continue
@@ -625,8 +618,11 @@ def find_verdict_review(
         ):
             conflict = r
             continue
-        return r, None
-    return None, conflict
+        if matched is not None:
+            conflict = r
+        else:
+            matched = r
+    return matched, conflict
 
 
 def submit_verdict(
@@ -637,6 +633,7 @@ def submit_verdict(
     lead: str,
     report: dict,
     identity: dict,
+    artifact: dict | None = None,
 ) -> None:
     """Submit the formal PR review via the REST API, bound to the reviewed
     commit and linking directly to the new report.
@@ -655,6 +652,8 @@ def submit_verdict(
         "verdict_mode": identity["verdict_mode"],
         "report_comment_id": report.get("id"),
     }
+    if artifact is not None:
+        marker.update(artifact)
     link = f" — see the [full review report]({report_url})" if report_url else "."
     body = f"{lead}{link}\n\n<!-- review-publication: {json.dumps(marker)} -->"
     print(
@@ -677,7 +676,7 @@ def submit_verdict(
         )
         reviews = _gh.rest_paginate(f"repos/{repo}/pulls/{pr_number}/reviews")
         matched, conflict = find_verdict_review(reviews, identity, report, head, event)
-        if matched is not None:
+        if matched is not None and conflict is None:
             print("Verdict review was created despite the ambiguous error; reusing it.")
             return
         if conflict is not None:
@@ -807,10 +806,15 @@ def _run() -> None:
         )
         sys.exit(1)
 
+    accepted, artifact = _review_result.load_current_result()
     started = run_started_at()
     identity = publication_identity()
-    head = current_head_sha()
-    base = current_base_sha()
+    head = accepted["context"]["current_sha"]
+    base = accepted["context"]["current_base_sha"]
+    body = accepted["result"]["report"]["summary"]
+    mapping = verdict_to_review(body, marker)
+    if mapping is None or parse_blocking_count(body, marker) != len(accepted["result"]["blocking_findings"]):
+        raise _gh.TerminalError("accepted Markdown/count is inconsistent")
 
     comments = summary_comments(
         _gh.rest_paginate(f"repos/{repo}/issues/{pr_number}/comments"), marker
@@ -824,14 +828,12 @@ def _run() -> None:
             f"Finalization replay: reusing published report {report['id']} "
             f"for run {identity['run_id']} attempt {identity['run_attempt']}."
         )
-        mapping = verdict_to_review(report.get("body", ""), marker)
-        if mapping is None:
-            print(
-                "Refusing to finalize: the published report's canonical "
-                "count row no longer parses unambiguously.",
-                file=sys.stderr,
-            )
-            sys.exit(1)
+        state = _review_state.marker_state(report.get("body", "")) or {}
+        if any(state.get(key) != value for key, value in artifact.items()) or not report.get("body", "").startswith(body.rstrip() + "\n\n---\n"):
+            raise _gh.TerminalError("published report no longer matches accepted evidence")
+        if state.get("base_sha") != base:
+            raise _gh.TerminalError("published report belongs to a different reviewed base")
+        _review_result.check_pr(_gh.rest("GET", f"repos/{repo}/pulls/{pr_number}"), accepted["context"])
     else:
         # Obsolete-attempt guard, BEFORE any new publication: a concurrent or
         # intentionally-rerun later attempt already completed. Chronology is
@@ -851,50 +853,19 @@ def _run() -> None:
             )
             sys.exit(1)
 
-        working, rejection = select_working_output(
-            comments,
-            started,
-            identity["workflow_ref"],
-            consumed_working_ids(comments, identity["workflow_ref"]),
-        )
-        if working is None:
-            if rejection is None:
-                rejection = (
-                    f"no bot summary comment matching {marker!r} found — the "
-                    "review agent may not have posted its summary"
-                )
-            print(f"Refusing to publish a review report: {rejection}.", file=sys.stderr)
-            sys.exit(1)
+        slot_id = accepted["context"]["summary_comment_id"]
+        slot = _gh.rest("GET", f"repos/{repo}/issues/comments/{slot_id}")
+        if slot.get("id") != slot_id or (slot.get("user") or {}).get("login") not in _review_state.BOT_LOGINS or not is_fresh(slot, started):
+            raise _gh.TerminalError("this run's provisional working slot is missing/stale")
+        # The fixed slot supplies only cleanup identity/timestamp, never authority.
+        working = dict(slot, body=body)
 
-        body = working.get("body", "")
-        mapping = verdict_to_review(body, marker)
-        if mapping is None:
-            print(
-                "Could not parse an unambiguous blocking-issue count from the "
-                "working summary (need exactly one canonical count row — "
-                "'**Blocking Issues: N** | **Suggestions: M** | **Threads Resolved: R**' — "
-                "as the first non-empty line after the summary heading; fenced "
-                "code blocks are ignored).",
-                file=sys.stderr,
-            )
-            sys.exit(1)
-
-        # Bind publication to the LIVE PR head: a push during the run stops
-        # it. The prompt's head guard covers the agent's own posts; this
-        # covers the CI publication the agent no longer performs.
-        live = live_head_sha(repo, pr_number)
-        if live != head:
-            print(
-                "Refusing to publish: the PR head changed during the run "
-                f"(reviewed {head}, live {live}). The verdict belongs to a "
-                "commit that is no longer current.",
-                file=sys.stderr,
-            )
-            sys.exit(1)
+        # Revalidate the reviewed snapshot immediately before report creation.
+        _review_result.check_pr(_gh.rest("GET", f"repos/{repo}/pulls/{pr_number}"), accepted["context"])
 
         report = create_report(
             repo, pr_number,
-            compose_report_body(working, identity, head, base, run_started_raw()),
+            compose_report_body(working, identity, head, base, run_started_raw(), artifact),
             identity, head,
         )
         print(f"Published review report {report['id']} -> {head[:12]} (pending completion)")
@@ -919,6 +890,9 @@ def _run() -> None:
             "Formal verdict review already submitted for this run/attempt; "
             "not creating another."
         )
+        reference = _review_result.marker(matched_review.get("body"), VERDICT_MARKER_PATTERN)
+        if any(reference.get(key) != value for key, value in artifact.items()):
+            raise _gh.TerminalError("formal review artifact binding changed")
     elif not is_pending(report):
         # The report is completed, so its formal review succeeded at
         # publication time. A missing review now means it was deleted or
@@ -932,16 +906,8 @@ def _run() -> None:
         sys.exit(1)
     else:
         # Recheck the live head immediately before the formal vote.
-        live = live_head_sha(repo, pr_number)
-        if live != head:
-            print(
-                "Refusing to submit the verdict: the PR head changed during "
-                f"the run (reviewed {head}, live {live}). The verdict belongs "
-                "to a commit that is no longer current.",
-                file=sys.stderr,
-            )
-            sys.exit(1)
-        submit_verdict(repo, pr_number, head, event, lead, report, identity)
+        _review_result.check_pr(_gh.rest("GET", f"repos/{repo}/pulls/{pr_number}"), accepted["context"])
+        submit_verdict(repo, pr_number, head, event, lead, report, identity, artifact)
 
     # Host transition: the report becomes completed state ONLY after the
     # required formal review exists. A report whose review never landed stays
@@ -971,6 +937,8 @@ def _run() -> None:
                 "finalization retries cleanup.",
                 file=sys.stderr,
             )
+
+    _review_result.reset_reviews(accepted, artifact, report)
 
 
 def main() -> None:
