@@ -84,11 +84,13 @@ Both profiles attempt self-dismissal by default, never approval. Before the
 model runs, CI freezes exact reviews positively owned by this workflow/profile,
 their original count-accounted blocking findings, and ALL typed prior-finding
 audit inputs. Known suggestions may remain nonblocking; scraped deduplication
-context and fenced prompt bullets do not become reset obligations. Capture uses
-the authoritative frozen input in runner temporary storage; the workspace copy
-is model-readable input only. New reset writes replace destination entries
-atomically, and preparation clears stale reset snapshots without following file
-symlinks. If there are no eligible targets, proof capture/upload are skipped.
+context and fenced prompt bullets do not become reset obligations.
+Top-level Security/Correctness list items are counted once, with nested bullets,
+wrapped text, and supporting fenced/quoted examples preserved in each audit item.
+Capture uses the authoritative frozen input in runner temporary storage; the
+workspace copy is model-readable input only. New reset writes replace destination
+entries atomically, and preparation clears stale reset snapshots without following
+file symlinks. If there are no eligible targets, proof capture/upload are skipped.
 A successful terminal response may supply a compact JSON audit
 proof for those IDs with complete coverage, no blockers, and affirmative
 current-code evidence. It supplements, rather than replaces, the normal review.
@@ -102,8 +104,9 @@ then dismiss those exact blocking reviews. A failed preparation, absent/malforme
 proof, incomplete audit, failed upload, stale source, or ambiguous GitHub result
 retains blocks without suppressing ordinary publication or changing its state
 lifecycle. An incomplete review still keeps its provisional summary as before.
-Reset warnings are visible in the workflow log; ambiguous writes are reconciled
-by reading the exact review, never blindly retried.
+Reset warnings and short redacted per-target retain reasons are visible in the
+workflow log; ambiguous writes are reconciled by reading the exact review,
+never blindly retried.
 
 Human, foreign-profile, and unmarked legacy reviews are never targets.
 Missing, edited-by-human, deleted-history, or count-unaccounted original finding

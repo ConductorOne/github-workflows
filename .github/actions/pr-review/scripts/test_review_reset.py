@@ -4,6 +4,7 @@
 import copy
 import hashlib
 import importlib.util
+import io
 import json
 import os
 from pathlib import Path
@@ -297,6 +298,125 @@ class ResetTest(unittest.TestCase):
         self.publish()
         reset.reset()
         self.assertEqual({review_id for review_id, review in self.reviews.items() if review["state"] == "DISMISSED"}, {10})
+
+    def test_nested_supporting_bullets_are_one_complete_finding(self):
+        finding = ("- **New** `handler.go:8`: missing input validation\n"
+                   "  - Empty input reaches the handler.\n"
+                   "  - The parser accepts the empty value.\n"
+                   "  - No guard checks the result.\n"
+                   "  - The caller then dereferences it.")
+        self.add_old(10, 1, [finding])
+        snapshot = self.freeze()
+        self.assertEqual(snapshot["retained"], [])
+        self.assertEqual(snapshot["targets"][0]["findings"], [finding])
+        self.assertEqual(snapshot["audit"][0],
+                         {"id": "review-10-0", "finding": finding, "blocking": True})
+        self.capture(snapshot)
+        self.publish()
+        reset.reset()
+        self.assertEqual(self.reviews[10]["state"], "DISMISSED")
+
+    def test_multiple_findings_keep_their_own_continuations(self):
+        findings = ["- **New** `handler.go:8`: missing validation\n"
+                    "  Wrapped explanation of the failing path.\n\n"
+                    "#### Failure details\n"
+                    "  - Supporting observation for the first issue.",
+                    "- **New** `cache.go:12`: stale value reused\n"
+                    "The explanation continues on an unindented line.\n"
+                    "  - Supporting observation for the second issue."]
+        self.add_old(10, 1, findings)
+        snapshot = self.freeze()
+        self.assertEqual(snapshot["retained"], [])
+        self.assertEqual(snapshot["targets"][0]["findings"], findings)
+        self.assertEqual(snapshot["audit"][:2],
+                         [{"id": f"review-10-{index}", "finding": finding, "blocking": True}
+                          for index, finding in enumerate(findings)])
+        accepted = self.capture(snapshot)
+        self.publish()
+        self.comments[1]["body"] = self.comments[1]["body"].replace(
+            "Supporting observation for the second issue.", "Changed supporting obligation.")
+        with self.assertRaises(_gh.TerminalError):
+            reset.dismiss(accepted)
+        self.assertFalse(self.puts())
+
+    def test_one_line_findings_keep_schema_text_and_audit_ids(self):
+        findings = ["- **New** `handler.go:8`: missing authorization",
+                    "- **New** `cache.go:12`: stale value reused"]
+        self.add_old(10, 1, findings)
+        body = self.comments[1]["body"]
+        body = body.replace("### Security Issues\nNone found.",
+                            "### Security Issues\n" + findings[0])
+        body = body.replace("### Correctness Issues\n" + "\n".join(findings),
+                            "### Correctness Issues\n" + findings[1])
+        self.comments[1]["body"] = body
+        snapshot = self.freeze()
+        target = snapshot["targets"][0]
+        self.assertEqual(set(target), {"id", "commit_id", "marker", "report_id", "findings"})
+        self.assertEqual(target["findings"], findings)
+        self.assertEqual(snapshot["audit"][:2],
+                         [{"id": f"review-10-{index}", "finding": finding, "blocking": True}
+                          for index, finding in enumerate(findings)])
+
+    def test_fenced_and_quoted_bullets_remain_supporting_evidence(self):
+        for opener, closer in (("```text", "```"), ("~~~~", "~~~~"),
+                               ("    ```text", "    ```")):
+            finding = ("- **New** `handler.go:8`: unsafe example is accepted\n"
+                       "  Reproduction:\n" + opener + "\n"
+                       "- This example bullet is not a finding.\n"
+                       "### Security Issues\n"
+                       "```not-a-closer\n" + closer + "\n"
+                       "> - Quoted output explains the failure.\n"
+                       "> ### Correctness Issues\n"
+                       "  The example and quote are relevant to this issue.")
+            self.add_old(10, 1, [finding])
+            with self.subTest(opener=opener):
+                snapshot = self.freeze()
+                self.assertEqual(snapshot["retained"], [])
+                self.assertEqual(snapshot["targets"][0]["findings"], [finding])
+                self.assertEqual(snapshot["audit"][0]["finding"], finding)
+
+    def test_count_mismatch_and_ambiguous_original_sections_retain(self):
+        original = self.comments[1]["body"]
+        finding = "- **New** `file.go:7`: dereference can panic"
+        variants = {
+            "zero_count": original.replace(baseline.count_row(1), baseline.count_row(0)),
+            "count_mismatch": original.replace(baseline.count_row(1), baseline.count_row(2)),
+            "duplicate_section": original.replace("### Suggestions", "### Correctness Issues\n### Suggestions"),
+            "missing_section": original.replace("### Security Issues", "### Other Issues"),
+            "orphan_prose": original.replace(finding, "Unaccounted issue text.\n" + finding),
+            "orphan_nested_item": original.replace(finding, "  - An indented issue has no parent."),
+            "quoted_only": original.replace(finding, "> - A quote is not an original finding."),
+            "fenced_only": original.replace(finding, "```\n- An example is not an original finding.\n```"),
+            "mixed_empty": original.replace(finding, "None found.\n" + finding),
+            "trailing_empty": original.replace(finding, finding + "\nNone found."),
+            "unclosed_fence": original.replace(finding, finding + "\n```text\n- Example"),
+        }
+        for name, body in variants.items():
+            self.comments[1]["body"] = body
+            with self.subTest(name=name), mock.patch("sys.stderr", new_callable=io.StringIO) as output:
+                snapshot = self.freeze()
+                self.assertEqual(snapshot["targets"], [])
+                self.assertEqual(snapshot["retained"],
+                                 [{"id": 10, "reason": "original blocking findings missing or not count-accounted"}])
+                self.assertIn("Retained prior owned blocking review 10: "
+                              "original blocking findings missing or not count-accounted", output.getvalue())
+                self.assertFalse(self.puts())
+
+    def test_prepare_retained_reason_is_redacted_single_line_and_bounded(self):
+        token = "ghp_" + "a" * 36
+        error = _gh.TerminalError("original guard failed: " + token + "\n" + "detail " * 100)
+        with mock.patch.object(reset, "target_evidence", side_effect=error), \
+                mock.patch("sys.stderr", new_callable=io.StringIO) as output:
+            snapshot = self.freeze()
+        self.assertEqual(snapshot["targets"], [])
+        self.assertEqual(snapshot["retained"][0]["id"], 10)
+        self.assertNotIn(token, output.getvalue())
+        self.assertNotIn(token, json.dumps(snapshot))
+        lines = output.getvalue().splitlines()
+        self.assertEqual(len(lines), 1)
+        prefix = "Retained prior owned blocking review 10: "
+        self.assertTrue(lines[0].startswith(prefix + "original guard failed: [REDACTED_GITHUB_TOKEN]"))
+        self.assertEqual(len(lines[0]) - len(prefix), 240)
 
     def test_original_missing_edited_or_unaccounted_evidence_never_vacuously_succeeds(self):
         original = copy.deepcopy(self.comments[1])

@@ -158,6 +158,68 @@ def check_history(item, kind, repo, pr_number):
                 "inconsistent original report history")
 
 
+def blocking_findings(body):
+    """Group canonical top-level items without losing their supporting text."""
+    sections = ("### Security Issues", "### Correctness Issues")
+    groups = []
+    current = None
+    section = None
+    seen = []
+    empty = False
+    fence_char = None
+    fence_len = 0
+    error = "original blocking findings missing or not count-accounted"
+    for line in body.splitlines():
+        # Preserve fences in a finding, including indented list-item examples.
+        # Their bullets/headings are evidence, never new findings or sections.
+        if fence_char is not None:
+            if section in sections:
+                require(current is not None, error)
+                current.append(line)
+            closer = pub._FENCE_CLOSE_PATTERN.match(line.lstrip(" \t"))
+            if closer:
+                delimiter = closer.group(1)
+                if delimiter[0] == fence_char and len(delimiter) >= fence_len:
+                    fence_char = None
+            continue
+        opener = pub._FENCE_OPEN_PATTERN.match(line.lstrip(" \t"))
+        if opener and not (opener[1][0] == "`" and "`" in opener[2]):
+            fence_char, fence_len = opener[1][0], len(opener[1])
+            if section in sections:
+                require(current is not None, error)
+                current.append(line)
+            continue
+        if re.match(r"#{1,3}[ \t]+", line):
+            section = line.strip()
+            current = None
+            empty = False
+            if section in sections:
+                seen.append(section)
+            continue
+        if section not in sections:
+            continue
+        if not line.strip():
+            if current is not None:
+                current.append(line)
+            continue
+        if line == "None found.":
+            require(current is None and not empty, error)
+            empty = True
+            continue
+        require(not empty, error)
+        if re.match(r"(?:[-+*]|\d+[.)])[ \t]+\S", line):
+            current = [line]
+            groups.append(current)
+        else:
+            # Wrapped prose, nested items and quotes must have a real owner.
+            require(current is not None, error)
+            current.append(line)
+    require(fence_char is None
+            and sorted(seen) == ["### Correctness Issues", "### Security Issues"]
+            and groups, error)
+    return ["\n".join(group).strip() for group in groups]
+
+
 def target_evidence(review, report, identity, repo, pr_number):
     require(owned(review, identity), "unknown target ownership")
     check_history(review, "PullRequestReview", repo, pr_number)
@@ -173,20 +235,8 @@ def target_evidence(review, report, identity, repo, pr_number):
             "original report/review binding mismatch")
     require(pub._parse_ts(state["started_at"]) < pub.run_started_at(), "target is not older")
     body = report["body"]
-    rows = []
-    section = None
-    seen = []
-    for line in pub._top_level_lines(body):
-        if line.startswith("### "):
-            section = line.strip()
-            if section in ("### Security Issues", "### Correctness Issues"):
-                seen.append(section)
-        elif section in ("### Security Issues", "### Correctness Issues") and line.strip():
-            if line.strip() != "None found.":
-                rows.append(line.strip())
-    require(sorted(seen) == ["### Correctness Issues", "### Security Issues"]
-            and len(rows) > 0
-            and pub.parse_blocking_count(body, identity["summary_marker"]) == len(rows),
+    rows = blocking_findings(body)
+    require(pub.parse_blocking_count(body, identity["summary_marker"]) == len(rows),
             "original blocking findings missing or not count-accounted")
     return {"id": review["id"], "commit_id": review["commit_id"],
             "marker": value, "report_id": report["id"], "findings": rows}
@@ -256,6 +306,9 @@ def prepare():
         output.write(f"has_targets={'true' if snapshot['targets'] else 'false'}\n")
         output.write(f"artifact_name=pr-review-reset-{identity['run_id']}-{identity['run_attempt']}-{name}\n")
     print(f"Reset snapshot: {len(snapshot['targets'])} eligible, {len(snapshot['retained'])} retained; unmarked legacy reviews require manual dismissal")
+    for retained in snapshot["retained"]:
+        reason = " ".join(retained["reason"].split())[:240]
+        print(f"Retained prior owned blocking review {retained['id']}: {reason}", file=sys.stderr)
 
 
 def validate_proof(proof, snapshot):
