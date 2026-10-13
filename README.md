@@ -93,7 +93,8 @@ entries atomically, and preparation clears stale reset snapshots without followi
 file symlinks. If there are no eligible targets, proof capture/upload are skipped.
 A successful terminal response may supply a compact JSON audit
 proof for those IDs with complete coverage, no blockers, and affirmative
-current-code evidence. It supplements, rather than replaces, the normal review.
+current-code evidence. It supplements, rather than replaces, the normal review;
+CI supplies run/attempt, head/base, and session provenance, not the model proof.
 CI captures it from the runner execution file, sanitizes/redacts all persisted
 evidence, and uploads one accepted reset artifact using repository retention
 defaults. Editable summary prose is not reset authority.

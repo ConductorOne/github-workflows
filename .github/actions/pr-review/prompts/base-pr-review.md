@@ -417,13 +417,14 @@ Then end your terminal response with one `review-reset-proof` fenced JSON block
 (not a comment, file, tool call, or a second copy of the Markdown):
 
 ```review-reset-proof
-{"run_id":"<snapshot identity.run_id>","run_attempt":"<snapshot identity.run_attempt>",
- "head_sha":"<snapshot context.current_sha>","base_sha":"<snapshot context.current_base_sha>",
- "review_complete":true,"coverage_gaps":[],"blocking_issues":0,
+{"review_complete":true,"coverage_gaps":[],"blocking_issues":0,
  "audit":[{"id":"<each frozen audit ID>","disposition":"fixed",
            "evidence":[{"path":"path/to/file","location":"line range or symbol",
                         "explanation":"Current code evidence resolving this exact finding"}]}]}
 ```
+
+CI supplies run/attempt, head/base, and session provenance from its frozen
+snapshot and runner metadata; do not add provenance fields to this proof.
 
 Use `fixed`, `obsolete` (identify replacement code), `incorrect` (explain why the
 original finding was wrong), `still_present`, or `unverified` honestly for every

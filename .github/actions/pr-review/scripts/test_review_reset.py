@@ -159,9 +159,7 @@ class ResetTest(unittest.TestCase):
         return self.real_read(reset.SNAPSHOT)
 
     def proof(self, snapshot):
-        return {"run_id": baseline.RUN_ID, "run_attempt": baseline.RUN_ATTEMPT,
-                "head_sha": baseline.HEAD, "base_sha": baseline.BASE, "review_complete": True,
-                "coverage_gaps": [], "blocking_issues": 0,
+        return {"review_complete": True, "coverage_gaps": [], "blocking_issues": 0,
                 "audit": [{"id": entry["id"], "disposition": "fixed",
                            "evidence": [{"path": "file.go", "location": "7-12", "explanation": "Current nil guard resolves the failure"}]}
                           for entry in snapshot["audit"]]}
@@ -192,7 +190,13 @@ class ResetTest(unittest.TestCase):
         self.add_old(11, 3)
         snapshot = self.freeze()
         self.assertEqual({entry["id"] for entry in snapshot["audit"]}, {"review-10-0", "review-11-0", "prior-0", "prior-1"})
-        self.capture(snapshot)
+        accepted = self.capture(snapshot)
+        self.assertEqual(set(accepted), {"snapshot", "proof", "completion"})
+        self.assertEqual(set(accepted["proof"]), {"review_complete", "coverage_gaps", "blocking_issues", "audit"})
+        self.assertEqual(accepted["snapshot"]["identity"], pub.publication_identity())
+        self.assertEqual(accepted["snapshot"]["context"]["current_sha"], baseline.HEAD)
+        self.assertEqual(accepted["snapshot"]["context"]["current_base_sha"], baseline.BASE)
+        self.assertEqual(accepted["completion"], {"session_id": "current-session", "terminal_success": True})
         self.assertFalse(self.puts())
         self.publish()
         reset.reset()
@@ -219,7 +223,8 @@ class ResetTest(unittest.TestCase):
     def test_reset_failures_do_not_break_ordinary_publication(self):
         snapshot = self.freeze()
         for extra in ({"result": "No optional proof"}, {"result": "```review-reset-proof\n{}\n```"},
-                      {"subtype": "error_max_turns"}, {"session_id": "old-session"}):
+                      {"subtype": "error_max_turns"}, {"session_id": "old-session"},
+                      {"is_error": True}, {"type": "assistant"}):
             with self.subTest(extra=extra), self.assertRaises((_gh.TerminalError, ValueError)):
                 self.capture(snapshot, terminal_extra=extra)
         self.publish()
@@ -240,7 +245,7 @@ class ResetTest(unittest.TestCase):
         proof = self.proof(snapshot)
         mutations = []
         for key, value in (("review_complete", False), ("coverage_gaps", ["unread diff"]), ("blocking_issues", 1),
-                           ("head_sha", "old"), ("base_sha", "old"), ("run_attempt", "1"), ("extra", "secret")):
+                           ("extra", "secret")):
             changed = copy.deepcopy(proof)
             changed[key] = value
             mutations.append(changed)
@@ -265,6 +270,70 @@ class ResetTest(unittest.TestCase):
         # An audited known suggestion need not be fixed to clear blocking reviews.
         proof["audit"][2]["disposition"] = "still_present"
         reset.validate_proof(proof, snapshot)
+
+    def test_model_supplied_provenance_is_rejected_even_when_correct(self):
+        snapshot = self.freeze()
+        provenance = {"run_id": baseline.RUN_ID, "run_attempt": baseline.RUN_ATTEMPT,
+                      "head_sha": baseline.HEAD, "base_sha": baseline.BASE}
+        for key, value in provenance.items():
+            for supplied in (value, "incorrect"):
+                proof = dict(self.proof(snapshot), **{key: supplied})
+                with self.subTest(key=key, value=supplied), self.assertRaises(_gh.TerminalError):
+                    self.capture(snapshot, proof)
+        with self.assertRaises(_gh.TerminalError):
+            self.capture(snapshot, dict(self.proof(snapshot), **provenance))
+        self.assertFalse(Path(self.env["REVIEW_RESET_FILE"]).exists())
+        self.assertFalse(self.puts())
+
+    def test_capture_requires_current_host_run_identity(self):
+        snapshot = self.freeze()
+        for key in ("run_id", "run_attempt"):
+            changed = copy.deepcopy(snapshot)
+            changed["identity"][key] = "old"
+            reset.write_json(self.env["REVIEW_RESET_SNAPSHOT"], changed)
+            with self.subTest(key=key), self.assertRaises(_gh.TerminalError):
+                self.capture(snapshot)
+        self.assertFalse(Path(self.env["REVIEW_RESET_FILE"]).exists())
+        self.assertFalse(self.puts())
+
+    def test_capture_requires_exact_runner_init_session(self):
+        snapshot = self.freeze()
+        terminal = {"type": "result", "subtype": "success", "is_error": False,
+                    "session_id": "current-session",
+                    "result": "```review-reset-proof\n" + json.dumps(self.proof(snapshot)) + "\n```"}
+        init = {"type": "system", "subtype": "init", "session_id": "current-session"}
+        for initials in ([], [dict(init, session_id="old-session")], [init, init]):
+            reset.write_json(self.env["REVIEW_EXECUTION_FILE"], initials + [terminal])
+            with self.subTest(initials=initials), self.assertRaises(_gh.TerminalError):
+                reset.capture()
+        reset.write_json(self.env["REVIEW_EXECUTION_FILE"], [init, terminal])
+        with mock.patch.dict(os.environ, REVIEW_SESSION_ID=""), self.assertRaises(_gh.TerminalError):
+            reset.capture()
+        self.assertFalse(Path(self.env["REVIEW_RESET_FILE"]).exists())
+        self.assertFalse(self.puts())
+
+    def test_late_dismissal_requires_ci_owned_envelope_provenance(self):
+        accepted = self.capture(self.freeze())
+        self.publish()
+        mutations = [
+            ("identity", "run_id", "old"), ("identity", "run_attempt", "old"),
+            ("context", "current_sha", "old"), ("context", "current_base_sha", "old"),
+            ("context", "repository", "foreign/repo"), ("context", "pr_number", "99"),
+        ]
+        for section, key, value in mutations:
+            changed = copy.deepcopy(accepted)
+            changed["snapshot"][section][key] = value
+            with self.subTest(section=section, key=key), self.assertRaises(_gh.TerminalError):
+                reset.dismiss(changed)
+        changed = copy.deepcopy(accepted)
+        changed["snapshot"]["started_at"] = baseline.T1
+        with self.assertRaises(_gh.TerminalError):
+            reset.dismiss(changed)
+        changed = copy.deepcopy(accepted)
+        changed["completion"]["terminal_success"] = False
+        with self.assertRaises(_gh.TerminalError):
+            reset.dismiss(changed)
+        self.assertFalse(self.puts())
 
     def test_upload_failure_or_changed_accepted_file_retains_after_clean_publication(self):
         self.capture(self.freeze())
