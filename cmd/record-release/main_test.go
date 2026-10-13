@@ -1,11 +1,18 @@
 package main
 
 import (
+	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io"
+	"net/http"
+	"net/http/httptest"
 	"reflect"
 	"strings"
+	"sync/atomic"
 	"testing"
+	"time"
 	"unicode/utf8"
 
 	pb "github.com/ConductorOne/github-workflows/pb/artifacts/v1"
@@ -15,6 +22,14 @@ const (
 	inTotoStatement = "https://in-toto.io/Statement/v1"
 	slsaProvenance  = "https://slsa.dev/provenance/v1"
 	spdxDocument    = "https://spdx.dev/Document"
+
+	// upstream503Body mirrors what the registry API sends back when an
+	// asset's signature/certificate fetch from the CDN hits a transient 503:
+	// an ordinary-looking 400 that is actually worth retrying.
+	upstream503Body = `{"code":3,"message":"asset \"windows-amd64-msi\" detached signature files are required: fetch certificate: GET https://example.invalid/releases/org/name/v1.2.3/name_v1.2.3_windows_amd64.msi.cert returned HTTP 503"}`
+
+	// ordinary400Body is a real validation failure; it must never be retried.
+	ordinary400Body = `{"code":3,"message":"version is required"}`
 )
 
 func TestTransformAssetsPreservesAssetAttestations(t *testing.T) {
@@ -304,4 +319,224 @@ func attestation(predicateType, bundleHref string) *pb.AttestationDescriptor {
 
 func strPtr(s string) *string {
 	return &s
+}
+
+// scriptedResponse is one canned reply from a scripted test server.
+type scriptedResponse struct {
+	status int
+	body   string
+}
+
+// newScriptedServer replies with responses in order and fails the test if
+// any request's body differs from wantBody: recordRelease must resend the
+// same payload on every attempt.
+func newScriptedServer(t *testing.T, wantBody []byte, responses []scriptedResponse) (*httptest.Server, *atomic.Int32) {
+	t.Helper()
+	var calls atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		i := int(calls.Add(1)) - 1
+		got, err := io.ReadAll(r.Body)
+		if err != nil {
+			t.Fatalf("reading request body: %v", err)
+		}
+		if !bytes.Equal(got, wantBody) {
+			t.Fatalf("request %d body = %q, want %q", i+1, got, wantBody)
+		}
+		idx := i
+		if idx >= len(responses) {
+			idx = len(responses) - 1
+		}
+		w.WriteHeader(responses[idx].status)
+		fmt.Fprint(w, responses[idx].body)
+	}))
+	t.Cleanup(srv.Close)
+	return srv, &calls
+}
+
+// stubSleep replaces the package-level sleep with a no-op for the duration
+// of the test, so retries run instantly instead of waiting for real.
+func stubSleep(t *testing.T) {
+	t.Helper()
+	orig := sleep
+	sleep = func(time.Duration) {}
+	t.Cleanup(func() { sleep = orig })
+}
+
+func TestRecordReleaseRetriesTransient503ThenSucceeds(t *testing.T) {
+	stubSleep(t)
+	body := []byte(`{"version":"v1.2.3"}`)
+	srv, calls := newScriptedServer(t, body, []scriptedResponse{
+		{status: http.StatusServiceUnavailable, body: "upstream unavailable"},
+		{status: http.StatusOK, body: ""},
+	})
+
+	var stdout, stderr bytes.Buffer
+	if err := recordRelease(srv.Client(), srv.URL, body, "v1.2.3", defaultRetryPolicy, &stdout, &stderr); err != nil {
+		t.Fatalf("recordRelease: %v", err)
+	}
+	if got := calls.Load(); got != 2 {
+		t.Fatalf("requests = %d, want 2", got)
+	}
+	if !strings.Contains(stdout.String(), `"status":"success"`) {
+		t.Fatalf("stdout = %q, want success JSON", stdout.String())
+	}
+	if n := strings.Count(stderr.String(), "attempt 1/5"); n != 1 {
+		t.Fatalf("stderr = %q, want exactly one 'attempt 1/5' line", stderr.String())
+	}
+}
+
+func TestRecordReleaseRetriesTruncatedResponseBody(t *testing.T) {
+	stubSleep(t)
+	var calls atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		if calls.Add(1) == 1 {
+			w.Header().Set("Content-Length", "100")
+			w.WriteHeader(http.StatusServiceUnavailable)
+			_, _ = w.Write([]byte("truncated"))
+			return
+		}
+		w.WriteHeader(http.StatusOK)
+	}))
+	t.Cleanup(srv.Close)
+
+	var stdout, stderr bytes.Buffer
+	if err := recordRelease(srv.Client(), srv.URL, []byte(`{"version":"v1.2.3"}`), "v1.2.3", defaultRetryPolicy, &stdout, &stderr); err != nil {
+		t.Fatalf("recordRelease: %v", err)
+	}
+	if got := calls.Load(); got != 2 {
+		t.Fatalf("requests = %d, want 2", got)
+	}
+	if !strings.Contains(stderr.String(), "reading response body") {
+		t.Fatalf("stderr = %q, want response-read retry reason", stderr.String())
+	}
+}
+
+func TestRecordReleaseRetries400WithUpstream5xxMessage(t *testing.T) {
+	stubSleep(t)
+	body := []byte(`{"version":"v1.2.3"}`)
+	srv, calls := newScriptedServer(t, body, []scriptedResponse{
+		{status: http.StatusBadRequest, body: upstream503Body},
+		{status: http.StatusOK, body: ""},
+	})
+
+	var stdout, stderr bytes.Buffer
+	if err := recordRelease(srv.Client(), srv.URL, body, "v1.2.3", defaultRetryPolicy, &stdout, &stderr); err != nil {
+		t.Fatalf("recordRelease: %v", err)
+	}
+	if got := calls.Load(); got != 2 {
+		t.Fatalf("requests = %d, want 2", got)
+	}
+}
+
+func TestRecordReleaseDoesNotRetryOrdinary400(t *testing.T) {
+	stubSleep(t)
+	body := []byte(`{"version":"v1.2.3"}`)
+	srv, calls := newScriptedServer(t, body, []scriptedResponse{
+		{status: http.StatusBadRequest, body: ordinary400Body},
+	})
+
+	var stdout, stderr bytes.Buffer
+	err := recordRelease(srv.Client(), srv.URL, body, "v1.2.3", defaultRetryPolicy, &stdout, &stderr)
+	if err == nil {
+		t.Fatal("recordRelease: want error, got nil")
+	}
+	if got := calls.Load(); got != 1 {
+		t.Fatalf("requests = %d, want 1", got)
+	}
+	if strings.Contains(stderr.String(), "attempt") {
+		t.Fatalf("stderr = %q, want no retry line", stderr.String())
+	}
+	var regErr *registryError
+	if !errors.As(err, &regErr) {
+		t.Fatalf("error = %#v, want *registryError", err)
+	}
+	if regErr.status != http.StatusBadRequest || regErr.attempts != 1 {
+		t.Fatalf("registryError = %+v, want status=400 attempts=1", regErr)
+	}
+}
+
+func TestRecordReleaseGivesUpAfterFiveServerErrors(t *testing.T) {
+	stubSleep(t)
+	body := []byte(`{"version":"v1.2.3"}`)
+	srv, calls := newScriptedServer(t, body, []scriptedResponse{
+		{status: http.StatusServiceUnavailable, body: "down"},
+		{status: http.StatusServiceUnavailable, body: "down"},
+		{status: http.StatusServiceUnavailable, body: "down"},
+		{status: http.StatusServiceUnavailable, body: "down"},
+		{status: http.StatusServiceUnavailable, body: "down"},
+	})
+
+	var stdout, stderr bytes.Buffer
+	err := recordRelease(srv.Client(), srv.URL, body, "v1.2.3", defaultRetryPolicy, &stdout, &stderr)
+	if err == nil {
+		t.Fatal("recordRelease: want error, got nil")
+	}
+	if got := calls.Load(); got != 5 {
+		t.Fatalf("requests = %d, want 5", got)
+	}
+	var regErr *registryError
+	if !errors.As(err, &regErr) || regErr.attempts != 5 {
+		t.Fatalf("error = %#v, want *registryError with attempts=5", err)
+	}
+	if !strings.Contains(err.Error(), "after 5 attempts") {
+		t.Fatalf("error = %q, want 'after 5 attempts'", err.Error())
+	}
+}
+
+func TestRecordReleaseRetries429ThenSucceeds(t *testing.T) {
+	stubSleep(t)
+	body := []byte(`{"version":"v1.2.3"}`)
+	srv, calls := newScriptedServer(t, body, []scriptedResponse{
+		{status: http.StatusTooManyRequests, body: "slow down"},
+		{status: http.StatusOK, body: ""},
+	})
+
+	var stdout, stderr bytes.Buffer
+	if err := recordRelease(srv.Client(), srv.URL, body, "v1.2.3", defaultRetryPolicy, &stdout, &stderr); err != nil {
+		t.Fatalf("recordRelease: %v", err)
+	}
+	if got := calls.Load(); got != 2 {
+		t.Fatalf("requests = %d, want 2", got)
+	}
+}
+
+func TestRecordReleaseReportsAlreadyExistsOn409(t *testing.T) {
+	stubSleep(t)
+	body := []byte(`{"version":"v1.2.3"}`)
+	srv, calls := newScriptedServer(t, body, []scriptedResponse{
+		{status: http.StatusConflict, body: ""},
+	})
+
+	var stdout, stderr bytes.Buffer
+	if err := recordRelease(srv.Client(), srv.URL, body, "v1.2.3", defaultRetryPolicy, &stdout, &stderr); err != nil {
+		t.Fatalf("recordRelease: %v", err)
+	}
+	if got := calls.Load(); got != 1 {
+		t.Fatalf("requests = %d, want 1", got)
+	}
+	if !strings.Contains(stdout.String(), `"status":"already_exists"`) {
+		t.Fatalf("stdout = %q, want already_exists JSON", stdout.String())
+	}
+}
+
+func TestRecordReleaseGivesUpAfterFiveTransportErrors(t *testing.T) {
+	stubSleep(t)
+	srv := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
+	client := srv.Client()
+	endpoint := srv.URL
+	srv.Close() // connections to endpoint now fail -- a genuine transport error.
+
+	body := []byte(`{"version":"v1.2.3"}`)
+	var stdout, stderr bytes.Buffer
+	err := recordRelease(client, endpoint, body, "v1.2.3", defaultRetryPolicy, &stdout, &stderr)
+	if err == nil {
+		t.Fatal("recordRelease: want error, got nil")
+	}
+	var transErr *transportError
+	if !errors.As(err, &transErr) || transErr.attempts != 5 {
+		t.Fatalf("error = %#v, want *transportError with attempts=5", err)
+	}
+	if !strings.Contains(err.Error(), "request failed after 5 attempts") {
+		t.Fatalf("error = %q, want 'request failed after 5 attempts'", err.Error())
+	}
 }

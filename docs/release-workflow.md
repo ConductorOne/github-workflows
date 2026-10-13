@@ -36,7 +36,17 @@ Resolves the exact SHA of the shared workflow, then uses the pinned workflow sou
 
 ### release-preflight
 
-Runs opted-in source integrity checks against the exact tagged caller source before any build job:
+First checks whether the tag is already fully published: a manifest on the CDN,
+a published (non-draft) GitHub release, and a registry version record whose
+commit SHA matches the triggering tag push (the tag is resolved through the
+GitHub API, so annotated and lightweight tags are handled alike). If all three
+are present, the run ends here as a no-op success with a notice, so a
+re-delivered tag push (for example, a duplicate push event) does not fail in
+build jobs that refuse to overwrite published artifacts. A partial earlier
+attempt, or a tag moved to a different commit, runs normally and fails visibly
+if immutable artifacts prevent it from resuming.
+
+Then runs opted-in source integrity checks against the exact tagged caller source before any build job:
 
 - `go_source_hygiene` runs `go generate ./...` and `go mod tidy`, then rejects a changed tree.
 - `go_vulnerability_scan` runs `govulncheck` for Linux, macOS, and Windows.
@@ -108,6 +118,9 @@ Records release metadata in the connector registry API:
   folded into one line with a count before the changelog is recorded
 - Includes `config_schema.json` and `baton_capabilities.json` when present
 - Sends release timestamp, commit SHA, and workflow run metadata
+- Retries the record up to five times with doubling waits (10s to 80s) on
+  transport errors, 5xx responses, 429, or a 400 whose message reports an
+  upstream 5xx from the CDN; other 4xx responses fail immediately
 
 ### verify-release
 
@@ -363,6 +376,7 @@ Test the MSI installer on an actual Windows machine:
 
 - **Cosign version:** Ensure using latest cosign (`cosign version`)
 - **MSI UpgradeCode:** If upgrades don't work, verify UpgradeCode is consistent across versions
+- **Re-pushed tag:** A second push of an already-released tag is a no-op; cut a new tag to re-release
 
 ## Future Work
 

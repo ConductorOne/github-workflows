@@ -110,7 +110,7 @@ same-repository PRs.
 
 ## Release Workflow
 
-Handles building, signing, and publishing connector releases. See [detailed documentation](docs/release-workflow.md) for security properties and internals.
+Handles building, signing, and publishing connector releases. See [detailed documentation](docs/release-workflow.md) for security properties and internals. A tag pushed again after its release is already published is a no-op.
 
 ### Usage
 

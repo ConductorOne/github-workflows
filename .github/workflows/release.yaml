@@ -241,9 +241,50 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
+    outputs:
+      already_released: ${{ steps.published-check.outputs.already_released }}
     steps:
+      - name: Checkout connector workflows
+        uses: actions/checkout@v5
+        with:
+          path: _workflows
+          repository: ConductorOne/github-workflows
+          ref: ${{ needs.determine-workflows-ref.outputs.ref }}
+          persist-credentials: false
+
+      - name: Set up Go for workflows
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: "_workflows/go.mod"
+          cache: false
+
+      # A re-delivered tag push must not fail a complete release or alert;
+      # end the run here as a no-op when the tag is already fully published.
+      - name: Check for an existing publication
+        id: published-check
+        working-directory: _workflows
+        shell: bash
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          ORG="${{ github.event.repository.owner.login }}"
+          REPO="${{ github.event.repository.name }}"
+          STORAGE_NAME="${{ inputs.release_storage_name }}"
+          TAG="${{ inputs.tag }}"
+          if [ -z "$STORAGE_NAME" ]; then
+            STORAGE_NAME="$REPO"
+          fi
+          MANIFEST_URL="${{ env.CDN_BASE_URL }}/releases/$ORG/$STORAGE_NAME/$TAG/manifest.json"
+          go run ./cmd/release-published-check \
+            -manifest-url "$MANIFEST_URL" \
+            -repo "${{ github.repository }}" \
+            -tag "${{ inputs.tag }}" \
+            -commit-sha "${{ github.sha }}" \
+            -output "$GITHUB_OUTPUT"
+
       - name: Checkout caller repo
-        if: inputs.go_source_hygiene == true || inputs.go_vulnerability_scan == true
+        if: (inputs.go_source_hygiene == true || inputs.go_vulnerability_scan == true) && steps.published-check.outputs.already_released != 'true'
         uses: actions/checkout@v5
         with:
           path: _caller
@@ -253,7 +294,7 @@ jobs:
           persist-credentials: false
 
       - name: Verify caller checkout matches release tag
-        if: inputs.go_source_hygiene == true || inputs.go_vulnerability_scan == true
+        if: (inputs.go_source_hygiene == true || inputs.go_vulnerability_scan == true) && steps.published-check.outputs.already_released != 'true'
         working-directory: _caller
         shell: bash
         env:
@@ -268,14 +309,14 @@ jobs:
           fi
 
       - name: Set up Go for caller
-        if: inputs.go_source_hygiene == true || inputs.go_vulnerability_scan == true
+        if: (inputs.go_source_hygiene == true || inputs.go_vulnerability_scan == true) && steps.published-check.outputs.already_released != 'true'
         uses: actions/setup-go@v6
         with:
           go-version-file: "_caller/go.mod"
           cache: false
 
       - name: Verify generated source and module hygiene
-        if: inputs.go_source_hygiene == true
+        if: inputs.go_source_hygiene == true && steps.published-check.outputs.already_released != 'true'
         working-directory: _caller
         shell: bash
         run: |
@@ -289,7 +330,7 @@ jobs:
           fi
 
       - name: Check for known vulnerabilities
-        if: inputs.go_vulnerability_scan == true
+        if: inputs.go_vulnerability_scan == true && steps.published-check.outputs.already_released != 'true'
         working-directory: _caller
         shell: bash
         env:
@@ -302,6 +343,7 @@ jobs:
           done
 
   goreleaser-binaries:
+    if: needs.release-preflight.outputs.already_released != 'true'
     needs: [determine-workflows-ref, release-preflight]
     runs-on: macos-latest-xlarge
     permissions:
@@ -631,7 +673,7 @@ jobs:
           } >> "$GITHUB_OUTPUT"
 
   goreleaser-windows:
-    if: inputs.msi == true
+    if: inputs.msi == true && needs.release-preflight.outputs.already_released != 'true'
     needs: [determine-workflows-ref, release-preflight]
     runs-on: windows-latest
     permissions:
@@ -917,7 +959,7 @@ jobs:
           } >> "$GITHUB_OUTPUT"
 
   goreleaser-docker:
-    if: inputs.docker == true || inputs.lambda == true
+    if: (inputs.docker == true || inputs.lambda == true) && needs.release-preflight.outputs.already_released != 'true'
     needs: [determine-workflows-ref, release-preflight]
     permissions:
       id-token: write

@@ -14,7 +14,7 @@ test: test-go test-scripts
 
 .PHONY: test-go
 test-go:
-	go test ./cmd/extract-images ./cmd/record-release ./cmd/generate-manifest ./cmd/merge-manifests ./cmd/publish-public-ecr-release-tags
+	go test ./cmd/extract-images ./cmd/record-release ./cmd/generate-manifest ./cmd/merge-manifests ./cmd/publish-public-ecr-release-tags ./cmd/release-published-check
 
 .PHONY: test-scripts
 test-scripts:

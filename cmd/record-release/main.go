@@ -3,12 +3,14 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"io"
 	"net/http"
 	"net/url"
 	"os"
+	"regexp"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -123,6 +125,167 @@ func (t *authTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 	req.Header.Set("Authorization", "Bearer "+t.token)
 	req.Header.Set("Content-Type", "application/json")
 	return t.base.RoundTrip(req)
+}
+
+// retryPolicy bounds how recordRelease retries a POST to the registry API:
+// up to maxAttempts tries total, waiting baseDelay after the first failure
+// and doubling the wait after each subsequent one.
+type retryPolicy struct {
+	maxAttempts int
+	baseDelay   time.Duration
+}
+
+var defaultRetryPolicy = retryPolicy{maxAttempts: 5, baseDelay: 10 * time.Second}
+
+// sleep is time.Sleep by default; tests stub it out so retries run instantly.
+var sleep = time.Sleep
+
+// upstreamFiveXXRe matches a registry 400 response whose message reports
+// that fetching an asset's signature or certificate from the CDN returned a
+// 5xx -- a transient upstream failure the API surfaces as a validation error.
+var upstreamFiveXXRe = regexp.MustCompile(`returned HTTP 5[0-9][0-9]`)
+
+// registryError carries the registry API's final HTTP response once
+// recordRelease stops retrying, so main can format the ::error:: lines.
+type registryError struct {
+	status   int
+	body     []byte
+	attempts int
+}
+
+func (e *registryError) Error() string {
+	return fmt.Sprintf("HTTP %d after %d attempt%s", e.status, e.attempts, plural(e.attempts))
+}
+
+// transportError carries a request-level failure (no HTTP response at all)
+// once recordRelease stops retrying.
+type transportError struct {
+	err      error
+	attempts int
+}
+
+func (e *transportError) Error() string {
+	return fmt.Sprintf("request failed after %d attempt%s: %v", e.attempts, plural(e.attempts), e.err)
+}
+
+func (e *transportError) Unwrap() error { return e.err }
+
+func plural(n int) string {
+	if n == 1 {
+		return ""
+	}
+	return "s"
+}
+
+// shouldRetryStatus reports whether an HTTP response is worth retrying: a
+// 5xx, a 429, or a 400 the API attributes to the CDN itself returning a 5xx.
+// Any other 4xx is a real validation failure and is not retried.
+func shouldRetryStatus(status int, body []byte) bool {
+	if status == http.StatusTooManyRequests || status >= http.StatusInternalServerError {
+		return true
+	}
+	return status == http.StatusBadRequest && upstreamFiveXXRe.Match(body)
+}
+
+// retryWait doubles base on each successive attempt (1-indexed): base, then
+// 2x, 4x, and so on.
+func retryWait(base time.Duration, attempt int) time.Duration {
+	return base * time.Duration(1<<uint(attempt-1))
+}
+
+// logBody returns up to the first 200 bytes of body with embedded newlines
+// flattened to spaces, for a compact single-line stderr log.
+func logBody(body []byte) string {
+	if len(body) > 200 {
+		body = body[:200]
+	}
+	s := strings.ReplaceAll(string(body), "\r\n", " ")
+	s = strings.ReplaceAll(s, "\n", " ")
+	return strings.ReplaceAll(s, "\r", " ")
+}
+
+// writeStatusJSON prints the status JSON main has always printed on 200/409.
+func writeStatusJSON(w io.Writer, status string, code int, version string) {
+	result, _ := json.Marshal(map[string]interface{}{
+		"status":  status,
+		"code":    code,
+		"version": version,
+	})
+	fmt.Fprintln(w, string(result))
+}
+
+// recordRelease POSTs body to endpoint, retrying per policy when the failure
+// looks transient (see shouldRetryStatus). HTTP 200 and 409 both write the
+// matching status JSON to stdout and return nil; any other outcome returns a
+// *registryError or *transportError describing the final attempt. The
+// request body is re-sent unchanged on every attempt.
+func recordRelease(client *http.Client, endpoint string, body []byte, version string, policy retryPolicy, stdout, stderr io.Writer) error {
+	var (
+		lastStatus int
+		lastBody   []byte
+		lastErr    error
+		attempt    int
+	)
+
+	for attempt = 1; attempt <= policy.maxAttempts; attempt++ {
+		httpReq, err := http.NewRequest(http.MethodPost, endpoint, bytes.NewReader(body))
+		if err != nil {
+			return fmt.Errorf("creating HTTP request: %w", err)
+		}
+
+		resp, err := client.Do(httpReq)
+		if err != nil {
+			lastErr = err
+			if attempt == policy.maxAttempts {
+				break
+			}
+			wait := retryWait(policy.baseDelay, attempt)
+			fmt.Fprintf(stderr, "record-release: attempt %d/%d failed (transport error): %v; retrying in %s\n",
+				attempt, policy.maxAttempts, err, wait)
+			sleep(wait)
+			continue
+		}
+
+		respBody, readErr := io.ReadAll(resp.Body)
+		resp.Body.Close()
+		if readErr != nil {
+			lastErr = fmt.Errorf("reading response body: %w", readErr)
+			if attempt == policy.maxAttempts {
+				break
+			}
+			wait := retryWait(policy.baseDelay, attempt)
+			fmt.Fprintf(stderr, "record-release: attempt %d/%d failed (transport error): %v; retrying in %s\n",
+				attempt, policy.maxAttempts, lastErr, wait)
+			sleep(wait)
+			continue
+		}
+		lastErr = nil
+
+		switch resp.StatusCode {
+		case http.StatusOK:
+			writeStatusJSON(stdout, "success", http.StatusOK, version)
+			return nil
+		case http.StatusConflict:
+			writeStatusJSON(stdout, "already_exists", http.StatusConflict, version)
+			return nil
+		}
+
+		lastStatus, lastBody = resp.StatusCode, respBody
+
+		if !shouldRetryStatus(resp.StatusCode, respBody) || attempt == policy.maxAttempts {
+			break
+		}
+
+		wait := retryWait(policy.baseDelay, attempt)
+		fmt.Fprintf(stderr, "record-release: attempt %d/%d failed (HTTP %d): %s; retrying in %s\n",
+			attempt, policy.maxAttempts, resp.StatusCode, logBody(respBody), wait)
+		sleep(wait)
+	}
+
+	if lastErr != nil {
+		return &transportError{err: lastErr, attempts: attempt}
+	}
+	return &registryError{status: lastStatus, body: lastBody, attempts: attempt}
 }
 
 func main() {
@@ -313,11 +476,6 @@ func main() {
 		os.Exit(1)
 	}
 	endpoint := baseURL.JoinPath("/api/v1/ingest/release")
-	httpReq, err := http.NewRequest(http.MethodPost, endpoint.String(), bytes.NewReader(bodyBytes))
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "record-release: error: creating HTTP request: %v\n", err)
-		os.Exit(1)
-	}
 
 	client := &http.Client{
 		Timeout: 30 * time.Second,
@@ -326,39 +484,21 @@ func main() {
 			base:  http.DefaultTransport,
 		},
 	}
-	resp, err := client.Do(httpReq)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "record-release: error: HTTP request failed: %v\n", err)
-		os.Exit(1)
-	}
-	defer resp.Body.Close()
 
-	respBody, err := io.ReadAll(resp.Body)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "record-release: error: reading response body: %v\n", err)
-		os.Exit(1)
-	}
-
-	// Handle response codes
-	switch resp.StatusCode {
-	case http.StatusOK:
-		result, _ := json.Marshal(map[string]interface{}{
-			"status":  "success",
-			"code":    http.StatusOK,
-			"version": version,
-		})
-		fmt.Println(string(result))
-	case http.StatusConflict:
-		// 409 = already exists, not an error (expected during dual-write migration)
-		result, _ := json.Marshal(map[string]interface{}{
-			"status":  "already_exists",
-			"code":    http.StatusConflict,
-			"version": version,
-		})
-		fmt.Println(string(result))
-	default:
-		fmt.Fprintf(os.Stderr, "::error::Registry API record failed: HTTP %d\n", resp.StatusCode)
-		fmt.Fprintf(os.Stderr, "%s\n", string(respBody))
+	if err := recordRelease(client, endpoint.String(), bodyBytes, version, defaultRetryPolicy, os.Stdout, os.Stderr); err != nil {
+		var regErr *registryError
+		var transErr *transportError
+		switch {
+		case errors.As(err, &regErr):
+			fmt.Fprintf(os.Stderr, "::error::Registry API record failed after %d attempt%s: HTTP %d\n",
+				regErr.attempts, plural(regErr.attempts), regErr.status)
+			fmt.Fprintf(os.Stderr, "%s\n", string(regErr.body))
+		case errors.As(err, &transErr):
+			fmt.Fprintf(os.Stderr, "::error::Registry API request failed after %d attempt%s: %v\n",
+				transErr.attempts, plural(transErr.attempts), transErr.err)
+		default:
+			fmt.Fprintf(os.Stderr, "record-release: error: %v\n", err)
+		}
 		os.Exit(1)
 	}
 }
