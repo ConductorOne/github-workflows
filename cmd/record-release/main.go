@@ -313,11 +313,6 @@ func main() {
 		os.Exit(1)
 	}
 	endpoint := baseURL.JoinPath("/api/v1/ingest/release")
-	httpReq, err := http.NewRequest(http.MethodPost, endpoint.String(), bytes.NewReader(bodyBytes))
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "record-release: error: creating HTTP request: %v\n", err)
-		os.Exit(1)
-	}
 
 	client := &http.Client{
 		Timeout: 30 * time.Second,
@@ -326,16 +321,9 @@ func main() {
 			base:  http.DefaultTransport,
 		},
 	}
-	resp, err := client.Do(httpReq)
+	resp, respBody, err := postWithRetry(client, endpoint.String(), bodyBytes)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "record-release: error: HTTP request failed: %v\n", err)
-		os.Exit(1)
-	}
-	defer resp.Body.Close()
-
-	respBody, err := io.ReadAll(resp.Body)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "record-release: error: reading response body: %v\n", err)
+		fmt.Fprintf(os.Stderr, "record-release: error: %v\n", err)
 		os.Exit(1)
 	}
 
@@ -361,6 +349,59 @@ func main() {
 		fmt.Fprintf(os.Stderr, "%s\n", string(respBody))
 		os.Exit(1)
 	}
+}
+
+// retryDelays are the waits between the attempts of postWithRetry; tests
+// shorten them.
+var retryDelays = []time.Duration{10 * time.Second, 20 * time.Second, 40 * time.Second, 80 * time.Second}
+
+// retryable reports whether a response is worth another attempt: a 5xx, a
+// 429, or a 400 the registry raised because the CDN answered 5xx while it was
+// fetching an asset's signature files -- a transient upstream failure, not a
+// bad record. Any other 4xx is final.
+func retryable(status int, body []byte) bool {
+	return status >= 500 || status == http.StatusTooManyRequests ||
+		(status == http.StatusBadRequest && bytes.Contains(body, []byte("returned HTTP 5")))
+}
+
+// postWithRetry POSTs body to endpoint, re-sending it after each retryable
+// failure until the delays run out. It returns the last response and its
+// body, or the transport error of the last attempt.
+func postWithRetry(client *http.Client, endpoint string, body []byte) (*http.Response, []byte, error) {
+	for attempt := 0; ; attempt++ {
+		resp, err := client.Do(mustRequest(endpoint, body))
+		var respBody []byte
+		if err == nil {
+			respBody, err = io.ReadAll(resp.Body)
+			resp.Body.Close()
+			if err != nil {
+				return nil, nil, fmt.Errorf("reading response body: %w", err)
+			}
+			if !retryable(resp.StatusCode, respBody) {
+				return resp, respBody, nil
+			}
+		}
+		if attempt == len(retryDelays) {
+			if err != nil {
+				return nil, nil, fmt.Errorf("HTTP request failed after %d attempts: %w", attempt+1, err)
+			}
+			return resp, respBody, nil
+		}
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "record-release: attempt %d failed: %v; retrying in %s\n", attempt+1, err, retryDelays[attempt])
+		} else {
+			fmt.Fprintf(os.Stderr, "record-release: attempt %d failed: HTTP %d; retrying in %s\n", attempt+1, resp.StatusCode, retryDelays[attempt])
+		}
+		time.Sleep(retryDelays[attempt])
+	}
+}
+
+func mustRequest(endpoint string, body []byte) *http.Request {
+	req, err := http.NewRequest(http.MethodPost, endpoint, bytes.NewReader(body))
+	if err != nil {
+		panic(err) // the endpoint was parsed by url.Parse already
+	}
+	return req
 }
 
 func transformAssets(manifest *pb.Manifest) map[string]*ReleaseAsset {

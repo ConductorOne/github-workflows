@@ -3,9 +3,13 @@ package main
 import (
 	"encoding/json"
 	"fmt"
+	"io"
+	"net/http"
+	"net/http/httptest"
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 	"unicode/utf8"
 
 	pb "github.com/ConductorOne/github-workflows/pb/artifacts/v1"
@@ -304,4 +308,47 @@ func attestation(predicateType, bundleHref string) *pb.AttestationDescriptor {
 
 func strPtr(s string) *string {
 	return &s
+}
+
+// A transient failure -- including the registry's 400 for a CDN 5xx -- is
+// retried with the same body; a real 400 is not.
+func TestPostWithRetry(t *testing.T) {
+	saved := retryDelays
+	retryDelays = []time.Duration{0, 0, 0, 0}
+	t.Cleanup(func() { retryDelays = saved })
+
+	cases := []struct {
+		name      string
+		responses []int
+		body      string
+		wantCalls int
+		wantCode  int
+	}{
+		{"503 then 200", []int{503, 200}, "", 2, 200},
+		{"400 for an upstream 503 then 200", []int{400, 200}, `{"code":3,"message":"fetch certificate: GET https://cdn.example/x.cert returned HTTP 503"}`, 2, 200},
+		{"plain 400 is final", []int{400}, `{"code":3,"message":"version is required"}`, 1, 400},
+		{"gives up after five", []int{503, 503, 503, 503, 503}, "", 5, 503},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			calls := 0
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if got, _ := io.ReadAll(r.Body); string(got) != "payload" {
+					t.Errorf("attempt %d body = %q, want payload", calls+1, got)
+				}
+				w.WriteHeader(tc.responses[calls])
+				_, _ = w.Write([]byte(tc.body))
+				calls++
+			}))
+			defer srv.Close()
+
+			resp, _, err := postWithRetry(srv.Client(), srv.URL, []byte("payload"))
+			if err != nil {
+				t.Fatalf("postWithRetry: %v", err)
+			}
+			if calls != tc.wantCalls || resp.StatusCode != tc.wantCode {
+				t.Fatalf("calls = %d, status = %d; want %d, %d", calls, resp.StatusCode, tc.wantCalls, tc.wantCode)
+			}
+		})
+	}
 }
