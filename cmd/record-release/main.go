@@ -372,12 +372,11 @@ func postWithRetry(client *http.Client, endpoint string, body []byte) (*http.Res
 		resp, err := client.Do(mustRequest(endpoint, body))
 		var respBody []byte
 		if err == nil {
+			// A read failure is the connection dying mid-response: retried
+			// like a failed request, not reported as a bad answer.
 			respBody, err = io.ReadAll(resp.Body)
 			resp.Body.Close()
-			if err != nil {
-				return nil, nil, fmt.Errorf("reading response body: %w", err)
-			}
-			if !retryable(resp.StatusCode, respBody) {
+			if err == nil && !retryable(resp.StatusCode, respBody) {
 				return resp, respBody, nil
 			}
 		}

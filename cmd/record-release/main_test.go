@@ -352,3 +352,66 @@ func TestPostWithRetry(t *testing.T) {
 		})
 	}
 }
+
+// A connection dropped before or during the response is retried the same way;
+// five drops in a row are the final error.
+func TestPostWithRetryTransportErrors(t *testing.T) {
+	saved := retryDelays
+	retryDelays = []time.Duration{0, 0, 0, 0}
+	t.Cleanup(func() { retryDelays = saved })
+
+	drops := 0
+	drop := func(w http.ResponseWriter) {
+		drops++
+		conn, _, err := w.(http.Hijacker).Hijack()
+		if err != nil {
+			t.Fatalf("hijack: %v", err)
+		}
+		conn.Close()
+	}
+
+	t.Run("dropped then 200", func(t *testing.T) {
+		drops = 0
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if drops == 0 {
+				drop(w)
+				return
+			}
+			w.WriteHeader(http.StatusOK)
+		}))
+		defer srv.Close()
+		resp, _, err := postWithRetry(srv.Client(), srv.URL, []byte("payload"))
+		if err != nil || resp.StatusCode != http.StatusOK || drops != 1 {
+			t.Fatalf("err = %v, status = %v, drops = %d; want nil, 200, 1", err, resp, drops)
+		}
+	})
+
+	t.Run("body cut after the headers then 200", func(t *testing.T) {
+		drops = 0
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if drops == 0 {
+				w.Header().Set("Content-Length", "100")
+				w.WriteHeader(http.StatusOK)
+				_, _ = w.Write([]byte("part"))
+				drop(w) // flushes the partial body, then closes: the client sees an unexpected EOF
+				return
+			}
+			w.WriteHeader(http.StatusOK)
+		}))
+		defer srv.Close()
+		resp, _, err := postWithRetry(srv.Client(), srv.URL, []byte("payload"))
+		if err != nil || resp.StatusCode != http.StatusOK || drops != 1 {
+			t.Fatalf("err = %v, status = %v, drops = %d; want nil, 200, 1", err, resp, drops)
+		}
+	})
+
+	t.Run("dropped five times", func(t *testing.T) {
+		drops = 0
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { drop(w) }))
+		defer srv.Close()
+		_, _, err := postWithRetry(srv.Client(), srv.URL, []byte("payload"))
+		if err == nil || !strings.Contains(err.Error(), "after 5 attempts") || drops != 5 {
+			t.Fatalf("err = %v, drops = %d; want 'after 5 attempts', 5", err, drops)
+		}
+	})
+}
