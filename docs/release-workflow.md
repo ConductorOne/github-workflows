@@ -28,6 +28,8 @@ Validates workflow inputs before proceeding:
 - Ensures `dockerfile_template` is only used when `lambda: false`
 - Ensures `docker_extra_files` is only used when `dockerfile_template` is set
 - Ensures `msi_wxs_path` has no path traversal (`..` or absolute paths)
+- Ensures `windows_pre_build_script` is a safe relative path without absolute
+  paths, `..` traversal, whitespace, or shell metacharacters
 - Ensures `GORELEASER_PRO_KEY` is provided when `msi: true`
 
 ### determine-workflows-ref
@@ -69,12 +71,25 @@ Builds Windows zip and MSI installer:
 - MSI built using WiX Toolset with GoReleaser Pro
 - Deterministic UpgradeCode via UUID v5 from repository name
 - Supports custom WXS templates via `msi_wxs_path` input
+- Supports an opt-in caller Bash script via `windows_pre_build_script`
 - Generates SBOMs and SLSA v1 provenance attestations
 - Uploads all artifacts to S3 with no-overwrite writes
 
 **Outputs:** `*.zip`, `*.msi`, `*.provenance.sigstore.json`, `*.sbom.sigstore.json`
 
 **Custom WXS:** For connectors requiring custom MSI behavior (Windows Service, registry keys, etc.), provide a custom WXS template via `msi_wxs_path`. If not provided, uses the default CLI installer template.
+
+**Windows pre-build script:** `windows_pre_build_script` defaults to empty,
+preserving the original rendered GoReleaser config without a hook. When set,
+Windows config generation verifies that the safe repo-relative path exists as a
+file in `_caller`. The config adds a `before.hooks` command, `bash ./<path>`,
+which GoReleaser runs in that same tagged caller checkout after its normal
+clean-tree/tag validation and before compilation. Only the Windows GoReleaser
+action forwards `RELEASE_TAG` from the validated `tag` input to the hook. Hook
+failures fail the release; generated resources remain local to the Windows
+build workspace. The workflow does not run this hook on macOS, Linux, Docker,
+or callers with the default empty input, and does not skip validation, build
+snapshots, retag, or commit generated resources.
 
 ### goreleaser-docker (Linux)
 
@@ -292,6 +307,16 @@ Use test connectors for validation:
    ```bash
    ./scripts/validate-release-artifacts.sh ConductorOne/baton-github-test v0.1.xxx
    ```
+
+### Local Windows Hook Checks
+
+`make test-scripts` includes `python3 scripts/test-windows-pre-build-script.py`.
+It uses the real workflow Bash steps and `envsubst`, with `yq` for YAML queries:
+empty input must match the frozen pre-hook config fixture byte-for-byte; opted-in
+scripts must render the expected command; unsafe and missing paths must fail.
+The fixture hook also checks the caller working directory, release-tag
+forwarding, and command failure propagation without compiling or publishing.
+These are local fixture checks, not a deployed Windows release proof.
 
 ### Validation Script
 

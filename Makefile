@@ -21,6 +21,7 @@ test-scripts:
 	bash scripts/test-derive-iam-role-name.sh
 	bash scripts/test-normalize-release-options.sh
 	python3 scripts/test-release-config-templates.py
+	python3 scripts/test-windows-pre-build-script.py
 	bash scripts/test-release-workflow-tag-pin.sh
 	bash scripts/test-s3-release-uploads.sh
 	bash scripts/test-validate-release-artifacts.sh

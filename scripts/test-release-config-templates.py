@@ -52,6 +52,7 @@ def verify_case(go_main_package: str, brew_tap: str) -> None:
         "DOCKERFILE_LAMBDA_PATH": "Dockerfile.lambda",
         "PUBLIC_ECR_PUBLISH_TAG": "candidate",
         "EXTRA_FILES_BLOCK": "",
+        "WINDOWS_BEFORE_HOOKS_BLOCK": "",
     }
     rendered = {name: render(path, values) for name, path in TEMPLATES.items()}
 

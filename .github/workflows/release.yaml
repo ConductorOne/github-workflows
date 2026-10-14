@@ -77,6 +77,11 @@ on:
         type: string
         default: ""
         description: "Path to a custom WXS file in the caller repo for MSI generation (relative to repo root). If not provided, uses default template."
+      windows_pre_build_script:
+        required: false
+        type: string
+        default: ""
+        description: "Optional safe relative Bash script in the caller repo, run by GoReleaser before Windows compilation."
       brew:
         required: false
         type: boolean
@@ -182,6 +187,16 @@ jobs:
         run: |
           if [[ "$WXS_PATH" == /* ]] || [[ "$WXS_PATH" == *".."* ]] || [[ ! "$WXS_PATH" =~ ^[A-Za-z0-9._/-]+$ ]]; then
             echo "::error::msi_wxs_path must be a relative path with safe characters and without '..' traversal. Got: $WXS_PATH"
+            exit 1
+          fi
+
+      - name: Validate windows_pre_build_script has safe path
+        if: inputs.windows_pre_build_script != ''
+        env:
+          WINDOWS_PRE_BUILD_SCRIPT: ${{ inputs.windows_pre_build_script }}
+        run: |
+          if [[ "$WINDOWS_PRE_BUILD_SCRIPT" == /* ]] || [[ "$WINDOWS_PRE_BUILD_SCRIPT" == *".."* ]] || [[ ! "$WINDOWS_PRE_BUILD_SCRIPT" =~ ^[A-Za-z0-9._/-]+$ ]]; then
+            echo "::error::windows_pre_build_script must be a relative path with safe characters and without '..' traversal. Got: $WINDOWS_PRE_BUILD_SCRIPT"
             exit 1
           fi
 
@@ -747,11 +762,13 @@ jobs:
           WXS_PATH: ${{ steps.wxs.outputs.wxs_path }}
           WORKFLOWS_REF: ${{ needs.determine-workflows-ref.outputs.ref }}
           RELEASE_TAG: ${{ inputs.tag }}
+          WINDOWS_PRE_BUILD_SCRIPT: ${{ inputs.windows_pre_build_script }}
         run: |
+          set -euo pipefail
           export BUILD_STARTED_ON=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
 
           # Generate GoReleaser config
-          envsubst < templates/.goreleaser-windows-template.yaml.tmpl | tee "_generated/.goreleaser.windows.yaml"
+          bash ./scripts/render-goreleaser-windows-config.sh "$WINDOWS_PRE_BUILD_SCRIPT" ../_caller | tee "_generated/.goreleaser.windows.yaml"
 
           # Generate provenance predicate
           envsubst < templates/.slsa-provenance-predicate-template.json.tmpl | tee "_generated/predicate.json"
@@ -766,6 +783,7 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.RELENG_GITHUB_TOKEN }}
           GORELEASER_CURRENT_TAG: ${{ inputs.tag }}
+          RELEASE_TAG: ${{ inputs.tag }}
           GORELEASER_KEY: ${{ secrets.GORELEASER_PRO_KEY }}
 
       - name: Flatten MSI directory structure
