@@ -78,6 +78,47 @@ Active findings appear once in their severity section, labeled `New` or
 `Prior — still present`. A compact resolved section records fixed/obsolete prior
 findings with evidence; it does not repeat the active findings.
 
+### Clearing this reviewer's previous blocks
+
+Both profiles attempt self-dismissal by default, never approval. Before the
+model runs, CI freezes exact reviews positively owned by this workflow/profile,
+their original count-accounted blocking findings, and ALL typed prior-finding
+audit inputs. Known suggestions may remain nonblocking; scraped deduplication
+context and fenced prompt bullets do not become reset obligations.
+Top-level Security/Correctness list items are counted once, with nested bullets,
+wrapped text, and supporting fenced/quoted examples preserved in each audit item.
+Capture uses the authoritative frozen input in runner temporary storage; the
+workspace copy is model-readable input only. New reset writes replace destination
+entries atomically, and preparation clears stale reset snapshots without following
+file symlinks. If there are no eligible targets, proof capture/upload are skipped.
+A successful terminal response may supply a compact JSON audit
+proof for those IDs with complete coverage, no blockers, and affirmative
+current-code evidence. It supplements, rather than replaces, the normal review;
+CI supplies run/attempt, head/base, and session provenance, not the model proof.
+CI captures it from the runner execution file, sanitizes/redacts all persisted
+evidence, and uploads one accepted reset artifact using repository retention
+defaults. Editable summary prose is not reset authority.
+
+Only after normal publication completes with a neutral COMMENT does CI recheck
+the PR head/base, frozen targets, original evidence, and competing/newer runs,
+then dismiss those exact blocking reviews. A failed preparation, absent/malformed
+proof, incomplete audit, failed upload, stale source, or ambiguous GitHub result
+retains blocks without suppressing ordinary publication or changing its state
+lifecycle. An incomplete review still keeps its provisional summary as before.
+Reset warnings and short redacted per-target retain reasons are visible in the
+workflow log; ambiguous writes are reconciled by reading the exact review,
+never blindly retried.
+
+Human, foreign-profile, and unmarked legacy reviews are never targets.
+Missing, edited-by-human, deleted-history, or count-unaccounted original finding
+evidence requires manual handling; this is not a migration of every historical
+block.
+An incomplete edit/competing-run inventory also retains the affected block
+(including more than 100 original edits or GitHub's capped run listing).
+No new permissions or caller opt-in are needed. The model retains its existing
+tools and write-capable GitHub token: this host ordering is not adversarial
+credential isolation and does not replace required human approval.
+
 ### Reusable Workflow Calls
 
 Callers of `pr-review.yaml` must pass `ANTHROPIC_API_KEY` as a named secret; do not

@@ -402,6 +402,38 @@ Your only obligation is an accurate count and a complete summary; a missing or
 malformed count turns the whole run red, so always post the summary in the exact
 template above.
 
+### Optional terminal proof for clearing this reviewer's prior blocks
+
+If `.github/review-reset.json` is available and its `targets` list is nonempty,
+read its frozen `audit` entries in addition to Step 3. Recheck EACH entry against
+current code, including all original blocking report findings; duplicated entries
+still need their own audit IDs. Missing/deleted/edited original evidence is not
+proof of a fix.
+Do not rely on resolved threads or earlier runs' “fixed” assertions.
+If there are no eligible targets, skip this optional proof and publish normally.
+
+Post the usual final Markdown summary through the native comment tool first.
+Then end your terminal response with one `review-reset-proof` fenced JSON block
+(not a comment, file, tool call, or a second copy of the Markdown):
+
+```review-reset-proof
+{"review_complete":true,"coverage_gaps":[],"blocking_issues":0,
+ "audit":[{"id":"<each frozen audit ID>","disposition":"fixed",
+           "evidence":[{"path":"path/to/file","location":"line range or symbol",
+                        "explanation":"Current code evidence resolving this exact finding"}]}]}
+```
+
+CI supplies run/attempt, head/base, and session provenance from its frozen
+snapshot and runner metadata; do not add provenance fields to this proof.
+
+Use `fixed`, `obsolete` (identify replacement code), `incorrect` (explain why the
+original finding was wrong), `still_present`, or `unverified` honestly for every
+entry. Set completeness, coverage gaps, and blocking count to the actual review
+outcome, never to obtain dismissal. Material gaps keep the normal summary
+provisional as already required. Finish all foreground audit agents before the
+terminal response. If the reset snapshot/proof is unavailable, publish normally;
+CI simply retains prior blocks. This proof never authorizes APPROVE.
+
 ## Review Criteria
 
 Use these base criteria for every repository. Built-in mixins and trusted repo-local

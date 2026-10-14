@@ -130,6 +130,17 @@ runs:
     # Bind a fresh provisional comment before the model runs. Completed
     # reports remain separate, CI-owned publication output.
     run: python3 ${{ github.action_path }}/scripts/prepare-review-summary.py
+  - name: Freeze prior blocking reviews for optional self-dismissal
+    id: reset-prepare
+    continue-on-error: true
+    shell: bash
+    env:
+      GH_TOKEN: ${{ inputs.github_token }}
+      PR_NUMBER: ${{ inputs.pr_number }}
+      SUMMARY_MARKER: ${{ steps.review-config.outputs.summary_heading }}
+      REVIEW_RUN_STARTED_AT: ${{ steps.review-config.outputs.review_run_started_at }}
+      REVIEW_RESET_SNAPSHOT: ${{ runner.temp }}/pr-review-reset-${{ steps.summary-transport.outputs.comment_id }}-snapshot.json
+    run: python3 ${{ github.action_path }}/scripts/review-reset.py prepare
   - name: Run Claude PR Review
     id: claude_review
     uses: anthropics/claude-code-action@9171db3e57d6a3140a37ddc2ba92788584e0ead6  # v1.0.234: Claude Code 2.1.282
@@ -185,6 +196,29 @@ runs:
       # shell path) to create or edit comments.
       claude_args: --model claude-opus-5-5 --max-turns 100 --setting-sources user --strict-mcp-config --disallowedTools "Skill,ScheduleWakeup,CronCreate,CronDelete,CronList" --allowedTools "Read,Glob,Grep,Task,mcp__github_inline_comment__create_inline_comment,mcp__github_comment__update_claude_comment,Bash(gh pr diff:*),Bash(gh pr view:*),Bash(gh api:*)"
       prompt: ${{ env.REVIEW_PROMPT }}
+  - name: Capture optional terminal reset proof
+    id: reset-proof
+    if: steps.claude_review.outcome == 'success' && steps.reset-prepare.outcome == 'success' && steps.reset-prepare.outputs.has_targets == 'true'
+    continue-on-error: true
+    shell: bash
+    env:
+      SUMMARY_MARKER: ${{ steps.review-config.outputs.summary_heading }}
+      REVIEW_RESET_SNAPSHOT: ${{ runner.temp }}/pr-review-reset-${{ steps.summary-transport.outputs.comment_id }}-snapshot.json
+      REVIEW_EXECUTION_FILE: ${{ steps.claude_review.outputs.execution_file }}
+      REVIEW_SESSION_ID: ${{ steps.claude_review.outputs.session_id }}
+      REVIEW_RESET_FILE: ${{ runner.temp }}/pr-review-reset-${{ steps.summary-transport.outputs.comment_id }}.json
+    run: python3 ${{ github.action_path }}/scripts/review-reset.py capture
+  - name: Persist accepted reset evidence
+    id: reset-upload
+    if: steps.reset-proof.outcome == 'success'
+    continue-on-error: true
+    uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+    with:
+      name: ${{ steps.reset-prepare.outputs.artifact_name }}
+      path: ${{ runner.temp }}/pr-review-reset-${{ steps.summary-transport.outputs.comment_id }}.json
+      if-no-files-found: error
+    # Repository retention defaults apply. Failure retains blocks but does not
+    # suppress the ordinary publisher; outcome below is NOT masked conclusion.
   - name: Publish review report and verdict
     id: publish
     # CI finalizes the run deterministically rather than relying on the agent
@@ -235,3 +269,18 @@ runs:
         .github/review-criteria.md
         .github/review-criteria.json
       retention-days: 7
+  - name: Dismiss exactly audited prior blocking reviews
+    if: steps.publish.outcome == 'success' && steps.reset-proof.outcome == 'success' && steps.reset-upload.outcome == 'success'
+    continue-on-error: true
+    shell: bash
+    env:
+      GH_TOKEN: ${{ inputs.github_token }}
+      PR_NUMBER: ${{ inputs.pr_number }}
+      SUMMARY_MARKER: ${{ steps.review-config.outputs.summary_heading }}
+      REVIEW_RUN_STARTED_AT: ${{ steps.review-config.outputs.review_run_started_at }}
+      REVIEW_RESET_FILE: ${{ runner.temp }}/pr-review-reset-${{ steps.summary-transport.outputs.comment_id }}.json
+      REVIEW_RESET_SHA256: ${{ steps.reset-proof.outputs.sha256 }}
+      REVIEW_RESET_UPLOAD_OUTCOME: ${{ steps.reset-upload.outcome }}
+      REVIEW_RESET_ARTIFACT_ID: ${{ steps.reset-upload.outputs.artifact-id }}
+      REVIEW_RESET_ARTIFACT_DIGEST: ${{ steps.reset-upload.outputs.artifact-digest }}
+    run: python3 ${{ github.action_path }}/scripts/review-reset.py dismiss
