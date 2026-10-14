@@ -3,9 +3,13 @@ package main
 import (
 	"encoding/json"
 	"fmt"
+	"io"
+	"net/http"
+	"net/http/httptest"
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 	"unicode/utf8"
 
 	pb "github.com/ConductorOne/github-workflows/pb/artifacts/v1"
@@ -304,4 +308,110 @@ func attestation(predicateType, bundleHref string) *pb.AttestationDescriptor {
 
 func strPtr(s string) *string {
 	return &s
+}
+
+// A transient failure -- including the registry's 400 for a CDN 5xx -- is
+// retried with the same body; a real 400 is not.
+func TestPostWithRetry(t *testing.T) {
+	saved := retryDelays
+	retryDelays = []time.Duration{0, 0, 0, 0}
+	t.Cleanup(func() { retryDelays = saved })
+
+	cases := []struct {
+		name      string
+		responses []int
+		body      string
+		wantCalls int
+		wantCode  int
+	}{
+		{"503 then 200", []int{503, 200}, "", 2, 200},
+		{"400 for an upstream 503 then 200", []int{400, 200}, `{"code":3,"message":"fetch certificate: GET https://cdn.example/x.cert returned HTTP 503"}`, 2, 200},
+		{"plain 400 is final", []int{400}, `{"code":3,"message":"version is required"}`, 1, 400},
+		{"gives up after five", []int{503, 503, 503, 503, 503}, "", 5, 503},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			calls := 0
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if got, _ := io.ReadAll(r.Body); string(got) != "payload" {
+					t.Errorf("attempt %d body = %q, want payload", calls+1, got)
+				}
+				w.WriteHeader(tc.responses[calls])
+				_, _ = w.Write([]byte(tc.body))
+				calls++
+			}))
+			defer srv.Close()
+
+			resp, _, err := postWithRetry(srv.Client(), srv.URL, []byte("payload"))
+			if err != nil {
+				t.Fatalf("postWithRetry: %v", err)
+			}
+			if calls != tc.wantCalls || resp.StatusCode != tc.wantCode {
+				t.Fatalf("calls = %d, status = %d; want %d, %d", calls, resp.StatusCode, tc.wantCalls, tc.wantCode)
+			}
+		})
+	}
+}
+
+// A connection dropped before or during the response is retried the same way;
+// five drops in a row are the final error.
+func TestPostWithRetryTransportErrors(t *testing.T) {
+	saved := retryDelays
+	retryDelays = []time.Duration{0, 0, 0, 0}
+	t.Cleanup(func() { retryDelays = saved })
+
+	drops := 0
+	drop := func(w http.ResponseWriter) {
+		drops++
+		conn, _, err := w.(http.Hijacker).Hijack()
+		if err != nil {
+			t.Fatalf("hijack: %v", err)
+		}
+		conn.Close()
+	}
+
+	t.Run("dropped then 200", func(t *testing.T) {
+		drops = 0
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if drops == 0 {
+				drop(w)
+				return
+			}
+			w.WriteHeader(http.StatusOK)
+		}))
+		defer srv.Close()
+		resp, _, err := postWithRetry(srv.Client(), srv.URL, []byte("payload"))
+		if err != nil || resp.StatusCode != http.StatusOK || drops != 1 {
+			t.Fatalf("err = %v, status = %v, drops = %d; want nil, 200, 1", err, resp, drops)
+		}
+	})
+
+	t.Run("body cut after the headers then 200", func(t *testing.T) {
+		drops = 0
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if drops == 0 {
+				w.Header().Set("Content-Length", "100")
+				w.WriteHeader(http.StatusOK)
+				_, _ = w.Write([]byte("part"))
+				drop(w) // flushes the partial body, then closes: the client sees an unexpected EOF
+				return
+			}
+			w.WriteHeader(http.StatusOK)
+		}))
+		defer srv.Close()
+		resp, _, err := postWithRetry(srv.Client(), srv.URL, []byte("payload"))
+		if err != nil || resp.StatusCode != http.StatusOK || drops != 1 {
+			t.Fatalf("err = %v, status = %v, drops = %d; want nil, 200, 1", err, resp, drops)
+		}
+	})
+
+	t.Run("dropped five times", func(t *testing.T) {
+		drops = 0
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { drop(w) }))
+		defer srv.Close()
+		_, _, err := postWithRetry(srv.Client(), srv.URL, []byte("payload"))
+		if err == nil || !strings.Contains(err.Error(), "after 5 attempts") || drops != 5 {
+			t.Fatalf("err = %v, drops = %d; want 'after 5 attempts', 5", err, drops)
+		}
+	})
 }

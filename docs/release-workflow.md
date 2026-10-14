@@ -108,6 +108,9 @@ Records release metadata in the connector registry API:
   folded into one line with a count before the changelog is recorded
 - Includes `config_schema.json` and `baton_capabilities.json` when present
 - Sends release timestamp, commit SHA, and workflow run metadata
+- Retries the record up to five times with doubling waits (10s to 80s) on
+  transport errors, 5xx responses, 429, or a 400 whose message reports an
+  upstream 5xx from the CDN; other 4xx responses fail immediately
 
 ### verify-release
 
