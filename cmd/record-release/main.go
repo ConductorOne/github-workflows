@@ -37,7 +37,7 @@ type RecordReleaseRequest struct {
 	Assets             map[string]*ReleaseAsset `json:"assets,omitempty"`
 	Images             map[string]*ReleaseImage `json:"images,omitempty"`
 	ReleasedAt         string                   `json:"releasedAt,omitempty"`
-	AllowAutoPromotion bool                     `json:"allowAutoPromotion"`
+	AllowAutoPromotion bool                     `json:"allowAutoPromotion,omitempty"`
 }
 
 // ReleaseAsset is the transformed asset for the registry API.

@@ -217,6 +217,16 @@ func TestRecordReleaseRequestMarshalsAttestations(t *testing.T) {
 	}
 }
 
+func TestRecordReleaseRequestOmitsDisabledAutoPromotion(t *testing.T) {
+	body, err := json.Marshal(&RecordReleaseRequest{Org: "example", Name: "baton-example", Version: "v1.2.3"})
+	if err != nil {
+		t.Fatalf("marshal request: %v", err)
+	}
+	if strings.Contains(string(body), `"allowAutoPromotion"`) {
+		t.Fatalf("disabled auto-promotion field must be omitted for older registry APIs: %s", body)
+	}
+}
+
 // TestTruncateChangelogFitsRegistryLimit: a release body far past the
 // registry's 10000-character limit (a year of goreleaser commit lines, as
 // baton-sap-grc v0.3.0 shipped at 15972) comes back under the limit, cut on a

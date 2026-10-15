@@ -278,13 +278,17 @@ jobs:
               -H 'Accept: application/vnd.github+json' \
               "https://api.github.com/repos/${{ github.repository }}/releases/tags/$RELEASE_TAG")"; then
               status=000
-              break
             fi
-            # Allow the UI-created release to become visible after its tag push.
-            if [ "$status" != 404 ] || [ "$attempt" = 3 ]; then
-              break
-            fi
-            sleep 2
+            case "$status" in
+              000|404|5??)
+                # Retry transient errors and allow a UI-created release to become visible.
+                if [ "$attempt" != 3 ]; then
+                  sleep 2
+                  continue
+                fi
+                ;;
+            esac
+            break
           done
           case "$status" in
             200)
@@ -295,10 +299,13 @@ jobs:
               prerelease=absent
               ;;
             *)
-              echo "::warning::GitHub Release lookup returned HTTP $status; automatic promotion will require a later successful lookup"
               prerelease=unknown
               ;;
           esac
+          if [ "$prerelease" = unknown ]; then
+            echo "::error::Cannot determine whether this GitHub Release is a pre-release (HTTP $status)"
+            exit 1
+          fi
           echo "prerelease=$prerelease" >> "$GITHUB_OUTPUT"
 
       - name: Checkout caller repo
