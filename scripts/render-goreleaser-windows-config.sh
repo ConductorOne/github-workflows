@@ -9,9 +9,10 @@ fi
 windows_pre_build_script="$1"
 caller_root="$2"
 WINDOWS_BEFORE_HOOKS_BLOCK=""
+script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 if [ -n "$windows_pre_build_script" ]; then
-  if [[ "$windows_pre_build_script" == /* ]] || [[ "$windows_pre_build_script" == *".."* ]] || [[ ! "$windows_pre_build_script" =~ ^[A-Za-z0-9._/-]+$ ]]; then
+  if ! bash "$script_dir/validate-safe-relative-path.sh" "$windows_pre_build_script"; then
     echo "::error::windows_pre_build_script must be a relative path with safe characters and without '..' traversal. Got: $windows_pre_build_script" >&2
     exit 1
   fi
@@ -23,5 +24,4 @@ if [ -n "$windows_pre_build_script" ]; then
 fi
 export WINDOWS_BEFORE_HOOKS_BLOCK
 
-script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 envsubst < "$script_dir/../templates/.goreleaser-windows-template.yaml.tmpl"

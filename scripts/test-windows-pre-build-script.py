@@ -46,9 +46,9 @@ def verify_forwarding() -> None:
 
 def verify_rendering() -> None:
     render_command = step_field("Generate configs for Windows", "run")
-    validate_command = query('.jobs."validate-inputs".steps[] | select(.name == "Validate windows_pre_build_script has safe path").run')
-    assert query('.jobs."validate-inputs".steps[] | select(.name == "Validate windows_pre_build_script has safe path").env.WINDOWS_PRE_BUILD_SCRIPT') == "${{ inputs.windows_pre_build_script }}"
-    assert query('.jobs."validate-inputs".steps[] | select(.name == "Validate windows_pre_build_script has safe path").if') == "inputs.windows_pre_build_script != ''"
+    validate_command = query('.jobs."determine-workflows-ref".steps[] | select(.name == "Validate windows_pre_build_script has safe path").run')
+    assert query('.jobs."determine-workflows-ref".steps[] | select(.name == "Validate windows_pre_build_script has safe path").env.WINDOWS_PRE_BUILD_SCRIPT') == "${{ inputs.windows_pre_build_script }}"
+    assert query('.jobs."determine-workflows-ref".steps[] | select(.name == "Validate windows_pre_build_script has safe path").if') == "inputs.windows_pre_build_script != ''"
 
     with tempfile.TemporaryDirectory(prefix="windows-pre-build-") as temporary:
         workspace = Path(temporary)
@@ -83,6 +83,7 @@ def verify_rendering() -> None:
         def validate(script: str) -> subprocess.CompletedProcess[bytes]:
             return subprocess.run(
                 ["bash", "-c", validate_command],
+                cwd=workflows,
                 env={**env, "WINDOWS_PRE_BUILD_SCRIPT": script},
                 capture_output=True,
             )

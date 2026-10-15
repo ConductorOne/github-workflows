@@ -27,14 +27,20 @@ Validates workflow inputs before proceeding:
   `^[a-z][a-z0-9-]{0,99}$`
 - Ensures `dockerfile_template` is only used when `lambda: false`
 - Ensures `docker_extra_files` is only used when `dockerfile_template` is set
-- Ensures `msi_wxs_path` has no path traversal (`..` or absolute paths)
-- Ensures `windows_pre_build_script` is a safe relative path without absolute
-  paths, `..` traversal, whitespace, or shell metacharacters
 - Ensures `GORELEASER_PRO_KEY` is provided when `msi: true`
 
 ### determine-workflows-ref
 
 Resolves the exact SHA of the shared workflow, then uses the pinned workflow source to normalize `go_main_package` and `brew_tap`. An omitted main package becomes `./cmd/<repository-name>`; a root package uses `./`. The workflow rejects non-relative package paths and tap values containing a path separator. The pinned reference is embedded in all provenance attestations, ensuring verifiability.
+
+Before option normalization, the pinned checkout validates `dockerfile_template`,
+`msi_wxs_path`, `windows_pre_build_script`, and trimmed `docker_extra_files`
+entries through `scripts/validate-safe-relative-path.sh`. The helper has the
+single safe-path predicate; callers retain their existing diagnostics and
+empty-input guards.
+These guarded checks run after the existing pinned checkout rather than adding
+an unpinned fetch or permissions to `validate-inputs`; all builds already depend
+on `determine-workflows-ref`. No job dependencies or permissions change.
 
 ### release-preflight
 
@@ -317,6 +323,10 @@ scripts must render the expected command; unsafe and missing paths must fail.
 The fixture hook also checks the caller working directory, release-tag
 forwarding, and command failure propagation without compiling or publishing.
 These are local fixture checks, not a deployed Windows release proof.
+
+`python3 scripts/test-safe-relative-path.py` additionally compares the shared
+predicate and every workflow/render call site's exit status and diagnostic bytes
+against the previous Bash rules, including extra-file trimming and empty guards.
 
 ### Validation Script
 
