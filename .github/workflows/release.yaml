@@ -260,7 +260,54 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
+    outputs:
+      github_prerelease: ${{ steps.github-release.outputs.prerelease }}
     steps:
+      - name: Capture GitHub Release pre-release setting
+        id: github-release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ inputs.tag }}
+        run: |
+          set -euo pipefail
+          response="$RUNNER_TEMP/github-release-preflight.json"
+          status=000
+          for attempt in 1 2 3; do
+            if ! status="$(curl -sS --connect-timeout 10 --max-time 30 -o "$response" -w '%{http_code}' \
+              -H "Authorization: Bearer $GH_TOKEN" \
+              -H 'Accept: application/vnd.github+json' \
+              "https://api.github.com/repos/${{ github.repository }}/releases/tags/$RELEASE_TAG")"; then
+              status=000
+            fi
+            case "$status" in
+              000|404|5??)
+                # Retry transient errors and allow a UI-created release to become visible.
+                if [ "$attempt" != 3 ]; then
+                  sleep 2
+                  continue
+                fi
+                ;;
+            esac
+            break
+          done
+          case "$status" in
+            200)
+              prerelease="$(jq -r 'if (.prerelease | type) == "boolean" then (.prerelease | tostring) else "unknown" end' "$response")"
+              ;;
+            404)
+              # Plain tag pushes have no GitHub Release until GoReleaser creates one.
+              prerelease=absent
+              ;;
+            *)
+              prerelease=unknown
+              ;;
+          esac
+          if [ "$prerelease" = unknown ]; then
+            echo "::error::Cannot determine whether this GitHub Release is a pre-release (HTTP $status)"
+            exit 1
+          fi
+          echo "prerelease=$prerelease" >> "$GITHUB_OUTPUT"
+
       - name: Checkout caller repo
         if: inputs.go_source_hygiene == true || inputs.go_vulnerability_scan == true
         uses: actions/checkout@v5
@@ -405,6 +452,7 @@ jobs:
           # For provenance predicate template
           WORKFLOWS_REF: ${{ needs.determine-workflows-ref.outputs.ref }}
           RELEASE_TAG: ${{ inputs.tag }}
+          GITHUB_RELEASE_PRERELEASE: ${{ needs.release-preflight.outputs.github_prerelease == 'true' && 'true' || 'false' }}
         run: |
           set -o pipefail
           mkdir -p "${GENERATED_DIR}"
@@ -1508,7 +1556,7 @@ jobs:
   record-registry-api:
     # Use !cancelled() so the explicit needs.result check controls skipped-job behavior.
     if: ${{ !cancelled() && needs.goreleaser-binaries.result == 'success' && needs.publish-release-manifest.result == 'success' && needs.verify-release.result == 'success' }}
-    needs: [determine-workflows-ref, goreleaser-binaries, publish-release-manifest, verify-release]
+    needs: [determine-workflows-ref, release-preflight, goreleaser-binaries, publish-release-manifest, verify-release]
     permissions:
       id-token: write
       contents: read
@@ -1618,7 +1666,16 @@ jobs:
         env:
           REGISTRY_API_TOKEN: ${{ steps.registry-oidc.outputs.token }}
           RELEASED_AT: ${{ needs.goreleaser-binaries.outputs.released_at }}
+          EARLY_GITHUB_PRERELEASE: ${{ needs.release-preflight.outputs.github_prerelease }}
         run: |
+          LATE_GITHUB_PRERELEASE="$(jq -r 'if (.prerelease | type) == "boolean" then (.prerelease | tostring) else "unknown" end' "$GITHUB_WORKSPACE/_release_metadata/github-release.json")"
+          ALLOW_AUTO_PROMOTION=false
+          if { [ "$EARLY_GITHUB_PRERELEASE" = false ] || [ "$EARLY_GITHUB_PRERELEASE" = absent ]; } && [ "$LATE_GITHUB_PRERELEASE" = false ]; then
+            ALLOW_AUTO_PROMOTION=true
+          elif [ "$EARLY_GITHUB_PRERELEASE" != true ] && [ "$LATE_GITHUB_PRERELEASE" != true ]; then
+            echo "::warning::GitHub pre-release status could not be verified; skipping automatic channel promotion"
+          fi
+
           DOCS_FLAG=""
           if [ "${{ steps.read-docs.outputs.has_docs }}" = "true" ]; then
             DOCS_FLAG="-docs ../_connector/docs/connector.mdx"
@@ -1654,6 +1711,7 @@ jobs:
             -commit-sha "${{ steps.verify-connector-checkout.outputs.commit_sha }}" \
             -workflow-run-id "${{ github.run_id }}" \
             -registry-url "https://dist.conductorone.com" \
+            -allow-auto-promotion="$ALLOW_AUTO_PROMOTION" \
             $DOCS_FLAG \
             $CHANGELOG_FLAG \
             $CONFIG_SCHEMA_FLAG \

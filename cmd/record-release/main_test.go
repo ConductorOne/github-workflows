@@ -158,6 +158,7 @@ func TestRecordReleaseRequestMarshalsAttestations(t *testing.T) {
 		Org:                "example",
 		Name:               "baton-example",
 		Version:            "v1.2.3",
+		AllowAutoPromotion: true,
 		ManifestURL:        "https://dist.example.com/manifest.json",
 		SignatureBundleURL: "https://dist.example.com/manifest.json.sigstore.json",
 		Assets: map[string]*ReleaseAsset{
@@ -184,6 +185,7 @@ func TestRecordReleaseRequestMarshalsAttestations(t *testing.T) {
 	var got struct {
 		ManifestURL        string `json:"manifestUrl"`
 		SignatureBundleURL string `json:"signatureBundleUrl"`
+		AllowAutoPromotion bool   `json:"allowAutoPromotion"`
 		Assets             map[string]struct {
 			Attestations []ReleaseAttestation `json:"attestations"`
 		} `json:"assets"`
@@ -198,6 +200,9 @@ func TestRecordReleaseRequestMarshalsAttestations(t *testing.T) {
 	if got.ManifestURL == "" || got.SignatureBundleURL == "" {
 		t.Fatalf("manifest signature metadata was not marshaled: %#v", got)
 	}
+	if !got.AllowAutoPromotion {
+		t.Fatal("verified auto-promotion signal was not marshaled")
+	}
 	if len(got.Assets["linux-amd64"].Attestations) != 1 {
 		t.Fatalf("asset attestations = %#v, want one entry", got.Assets["linux-amd64"].Attestations)
 	}
@@ -209,6 +214,16 @@ func TestRecordReleaseRequestMarshalsAttestations(t *testing.T) {
 	}
 	if got.Images["ecrPublic"].Attestations[0].URL != "" {
 		t.Fatalf("image attestation URL = %q, want empty", got.Images["ecrPublic"].Attestations[0].URL)
+	}
+}
+
+func TestRecordReleaseRequestOmitsDisabledAutoPromotion(t *testing.T) {
+	body, err := json.Marshal(&RecordReleaseRequest{Org: "example", Name: "baton-example", Version: "v1.2.3"})
+	if err != nil {
+		t.Fatalf("marshal request: %v", err)
+	}
+	if strings.Contains(string(body), `"allowAutoPromotion"`) {
+		t.Fatalf("disabled auto-promotion field must be omitted for older registry APIs: %s", body)
 	}
 }
 

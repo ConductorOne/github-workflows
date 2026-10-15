@@ -53,6 +53,7 @@ def verify_case(go_main_package: str, brew_tap: str) -> None:
         "PUBLIC_ECR_PUBLISH_TAG": "candidate",
         "EXTRA_FILES_BLOCK": "",
         "WINDOWS_BEFORE_HOOKS_BLOCK": "",
+        "GITHUB_RELEASE_PRERELEASE": "true",
     }
     rendered = {name: render(path, values) for name, path in TEMPLATES.items()}
 
@@ -63,6 +64,9 @@ def verify_case(go_main_package: str, brew_tap: str) -> None:
     assert_contains(rendered["binaries"], f'name: "{brew_tap}"', "binaries template")
     # The workflow writes the formula itself; GoReleaser only renders it.
     assert_contains(rendered["binaries"], 'skip_upload: "true"', "binaries template")
+    assert_contains(rendered["binaries"], "prerelease: true", "binaries template")
+    values["GITHUB_RELEASE_PRERELEASE"] = "false"
+    assert_contains(render(TEMPLATES["binaries"], values), "prerelease: false", "binaries template")
 
 
 def main() -> int:
