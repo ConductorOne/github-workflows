@@ -77,6 +77,11 @@ on:
         type: string
         default: ""
         description: "Path to a custom WXS file in the caller repo for MSI generation (relative to repo root). If not provided, uses default template."
+      windows_pre_build_script:
+        required: false
+        type: string
+        default: ""
+        description: "Optional safe relative Bash script in the caller repo, run by GoReleaser before Windows compilation."
       brew:
         required: false
         type: boolean
@@ -144,46 +149,11 @@ jobs:
             exit 1
           fi
 
-      - name: Validate dockerfile_template has safe path
-        if: inputs.dockerfile_template != ''
-        env:
-          DOCKERFILE_TEMPLATE: ${{ inputs.dockerfile_template }}
-        run: |
-          if [[ "$DOCKERFILE_TEMPLATE" == /* ]] || [[ "$DOCKERFILE_TEMPLATE" == *".."* ]] || [[ ! "$DOCKERFILE_TEMPLATE" =~ ^[A-Za-z0-9._/-]+$ ]]; then
-            echo "::error::dockerfile_template must be a relative path with safe characters and without '..' traversal. Got: $DOCKERFILE_TEMPLATE"
-            exit 1
-          fi
-
       - name: Validate docker_extra_files requires dockerfile_template
         if: inputs.docker_extra_files != '' && inputs.dockerfile_template == ''
         run: |
           echo "::error::docker_extra_files can only be used when dockerfile_template is set"
           exit 1
-
-      - name: Validate docker_extra_files have safe paths
-        if: inputs.docker_extra_files != ''
-        env:
-          DOCKER_EXTRA_FILES: ${{ inputs.docker_extra_files }}
-        run: |
-          IFS=',' read -ra FILES <<< "$DOCKER_EXTRA_FILES"
-          for file in "${FILES[@]}"; do
-            file="${file#"${file%%[![:space:]]*}"}"
-            file="${file%"${file##*[![:space:]]}"}"
-            if [[ -z "$file" ]] || [[ "$file" == /* ]] || [[ "$file" == *".."* ]] || [[ ! "$file" =~ ^[A-Za-z0-9._/-]+$ ]]; then
-              echo "::error::docker_extra_files entries must be relative paths with safe characters and without '..' traversal. Got: $file"
-              exit 1
-            fi
-          done
-
-      - name: Validate msi_wxs_path has no path traversal
-        if: inputs.msi_wxs_path != ''
-        env:
-          WXS_PATH: ${{ inputs.msi_wxs_path }}
-        run: |
-          if [[ "$WXS_PATH" == /* ]] || [[ "$WXS_PATH" == *".."* ]] || [[ ! "$WXS_PATH" =~ ^[A-Za-z0-9._/-]+$ ]]; then
-            echo "::error::msi_wxs_path must be a relative path with safe characters and without '..' traversal. Got: $WXS_PATH"
-            exit 1
-          fi
 
       - name: Validate GORELEASER_PRO_KEY when msi enabled
         if: inputs.msi == true
@@ -221,6 +191,55 @@ jobs:
           repository: ConductorOne/github-workflows
           ref: ${{ steps.workflow-version.outputs.sha }}
           persist-credentials: false
+
+      - name: Validate dockerfile_template has safe path
+        if: inputs.dockerfile_template != ''
+        working-directory: _workflows
+        env:
+          DOCKERFILE_TEMPLATE: ${{ inputs.dockerfile_template }}
+        run: |
+          if ! bash ./scripts/validate-safe-relative-path.sh "$DOCKERFILE_TEMPLATE"; then
+            echo "::error::dockerfile_template must be a relative path with safe characters and without '..' traversal. Got: $DOCKERFILE_TEMPLATE"
+            exit 1
+          fi
+
+      - name: Validate docker_extra_files have safe paths
+        if: inputs.docker_extra_files != ''
+        working-directory: _workflows
+        env:
+          DOCKER_EXTRA_FILES: ${{ inputs.docker_extra_files }}
+        run: |
+          IFS=',' read -ra FILES <<< "$DOCKER_EXTRA_FILES"
+          for file in "${FILES[@]}"; do
+            file="${file#"${file%%[![:space:]]*}"}"
+            file="${file%"${file##*[![:space:]]}"}"
+            if ! bash ./scripts/validate-safe-relative-path.sh "$file"; then
+              echo "::error::docker_extra_files entries must be relative paths with safe characters and without '..' traversal. Got: $file"
+              exit 1
+            fi
+          done
+
+      - name: Validate msi_wxs_path has no path traversal
+        if: inputs.msi_wxs_path != ''
+        working-directory: _workflows
+        env:
+          WXS_PATH: ${{ inputs.msi_wxs_path }}
+        run: |
+          if ! bash ./scripts/validate-safe-relative-path.sh "$WXS_PATH"; then
+            echo "::error::msi_wxs_path must be a relative path with safe characters and without '..' traversal. Got: $WXS_PATH"
+            exit 1
+          fi
+
+      - name: Validate windows_pre_build_script has safe path
+        if: inputs.windows_pre_build_script != ''
+        working-directory: _workflows
+        env:
+          WINDOWS_PRE_BUILD_SCRIPT: ${{ inputs.windows_pre_build_script }}
+        run: |
+          if ! bash ./scripts/validate-safe-relative-path.sh "$WINDOWS_PRE_BUILD_SCRIPT"; then
+            echo "::error::windows_pre_build_script must be a relative path with safe characters and without '..' traversal. Got: $WINDOWS_PRE_BUILD_SCRIPT"
+            exit 1
+          fi
 
       - name: Normalize release options
         id: release-options
@@ -747,11 +766,13 @@ jobs:
           WXS_PATH: ${{ steps.wxs.outputs.wxs_path }}
           WORKFLOWS_REF: ${{ needs.determine-workflows-ref.outputs.ref }}
           RELEASE_TAG: ${{ inputs.tag }}
+          WINDOWS_PRE_BUILD_SCRIPT: ${{ inputs.windows_pre_build_script }}
         run: |
+          set -euo pipefail
           export BUILD_STARTED_ON=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
 
           # Generate GoReleaser config
-          envsubst < templates/.goreleaser-windows-template.yaml.tmpl | tee "_generated/.goreleaser.windows.yaml"
+          bash ./scripts/render-goreleaser-windows-config.sh "$WINDOWS_PRE_BUILD_SCRIPT" ../_caller | tee "_generated/.goreleaser.windows.yaml"
 
           # Generate provenance predicate
           envsubst < templates/.slsa-provenance-predicate-template.json.tmpl | tee "_generated/predicate.json"
@@ -766,6 +787,7 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.RELENG_GITHUB_TOKEN }}
           GORELEASER_CURRENT_TAG: ${{ inputs.tag }}
+          RELEASE_TAG: ${{ inputs.tag }}
           GORELEASER_KEY: ${{ secrets.GORELEASER_PRO_KEY }}
 
       - name: Flatten MSI directory structure

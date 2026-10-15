@@ -197,6 +197,7 @@ The release workflow accepts the following input parameters:
 | `docker_extra_files` | No | `""` | Comma-separated list of extra files/dirs to include in Docker build context |
 | `msi` | No | `true` | Whether to build MSI Windows installers |
 | `msi_wxs_path` | No | `""` | Path to custom WXS template for MSI installer (uses default if not set) |
+| `windows_pre_build_script` | No | `""` | Optional safe repo-relative Bash script, run in the caller checkout by GoReleaser before Windows compilation with `RELEASE_TAG` set to the requested tag. |
 | `brew` | No | `true` | Whether to publish a Homebrew formula to the selected public `conductorone` tap |
 
 2. Ensure your repository has the following secrets configured:
@@ -290,6 +291,29 @@ To disable MSI builds entirely (e.g., for connectors that don't need Windows ins
 ```
 
 When `msi: false`, the `GORELEASER_PRO_KEY` secret is not required.
+
+### Windows Pre-build Script
+
+Connectors that generate Windows-specific resources from the release tag can opt in:
+
+```yaml
+    with:
+      tag: ${{ github.ref_name }}
+      windows_pre_build_script: scripts/release-windows-resources.sh
+```
+
+The script must exist as a file in the tagged caller repository. Paths must use
+only letters, digits, `.`, `_`, `/`, and `-`, and must not be absolute or contain
+`..` or whitespace. GoReleaser runs `bash ./<path>` in `_caller` as a
+`before.hooks` command, after its normal clean-tree/tag validation and before
+Windows compilation. The hook receives the validated workflow tag as
+`RELEASE_TAG`; a failing hook fails the Windows release.
+
+This is Windows-only and opt-in: an empty input leaves the rendered Windows
+config unchanged and does not run any generation. macOS, Linux, and Docker
+builds do not run this hook. Keep connector-specific generation in the caller's
+script; do not skip release validation, use snapshots, retag, or commit generated
+resources during release.
 
 ## Verify Workflow
 

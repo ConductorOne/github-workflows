@@ -2,7 +2,7 @@
 ## This runs on Windows runner with Wix Toolset
 version: 2
 project_name: "${REPO_NAME}"
-builds:
+${WINDOWS_BEFORE_HOOKS_BLOCK}builds:
   - binary: "${REPO_NAME}"
     env:
       - CGO_ENABLED=0
