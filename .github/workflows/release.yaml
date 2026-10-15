@@ -273,7 +273,7 @@ jobs:
           response="$RUNNER_TEMP/github-release-preflight.json"
           status=000
           for attempt in 1 2 3; do
-            if ! status="$(curl -sS -o "$response" -w '%{http_code}' \
+            if ! status="$(curl -sS --connect-timeout 10 --max-time 30 -o "$response" -w '%{http_code}' \
               -H "Authorization: Bearer $GH_TOKEN" \
               -H 'Accept: application/vnd.github+json' \
               "https://api.github.com/repos/${{ github.repository }}/releases/tags/$RELEASE_TAG")"; then
@@ -445,7 +445,7 @@ jobs:
           # For provenance predicate template
           WORKFLOWS_REF: ${{ needs.determine-workflows-ref.outputs.ref }}
           RELEASE_TAG: ${{ inputs.tag }}
-          GITHUB_RELEASE_PRERELEASE: ${{ needs.release-preflight.outputs.github_prerelease == 'true' && 'true' || 'auto' }}
+          GITHUB_RELEASE_PRERELEASE: ${{ needs.release-preflight.outputs.github_prerelease == 'true' && 'true' || 'false' }}
         run: |
           set -o pipefail
           mkdir -p "${GENERATED_DIR}"
