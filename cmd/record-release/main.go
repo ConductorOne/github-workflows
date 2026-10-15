@@ -37,6 +37,7 @@ type RecordReleaseRequest struct {
 	Assets             map[string]*ReleaseAsset `json:"assets,omitempty"`
 	Images             map[string]*ReleaseImage `json:"images,omitempty"`
 	ReleasedAt         string                   `json:"releasedAt,omitempty"`
+	AllowAutoPromotion bool                     `json:"allowAutoPromotion"`
 }
 
 // ReleaseAsset is the transformed asset for the registry API.
@@ -127,20 +128,21 @@ func (t *authTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 
 func main() {
 	var (
-		manifestPath     string
-		docsPath         string
-		org              string
-		name             string
-		version          string
-		repositoryURL    string
-		commitSha        string
-		workflowRunID    string
-		registryURL      string
-		changelogPath    string
-		configSchemaPath string
-		capabilitiesPath string
-		manifestURL      string
-		token            string
+		manifestPath       string
+		docsPath           string
+		org                string
+		name               string
+		version            string
+		repositoryURL      string
+		commitSha          string
+		workflowRunID      string
+		registryURL        string
+		changelogPath      string
+		allowAutoPromotion bool
+		configSchemaPath   string
+		capabilitiesPath   string
+		manifestURL        string
+		token              string
 	)
 
 	flag.StringVar(&manifestPath, "manifest", "", "Path to merged manifest.json file (required)")
@@ -153,6 +155,7 @@ func main() {
 	flag.StringVar(&workflowRunID, "workflow-run-id", "", "GitHub Actions workflow run ID (required)")
 	flag.StringVar(&registryURL, "registry-url", "", "Registry API base URL (required)")
 	flag.StringVar(&changelogPath, "changelog", "", "Path to a file containing release notes (optional)")
+	flag.BoolVar(&allowAutoPromotion, "allow-auto-promotion", false, "Allow optional automatic channel promotion after verifying the GitHub Release is not a pre-release")
 	flag.StringVar(&configSchemaPath, "config-schema", "", "Path to config_schema.json file (optional)")
 	flag.StringVar(&capabilitiesPath, "capabilities", "", "Path to baton_capabilities.json file (optional)")
 	flag.StringVar(&manifestURL, "manifest-url", "", "Published manifest.json URL (required)")
@@ -298,6 +301,7 @@ func main() {
 		Assets:             assets,
 		Images:             images,
 		ReleasedAt:         releasedAt,
+		AllowAutoPromotion: allowAutoPromotion,
 	}
 
 	bodyBytes, err := json.Marshal(req)
