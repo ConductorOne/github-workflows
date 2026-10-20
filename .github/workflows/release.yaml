@@ -624,7 +624,7 @@ jobs:
       - name: Set up Go for workflows
         uses: actions/setup-go@v6
         with:
-          go-version-file: "_workflows/go.mod"
+          go-version: "1.27.3"
           cache: false
 
       - name: Fetch release metadata
@@ -962,7 +962,7 @@ jobs:
       - name: Set up Go for workflows tools
         uses: actions/setup-go@v6
         with:
-          go-version-file: "_workflows/go.mod"
+          go-version: "1.27.3"
           cache: false
 
       - name: Generate Windows manifest
@@ -1171,7 +1171,7 @@ jobs:
         if: inputs.docker == true
         uses: actions/setup-go@v6
         with:
-          go-version-file: "_workflows/go.mod"
+          go-version: "1.27.3"
           cache: false
 
       - name: Preflight and publish Public ECR release tags
@@ -1224,7 +1224,7 @@ jobs:
         if: inputs.docker == true || inputs.lambda == true
         uses: actions/setup-go@v6
         with:
-          go-version-file: "_workflows/go.mod"
+          go-version: "1.27.3"
           cache: false
 
       - name: Extract image digests from GoReleaser assets
@@ -1338,7 +1338,7 @@ jobs:
       - name: Set up Go for workflows
         uses: actions/setup-go@v6
         with:
-          go-version-file: "_workflows/go.mod"
+          go-version: "1.27.3"
           cache: false
 
       - name: Merge binaries, Windows, and images manifests
@@ -1573,7 +1573,7 @@ jobs:
       - name: Set up Go for workflows
         uses: actions/setup-go@v6
         with:
-          go-version-file: "_workflows/go.mod"
+          go-version: "1.27.3"
           cache: false
 
       - name: Checkout connector repo
