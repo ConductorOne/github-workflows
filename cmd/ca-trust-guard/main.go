@@ -107,6 +107,7 @@ func record(args []string, stdout io.Writer) error {
 		return err
 	}
 	defer writer.file.Close()
+	writer.instrument = evidenceInstrument(filepath.Dir(*out))
 	return writer.emit(r)
 }
 

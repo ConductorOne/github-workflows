@@ -16,12 +16,40 @@ inside the action and are resolved from its location, not a caller checkout.
 An OS-denial error is recorded and fails that step. When BEFORE succeeded, an
 enabled clean-bundle leg still runs after a failed deny; AFTER and summary run
 unless the job was cancelled.
-Every probe first validates SHA256SUMS and verifies **both** positive-control
-chains against `vulnerable-roots.pem`, then observes the physical/client stores.
-`chains.json` pins certificate DER fingerprints and capture epochs. File-store
-measurement uses OpenSSL with explicit CAfile/intermediates and capture time,
-with all implicit CAfile/CApath/CAstore inputs disabled. The PATH-resolved
-instrument's path and version are logged in probe rows.
+Every probe first validates SHA256SUMS, selects an instrument that passes its
+isolation self-check, and verifies **both** positive-control chains against
+`vulnerable-roots.pem` before observing physical/client stores. `chains.json`
+pins certificate DER fingerprints and capture epochs. File-store measurement
+uses explicit CAfile/intermediates and capture time; isolation options are
+selected from the binary's advertised capabilities, not its version string.
+
+OpenSSL candidates are tried deterministically in this order:
+
+1. `CA_TRUST_GUARD_OPENSSL`, when set (an environment override, not an action input).
+2. `/opt/homebrew/opt/openssl@3/bin/openssl`.
+3. `/usr/local/opt/openssl@3/bin/openssl`.
+4. `/opt/homebrew/bin/openssl`.
+5. `/usr/local/bin/openssl`.
+6. `openssl` resolved from PATH.
+7. `/usr/bin/openssl`.
+
+The first candidate advertising `-CAfile`, `-untrusted` and `-attime` and passing
+the isolation check is selected. `-no-CAfile` is used only when advertised.
+`-no-CApath` is likewise conditional; when absent, an empty temporary `-CApath`
+neutralizes the default directory. `-no-CAstore` is passed only when advertised (OpenSSL 3.x), avoiding
+unsupported-option failures on 1.1.1 and LibreSSL. LibreSSL is accepted only if
+the same isolation check succeeds.
+
+The check verifies chain 1 with a temporary CAfile containing only the pinned,
+unrelated self-signed `isolation-ca.pem` certificate. It must produce the
+missing-issuer rejection, not success or a malformed/empty-store error. A
+candidate that still trusts this chain is rejected as leaking implicit trust.
+Rejections log path, version and reason and allow the next candidate to run;
+only failure of every candidate emits a probe ERROR. The selected instrument
+emits an `isolation-self-check` / `VERIFIED-DISTRUST` row before the two positive
+controls. This is instrument-control evidence, not physical-store retirement
+evidence. Its path and `openssl version` propagate to probe, OS-deny/env records
+and summary rows. Action inputs and outputs are unchanged.
 
 Fixture bytes remain SHA-256-pinned with checkout text conversion disabled.
 Generated native-tool text is a different boundary: Windows `jq.exe`

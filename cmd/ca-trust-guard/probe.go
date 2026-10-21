@@ -148,13 +148,32 @@ func probe(args []string, stdout io.Writer) error {
 	if err != nil {
 		return fatal(err)
 	}
-	verifier, err := newVerifier()
+	scratch, err := os.MkdirTemp(filepath.Dir(*out), "openssl-isolation-")
 	if err != nil {
 		return fatal(err)
 	}
+	defer os.RemoveAll(scratch)
+	isolationChain := chains[0]
+	for _, c := range chains {
+		if c.spec.ID == "1" {
+			isolationChain = c
+			break
+		}
+	}
+	verifier, err := newVerifier(isolationChain, dir, scratch, os.Stderr)
+	if err != nil {
+		if writeErr := writer.emit(row{Phase: "isolation-self-check", Store: "openssl", Chain: "1", Verdict: probeError, Detail: err.Error()}); writeErr != nil {
+			return writeErr
+		}
+		return err
+	}
 	writer.instrument = verifier
-	// The very first trust observation is the positive control for EVERY
-	// chain, before discovery or any physical/client store observation.
+	if err := writer.emit(row{Phase: "isolation-self-check", Store: "isolation-ca", Chain: "1", Verdict: distrust,
+		Detail: "selected instrument rejected chain 1 with unrelated CAfile; default-store isolation self-check passed"}); err != nil {
+		return err
+	}
+	// Isolation must pass first; EVERY positive-control chain must then verify
+	// before any physical/client candidate-store observation is accepted.
 	positive := true
 	for _, c := range chains {
 		verdict, detail := verifier.classifyStore(c, filepath.Join(dir, "vulnerable-roots.pem"))
