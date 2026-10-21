@@ -94,6 +94,12 @@ verification loop. No package upgrade or online fetch is performed.
 `bash scripts/deny-os.sh --dry-run` validates candidates and prints mutation
 commands without executing them or claiming successful distrust.
 
+Credit to [gsilvestrin](https://github.com/gsilvestrin) and
+[ductone/multipass#951](https://github.com/ductone/multipass/pull/951) for the
+adopted OS-level deny design: per-OS deny mechanics, fingerprint-keyed
+refusal-before-mutation, and the Linux verification loop; also for the enforce
+post-condition design point of verifying each mitigation where it was applied.
+
 ## Verdict table
 
 | Verdict | Meaning |
