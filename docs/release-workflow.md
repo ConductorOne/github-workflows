@@ -189,11 +189,14 @@ Custom Dockerfiles in caller repositories are still the caller's responsibility.
 #### Updating Locks
 
 `renovate.json` adds Dockerfile-template discovery and regex managers for image
-locks, helper workflow inputs, the README's Java example, and tool locks.
+locks, helper workflow inputs and setup script, the README's Java example, and tool locks.
 Enable the Renovate app for this repository to activate these rules; configuration
 alone does not grant the app access. Digest refreshes are grouped into reviewable
 PRs, with no automerge. Image tags are retained as readable update channels, not
 trusted build identities.
+Tagless QEMU and BuildKit execution references are tracked against explicit
+`latest` and `buildx-stable-1` update channels, respectively; refreshes replace
+their digests without adding mutable tags to the execution references.
 
 Neither Dependabot nor Renovate natively refreshes this repository's arbitrary
 artifact SHA-256 lock format. Regex managers instead open **draft version-proposal

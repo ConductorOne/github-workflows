@@ -11,7 +11,15 @@
     {
       "customType": "regex",
       "managerFilePatterns": ["/^\\.github/workflows/release\\.yaml$/"],
-      "matchStrings": ["image[=:]\\s*['\"]?(?<depName>[^ \\n:@'\"]+):(?<currentValue>[^ \\n:@'\"]+)@(?<currentDigest>sha256:[a-f0-9]{64})"],
+      "matchStrings": ["image[:]\\s*['\"]?(?<depName>tonistiigi/binfmt)@(?<currentDigest>sha256:[a-f0-9]{64})"],
+      "currentValueTemplate": "latest",
+      "datasourceTemplate": "docker"
+    },
+    {
+      "customType": "regex",
+      "managerFilePatterns": ["/^scripts/setup-release-buildx\\.sh$/"],
+      "matchStrings": ["image[=](?<depName>moby/buildkit)@(?<currentDigest>sha256:[a-f0-9]{64})"],
+      "currentValueTemplate": "buildx-stable-1",
       "datasourceTemplate": "docker"
     },
     {

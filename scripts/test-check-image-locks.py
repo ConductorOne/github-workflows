@@ -91,10 +91,16 @@ class UpdateConfigTest(unittest.TestCase):
             self.assertEqual(match["currentDigest"], lock[1])
 
     def test_helper_input_and_driver_assignment_are_discovered(self):
-        manager = next(m for m in self.config["customManagers"] if "release" in str(m["managerFilePatterns"]))
-        matches = self.extract(manager, f"image: '{PIN}'\n--driver-opt image={PIN}\n")
-        self.assertEqual(len(matches), 2)
-        self.assertTrue(all(m["currentDigest"] == "sha256:" + "a" * 64 for m in matches))
+        cases = [
+            ("release", "image: 'tonistiigi/binfmt", "latest"),
+            ("setup-release-buildx", "--driver-opt image=moby/buildkit", "buildx-stable-1"),
+        ]
+        for path_fragment, prefix, channel in cases:
+            manager = next(m for m in self.config["customManagers"] if path_fragment in str(m["managerFilePatterns"]))
+            matches = self.extract(manager, prefix + "@sha256:" + "a" * 64 + "'\n")
+            self.assertEqual(len(matches), 1, path_fragment)
+            self.assertEqual(matches[0]["currentDigest"], "sha256:" + "a" * 64)
+            self.assertEqual(manager["currentValueTemplate"], channel)
 
     def test_binary_tool_proposals_preserve_go_prefix(self):
         for manager in self.config["customManagers"]:
