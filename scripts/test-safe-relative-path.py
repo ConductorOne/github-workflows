@@ -41,7 +41,7 @@ def test_predicate_and_workflow_sites():
     assert query(f"{JOB}.needs") == "validate-inputs"
     assert query(f"{JOB}.permissions.actions") == "read"
     assert query(f"{JOB}.permissions.contents") == "read"
-    assert query(f'{JOB}.steps[] | select(.name == "Checkout pinned connector workflows").with.ref') == "${{ steps.workflow-version.outputs.sha }}"
+    assert query(f'{JOB}.steps[] | select(.name == "Checkout pinned connector workflows").with.ref') == "${{ job.workflow_sha }}"
     sites = (
         ("Validate dockerfile_template has safe path", "DOCKERFILE_TEMPLATE", "dockerfile_template"),
         ("Validate msi_wxs_path has no path traversal", "WXS_PATH", "msi_wxs_path"),
