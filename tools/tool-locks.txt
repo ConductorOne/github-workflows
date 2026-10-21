@@ -2,7 +2,7 @@
 # gon source: <tool> <commit> darwin/* source (checkout by object ID, build with locked Go).
 # Versions observed in baton-github-test release run 38979848074; Go hashes from go.dev/dl/?mode=json.
 # Artifact hashes fetched once from each release's checksums.txt (Syft: syft_1.42.3_checksums.txt).
-goreleaser v2.13.3 linux/amd64 4b66f2f78f78561330350651ade557b70328664718490f37834749073af21d20 https://github.com/goreleaser/goreleaser/releases/download/v2.13.3/goreleaser_Linux_x86_64.tar.gz
+goreleaser v2.13.3 linux/amd64 4b66f2f78f78561330350651ade557b70328664718490f37834749073af21d21 https://github.com/goreleaser/goreleaser/releases/download/v2.13.3/goreleaser_Linux_x86_64.tar.gz
 goreleaser v2.13.3 darwin/arm64 5516c37779efb3935d5b213cda3b0b9025ae94ddbcb51df6919acbcdef4194b0 https://github.com/goreleaser/goreleaser/releases/download/v2.13.3/goreleaser_Darwin_all.tar.gz
 goreleaser-pro v2.13.3 windows/amd64 8f65fca431ae6aa083805c9287d4b98b7937d54649712f1185b0590ae02001de https://github.com/goreleaser/goreleaser-pro/releases/download/v2.13.3/goreleaser-pro_Windows_x86_64.zip
 # gon-release v0.2.10
