@@ -36,35 +36,49 @@
     },
     {
       "customType": "regex",
-      "managerFilePatterns": ["/^tools/tool-locks\\.txt$/"],
+      "managerFilePatterns": ["/^\\.github/actions/locked-tools/tool-locks\\.txt$/"],
       "matchStrings": ["(?:^|\\n)goreleaser (?<currentValue>v[^ \\n]+) "],
       "depNameTemplate": "goreleaser/goreleaser",
       "datasourceTemplate": "github-releases"
     },
     {
       "customType": "regex",
-      "managerFilePatterns": ["/^tools/tool-locks\\.txt$/"],
+      "managerFilePatterns": ["/^\\.github/actions/locked-tools/tool-locks\\.txt$/"],
       "matchStrings": ["(?:^|\\n)goreleaser-pro (?<currentValue>v[^ \\n]+) "],
       "depNameTemplate": "goreleaser/goreleaser-pro",
       "datasourceTemplate": "github-releases"
     },
     {
       "customType": "regex",
-      "managerFilePatterns": ["/^tools/tool-locks\\.txt$/"],
+      "managerFilePatterns": ["/^\\.github/actions/locked-tools/tool-locks\\.txt$/"],
       "matchStrings": ["(?:^|\\n)# gon-release (?<currentValue>v[^ \\n]+)\\ngon (?<currentDigest>[a-f0-9]{40}) darwin/\\* source"],
       "depNameTemplate": "ConductorOne/gon",
       "datasourceTemplate": "github-tags"
     },
     {
       "customType": "regex",
-      "managerFilePatterns": ["/^tools/tool-locks\\.txt$/"],
+      "managerFilePatterns": ["/^\\.github/actions/locked-tools/tool-locks\\.txt$/"],
       "matchStrings": ["(?:^|\\n)syft (?<currentValue>v[^ \\n]+) "],
       "depNameTemplate": "anchore/syft",
       "datasourceTemplate": "github-releases"
     },
     {
       "customType": "regex",
-      "managerFilePatterns": ["/^tools/tool-locks\\.txt$/"],
+      "managerFilePatterns": ["/^\\.github/actions/locked-tools/tool-locks\\.txt$/"],
+      "matchStrings": ["(?:^|\\n)node (?<currentValue>v[^ \\n]+) "],
+      "depNameTemplate": "nodejs/node",
+      "datasourceTemplate": "github-releases"
+    },
+    {
+      "customType": "regex",
+      "managerFilePatterns": ["/^\\.github/actions/locked-tools/tool-locks\\.txt$/"],
+      "matchStrings": ["(?:^|\\n)minisign (?<currentValue>[^ \\n]+) "],
+      "depNameTemplate": "jedisct1/minisign",
+      "datasourceTemplate": "github-releases"
+    },
+    {
+      "customType": "regex",
+      "managerFilePatterns": ["/^\\.github/actions/locked-tools/tool-locks\\.txt$/"],
       "matchStrings": ["(?:^|\\n)go go(?<currentValue>[^ \\n]+) "],
       "depNameTemplate": "go",
       "datasourceTemplate": "golang-version",
@@ -90,7 +104,7 @@
       "matchManagers": ["custom.regex"],
       "matchDatasources": ["github-releases", "github-tags", "golang-version"],
       "draftPR": true,
-      "prBodyNotes": ["This is a version proposal, NOT a completed lock refresh. For binary tools, update every affected platform URL and committed SHA-256 in tools/tool-locks.txt from reviewed upstream release assets. For source-built gon, review the release tag and locked commit and rerun the source build. Refresh the download table and run installer negative controls and the release canary before marking ready. Never merge a version-only lock change."]
+      "prBodyNotes": ["This is a version proposal, NOT a completed lock refresh. For binary tools, update every affected platform URL and committed SHA-256 in .github/actions/locked-tools/tool-locks.txt from reviewed upstream release assets. For source-built gon, review the release tag and locked commit and rerun the source build. Refresh the download table and run installer negative controls and the release canary before marking ready. Never merge a version-only lock change."]
     }
   ]
 }

@@ -154,7 +154,9 @@ continues to select Linux arm64. `tools/image-locks.txt` records each image
 reference, index digest, and UTC resolution date. The helper-image locks are
 consumed by the companion release-workflow change that pins QEMU and the
 docker-container BuildKit driver.
-Until that change merges, the `tonistiigi/binfmt` and `moby/buildkit` lock lines, the release-workflow/setup-script Renovate managers, and the `tools/tool-locks.txt` version-proposal managers match nothing and are inert.
+The companion release-workflow change is now merged, so the helper-image locks
+and release-workflow/setup-script Renovate managers are active. Tool-version
+proposal managers read `.github/actions/locked-tools/tool-locks.txt`.
 
 Resolved on **2026-10-21** with `crane digest <ref>`:
 
