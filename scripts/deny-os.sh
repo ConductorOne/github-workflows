@@ -10,7 +10,10 @@ if [ "${1:-}" = --dry-run ]; then dry_run=true; shift; fi
 (cd "$fixtures" && { sha256sum -c --quiet SHA256SUMS 2>/dev/null || shasum -a 256 -c --quiet SHA256SUMS; })
 work=$(mktemp -d)
 trap 'rm -rf "$work"' EXIT
-jq -er '.certs[] | [.kind, .name, .sha1, .sha256, .pem] | @tsv' "$manifest" > "$work/identities"
+# Native Windows jq.exe writes CRLF even for LF JSON inputs. Normalize generated
+# records, not pinned fixtures; consumers also strip CR at path boundaries.
+jq -er '.certs[] | [.kind, .name, .sha1, .sha256, .pem] | @tsv' "$manifest" \
+  | tr -d '\r' > "$work/identities"
 os=$(uname -s)
 row() {
   if [ "$dry_run" = false ]; then
@@ -22,7 +25,7 @@ elevated() {
   elif [ "$(id -u)" = 0 ]; then "$@"
   else sudo -n "$@"; fi
 }
-fingerprint() { openssl x509 -in "$1" -noout -fingerprint "-$2" | sed 's/.*=//; s/://g'; }
+fingerprint() { openssl x509 -in "$1" -noout -fingerprint "-$2" | tr -d '\r' | sed 's/.*=//; s/://g'; }
 check_fingerprint() {
   local got_sha1 got_sha256
   got_sha1=$(fingerprint "$1" sha1); got_sha256=$(fingerprint "$1" sha256)
@@ -44,6 +47,7 @@ esac
 # compromised intermediates share a CN: fingerprints, never names, select them.
 i=0
 while IFS="$(printf '\t')" read -r kind name want_sha1 want_sha256 pem; do
+  pem=${pem%$'\r'}
   case "$pem" in */*|*\\*|..|'') echo 'invalid certificate fixture path' >&2; exit 1;; esac
   awk -v prefix="$work/input-$i" \
     '/-----BEGIN CERTIFICATE-----/{n++} n {print > sprintf("%s-%03d.pem", prefix, n)}' "$fixtures/$pem"
@@ -67,7 +71,8 @@ case "$os" in
     find /usr/share/ca-certificates -type f -name '*.crt' > "$work/candidates"
     : > "$work/entries"
     while IFS= read -r cert; do
-      subject=$(openssl x509 -in "$cert" -noout -subject -nameopt RFC2253)
+      cert=${cert%$'\r'}
+      subject=$(openssl x509 -in "$cert" -noout -subject -nameopt RFC2253 | tr -d '\r')
       got_sha1=$(fingerprint "$cert" sha1)
       while IFS="$(printf '\t')" read -r kind name want_sha1 want_sha256 pem; do
         [ "$kind" = root ] || continue
@@ -81,6 +86,7 @@ case "$os" in
     done < "$work/candidates"
     changed=0
     while IFS= read -r entry; do
+      entry=${entry%$'\r'}
       if grep -qxF "$entry" "$CONF"; then
         awk -v entry="$entry" '{if ($0 == entry) print "!" $0; else print}' "$CONF" > "$work/conf"
         elevated cp "$work/conf" "$CONF"
@@ -96,7 +102,7 @@ case "$os" in
     awk -v dir="$work" '/-----BEGIN CERTIFICATE-----/{n++} n {print > sprintf("%s/dca-%03d.pem", dir, n)}' "$BUNDLE"
     for cert in "$work"/dca-*.pem; do
       [ -s "$cert" ] || continue
-      subject=$(openssl x509 -in "$cert" -noout -subject -nameopt RFC2253)
+      subject=$(openssl x509 -in "$cert" -noout -subject -nameopt RFC2253 | tr -d '\r')
       got_sha1=$(fingerprint "$cert" sha1)
       while IFS="$(printf '\t')" read -r kind name want_sha1 want_sha256 pem; do
         [ "$kind" = root ] || continue
@@ -126,6 +132,7 @@ case "$os" in
     done < "$work/identities"
     # Root exports and both fixture intermediates all passed before mutation.
     while IFS="$(printf '\t')" read -r name want_sha1 want_sha256 cert; do
+      cert=${cert%$'\r'}
       check_fingerprint "$cert" "$want_sha1" "$want_sha256" "$name"
       elevated security add-trusted-cert -d -r deny -k /Library/Keychains/System.keychain "$cert"
       row DENIED "$name ($want_sha1) in System.keychain"

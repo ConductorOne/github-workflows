@@ -13,12 +13,21 @@ steps:
 The five steps are BEFORE probe → optional OS denial → optional clean-bundle
 environment → unconditional AFTER probe → summary/enforcement. Fixtures ship
 inside the action and are resolved from its location, not a caller checkout.
+An OS-denial error is recorded and fails that step. When BEFORE succeeded, an
+enabled clean-bundle leg still runs after a failed deny; AFTER and summary run
+unless the job was cancelled.
 Every probe first validates SHA256SUMS and verifies **both** positive-control
 chains against `vulnerable-roots.pem`, then observes the physical/client stores.
 `chains.json` pins certificate DER fingerprints and capture epochs. File-store
 measurement uses OpenSSL with explicit CAfile/intermediates and capture time,
 with all implicit CAfile/CApath/CAstore inputs disabled. The PATH-resolved
 instrument's path and version are logged in probe rows.
+
+Fixture bytes remain SHA-256-pinned with checkout text conversion disabled.
+Generated native-tool text is a different boundary: Windows `jq.exe`
+[converts LF output to CRLF by default](https://jqlang.org/manual/v1.7/#invoking-jq).
+The deny leg normalizes generated TSV/fingerprint output and strips trailing CR
+at path consumption; it does not normalize or waive checksums on fixture bytes.
 
 **Why OpenSSL remains the measurement instrument:** Go 1.27.3 `crypto/x509`
 applies the incident SPKI blacklist unconditionally through
@@ -36,6 +45,11 @@ floor, so an older runner Go is not forced to satisfy the repository module's
 Go 1.27.3 directive. Vet/tests retain that module/toolchain requirement. Nothing
 is downloaded; a missing/too-old compiler fails closed. The runner Go compiler
 is a residual bootstrap dependency in the same trust class as the runner agent.
+
+Compiler discovery prefers PATH, then the highest runnable stable cached Go
+under `RUNNER_TOOLCACHE` / `RUNNER_TOOL_CACHE` and hosted-toolcache fallbacks
+(`arm64` / `x64`), then `/opt/homebrew/bin/go` and `/usr/local/go/bin/go`.
+No compiler is downloaded. If none is found, the error lists the probed locations.
 
 The command emits JSON-encoded `ca-trust-guard` rows, and writes raw JSONL
 under `$RUNNER_TEMP/ca-trust-guard/`. Its direct interfaces are:
@@ -176,6 +190,7 @@ remain residual until the runner image changes or their specific store is
 repaired; environment coverage alone is not physical-store retirement proof.
 
 Scoped verification: `go vet ./cmd/ca-trust-guard/...`,
-`go test ./cmd/ca-trust-guard/...`, `bash scripts/test-deny-os.sh`, and shellcheck
-on the new Bash scripts. The reusable verify workflow checks these workflow-repo
-paths independently of its caller's code.
+`go test ./cmd/ca-trust-guard/...`, `bash scripts/test-deny-os.sh`,
+`bash scripts/test-ca-trust-guard.sh`, and shellcheck on the new Bash scripts.
+The reusable verify workflow checks these workflow-repo paths independently of
+its caller's code.

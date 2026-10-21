@@ -17,6 +17,7 @@ runs:
   using: composite
   steps:
     - name: Probe BEFORE
+      id: before
       shell: bash
       env:
         GUARD_ROOT: ${{ github.action_path }}/../../..
@@ -36,7 +37,7 @@ runs:
         GUARD_OS_DENY_ELEVATION: ${{ inputs.os-deny-elevation }}
       run: bash "$GUARD_ROOT/scripts/ca-trust-guard.sh" deny-os
     - name: Apply clean-bundle environment
-      if: inputs.apply-distrust == 'true'
+      if: ${{ !cancelled() && steps.before.outcome == 'success' && inputs.apply-distrust == 'true' }}
       shell: bash
       env:
         GUARD_ROOT: ${{ github.action_path }}/../../..

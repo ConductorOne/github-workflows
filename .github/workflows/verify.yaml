@@ -174,8 +174,12 @@ jobs:
       - name: Test OS denial scripts
         working-directory: _workflow
         run: bash scripts/test-deny-os.sh
+      - name: Test offline bootstrap and step error propagation
+        working-directory: _workflow
+        run: bash scripts/test-ca-trust-guard.sh
       - name: Shellcheck CA Trust Guard scripts
         working-directory: _workflow
         run: >-
           shellcheck --shell=bash scripts/ca-trust-guard.sh scripts/deny-os.sh
           scripts/apply-clean-bundle.sh scripts/test-deny-os.sh
+          scripts/test-ca-trust-guard.sh

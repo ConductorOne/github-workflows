@@ -3,3 +3,4 @@ scripts/ca-trust-guard.sh text eol=lf
 scripts/deny-os.sh text eol=lf
 scripts/apply-clean-bundle.sh text eol=lf
 scripts/test-deny-os.sh text eol=lf
+scripts/test-ca-trust-guard.sh text eol=lf

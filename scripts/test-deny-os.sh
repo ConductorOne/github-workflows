@@ -15,8 +15,16 @@ awk -v dir="$work/certs" '/-----BEGIN CERTIFICATE-----/{n++} n {print > sprintf(
   "$fixtures/vulnerable-roots.pem"
 printf 'root-1.crt\nroot-2.crt\nroot-3.crt\nroot-4.crt\n' > "$work/ca-certificates.conf"
 cp "$fixtures/vulnerable-roots.pem" "$work/bundle.pem"
-export TEST_WORK="$work" TEST_FIXTURES="$fixtures" OPENSSL_REAL
+export TEST_WORK="$work" TEST_FIXTURES="$fixtures" OPENSSL_REAL JQ_REAL
 OPENSSL_REAL=$(command -v openssl)
+JQ_REAL=$(type -P jq)
+cat > "$work/bin/jq" <<'SCRIPT'
+#!/bin/bash
+set -euo pipefail
+if [ "${TEST_CRLF_RECORDS:-false}" = true ]; then
+  "$JQ_REAL" "$@" | sed 's/$/\r/' | tee "$TEST_WORK/native-jq.tsv"
+else exec "$JQ_REAL" "$@"; fi
+SCRIPT
 cat > "$work/bin/uname" <<'SCRIPT'
 #!/bin/sh
 printf '%s\n' "$TEST_OS"
@@ -45,6 +53,8 @@ cat > "$work/bin/openssl" <<'SCRIPT'
 set -euo pipefail
 if [ "${TEST_MISMATCH:-false}" = true ] && [[ " $* " == *' -fingerprint '* ]]; then
   printf 'Fingerprint=0000000000000000000000000000000000000000\n'
+elif [ "${TEST_CRLF_OPENSSL:-false}" = true ]; then
+  "$OPENSSL_REAL" "$@" | sed 's/$/\r/'
 else exec "$OPENSSL_REAL" "$@"; fi
 SCRIPT
 cat > "$work/bin/update-ca-certificates" <<'SCRIPT'
@@ -70,6 +80,13 @@ chmod +x "$work"/bin/*
 export PATH="$work/bin:$PATH" CA_GUARD_BIN="$work/bin/record" CA_GUARD_STATE="$work"
 output=$(TEST_OS=Darwin bash "$work/repo/scripts/deny-os.sh" --dry-run)
 [ "$(printf '%s\n' "$output" | grep -c 'DRY-RUN security add-trusted-cert')" = 6 ]
+[ ! -e "$work/mutations" ]
+# Model native jq.exe/OpenSSL output conversion, NOT modified pinned fixtures.
+output=$(TEST_OS=Darwin TEST_CRLF_RECORDS=true TEST_CRLF_OPENSSL=true \
+  bash "$work/repo/scripts/deny-os.sh" --dry-run)
+grep -q $'\r' "$work/native-jq.tsv"
+[ "$(printf '%s\n' "$output" | grep -c 'DRY-RUN security add-trusted-cert')" = 6 ]
+case "$output" in *$'\r'*|*'\r'*) echo 'CR leaked into a dry-run certificate path' >&2; exit 1;; esac
 [ ! -e "$work/mutations" ]
 output=$(TEST_OS=Linux bash "$work/repo/scripts/deny-os.sh" --dry-run)
 [ "$(printf '%s\n' "$output" | grep -c 'DRY-RUN cp')" = 4 ]
