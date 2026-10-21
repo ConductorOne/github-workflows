@@ -518,6 +518,10 @@ duplicate locks, newer or malformed Go requirements, the source-locked gon
 build gates, bundled-buildx failure, and event-SHA checks with both lightweight
 and annotated tags. It also checks workflow credential ordering. These are
 deterministic local fixtures, not deployed macOS or Windows proof.
+Repository CI additionally runs the single Windows Node installer fixture on
+`windows-latest`, using real ZIP/hash/extraction/leaf checks and a shadowed
+download command, without release secrets. This is native fixture proof, not a
+deployed Windows release or signing test.
 
 Before release adoption, run canaries on `ConductorOne/baton-github-test`:
 mutate one artifact hash at a time for GoReleaser and Syft and require the
