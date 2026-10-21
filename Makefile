@@ -14,7 +14,7 @@ test: test-go test-scripts
 
 .PHONY: test-go
 test-go:
-	go test ./cmd/extract-images ./cmd/record-release ./cmd/generate-manifest ./cmd/merge-manifests ./cmd/publish-public-ecr-release-tags
+	go test ./...
 
 .PHONY: test-scripts
 test-scripts:
@@ -28,7 +28,7 @@ test-scripts:
 	bash scripts/test-validate-release-artifacts.sh
 	bash scripts/test-cosign-retry.sh
 	bash scripts/test-publish-homebrew-formula.sh
-	python3 -m unittest discover -s .github/actions/pr-review/scripts -p 'test_*.py'
+	python3 -m unittest discover -b -s .github/actions/pr-review/scripts -p 'test_*.py'
 	if command -v pwsh >/dev/null 2>&1; then pwsh -NoProfile -File scripts/test-s3-release-uploads.ps1; else echo "pwsh not found; skipping PowerShell S3 release upload tests"; fi
 
 .PHONY: workflow-validate

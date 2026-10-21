@@ -2,7 +2,8 @@
 
 Internals and all options for `pr-review.yaml`, `general-pr-review.yaml` and the
 `.github/actions/pr-review` composite action. The README carries the short
-version and how to call it.
+version, the input table, and how to call it; this file is the detail behind
+it and does not repeat it.
 
 Runs Claude-powered PR review for same-repository pull requests. Fork PRs are skipped
 because they do not receive automatic Claude review. Review jobs check out the exact PR
@@ -121,9 +122,9 @@ credential isolation and does not replace required human approval.
 
 ## Reusable Workflow Calls
 
-Callers of `pr-review.yaml` must pass `ANTHROPIC_API_KEY` as a named secret; do not
-inherit unrelated secrets. The called workflow uses the caller's existing
-`GITHUB_TOKEN` and declared review permissions.
+How to call these workflows, and what secrets they need, is in the README's
+[Reusable Workflow Calls](../README.md#reusable-workflow-calls) section. This
+section covers only what the inputs mean in detail.
 
 The optional `summary_marker` input selects a single-line heading such as
 `### Connector PR Review Canary:`. Empty uses the selected profile's existing

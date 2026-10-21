@@ -5,19 +5,33 @@
 # `make test` existed but only ever ran by hand. The pr-review scripts are the
 # sharpest case — they carry the most logic here and had no automated run at
 # all.
+#
+# Not covered yet, deliberately rather than by oversight: golangci-lint (the
+# repo ships .golangci.yml and verify.yaml:43 already encodes the invocation
+# for caller repos, but it has never run against this repo and would need its
+# own green-first pass) and `make workflow-validate`.
 name: self-test
 on:
   pull_request:
   push:
     branches: [main]
 concurrency:
-  group: self-test-${{ github.workflow_ref }}-${{ github.event.pull_request.number || github.ref }}
+  # run_id, not github.ref, for the non-PR fallback: every push to main would
+  # otherwise share one group and a second merge would cancel the first
+  # commit's run, leaving that commit with no completed test. This is the
+  # shape pr-review.yaml and general-pr-review.yaml already use.
+  group: self-test-${{ github.workflow_ref }}-${{ github.event.pull_request.number || github.run_id }}
   cancel-in-progress: true
 permissions:
   contents: read
 jobs:
   test:
     runs-on: ubuntu-latest
+    # `make test` runs the Makefile, scripts/ and every test_*.py as they exist
+    # at the PR head — inherent to a pull_request trigger, and safe (no secrets
+    # are referenced and a fork's token is read-only), but a hung or looping
+    # test would otherwise burn the 360-minute default.
+    timeout-minutes: 15
     steps:
     - name: Checkout
       uses: actions/checkout@v5
@@ -27,28 +41,28 @@ jobs:
       uses: actions/setup-go@v6
       with:
         go-version-file: go.mod
-    - name: Ensure yq
+    - name: Check prerequisites
       shell: bash
       run: |
-        # Three script tests shell out to it (test-safe-relative-path.py,
+        set -euo pipefail
+        # yq comes from the runner image, like python3 and the rest of the
+        # suite's tooling. Asserted here rather than hoped for: three script
+        # tests shell out to it (test-safe-relative-path.py,
         # test-windows-pre-build-script.py, test-release-workflow-tag-pin.sh)
-        # and fail hard without it. Present on current GitHub runner images;
-        # installed here so the suite does not quietly depend on that.
-        if command -v yq >/dev/null 2>&1; then
-          yq --version
-          exit 0
-        fi
-        # Pinned by digest, not only by tag: a release tag can be repointed,
-        # so the tag alone does not say what ends up running as root here.
-        # SHA-256 of yq_linux_amd64 from the v4.44.3 `checksums` asset.
-        # Verified before the binary is made executable — the step runs under
-        # `set -e`, so a mismatch fails the job rather than installing it.
-        YQ_SHA256=a2c097180dd884a8d50c956ee16a9cec070f30a7947cf4ebf87d5f36213e9ed7
-        curl -fsSL -o "${RUNNER_TEMP}/yq" \
-          https://github.com/mikefarah/yq/releases/download/v4.44.3/yq_linux_amd64
-        echo "${YQ_SHA256}  ${RUNNER_TEMP}/yq" | sha256sum -c -
-        sudo install -m 0755 "${RUNNER_TEMP}/yq" /usr/local/bin/yq
+        # and fail with a bare "command not found" halfway through the suite
+        # if it is missing. Failing here instead says which tool and why.
         yq --version
     - name: make test
       shell: bash
-      run: make test
+      run: |
+        set -euo pipefail
+        # The pr-review scripts print `::error::` / `::warning::` lines as
+        # their normal failure paths, and the tests drive those paths as
+        # SUCCESS cases — a green run emits 9 errors and 3 warnings at column
+        # zero. Without this the runner parses them as workflow commands and
+        # annotates a passing PR with red errors. The token makes the runner
+        # treat them as plain text until it is echoed back.
+        STOP="stop-$(uuidgen)"
+        echo "::stop-commands::${STOP}"
+        trap 'echo "::${STOP}::"' EXIT
+        make test

@@ -22,10 +22,13 @@ Callers of `pr-review.yaml` must pass `ANTHROPIC_API_KEY` as a named secret; do 
 inherit unrelated secrets. The called workflow uses the caller's existing
 `GITHUB_TOKEN` and declared review permissions.
 
+These are `pr-review.yaml`'s inputs. `general-pr-review.yaml` declares none —
+it takes the `ANTHROPIC_API_KEY` secret and nothing else.
+
 | Input | Default | Purpose |
 | --- | --- | --- |
 | `review_prompt` | `connector` | Which built-in mixin to add: `connector` or `general`. |
-| `summary_marker` | profile's heading | Override the review summary heading. See [Reusable workflow calls](docs/pr-review.md#reusable-workflow-calls). |
+| `summary_marker` | `""` (the profile's heading) | Override the review summary heading. Must be a single-line `### ...:` Markdown heading and may not embed a reserved one — the action validates this and fails the job otherwise. See [Reusable workflow calls](docs/pr-review.md#reusable-workflow-calls). |
 
 ## Release Workflow
 
@@ -334,6 +337,15 @@ The `test-flow` parameter can be:
 - `disable-only`: Only test disabling the account
 
 ## Development
+
+`make test` runs this repository's own Go tests and script tests, including the
+`pr-review` Python suite under `.github/actions/pr-review/scripts`. It is a
+required-by-convention gate: `self-test.yaml` runs it on every pull request and
+every push to `main`. Running it locally needs `yq` (three script tests shell
+out to it) and optionally `pwsh`, which is skipped when absent.
+
+Note that `verify.yaml` is **not** this: it is a reusable workflow that tests
+whichever repo calls it, not this one.
 
 See [release-workflow.md](docs/release-workflow.md) for testing and modification guidance.
 
