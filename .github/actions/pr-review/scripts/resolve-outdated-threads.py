@@ -20,7 +20,11 @@ from typing import Optional
 REVIEW_PREFIXES = ("🔴 Security:", "🟠 Bug:", "🟡 Suggestion:")
 DEFAULT_API_ATTEMPTS = 3
 HTTP_STATUS_PATTERN = re.compile(r"HTTP\s+(\d{3})")
-BOT_LOGINS = {"github-actions[bot]", "github-actions"}
+# Shared with publish-review-report.py and fetch-pr-context.py so every side
+# of the contract classifies comments identically. Thread classification is one
+# of those sides: an unlisted bot login would read as a human reply here and
+# suppress re-raising a finding, so a private copy drifting is fail-open.
+from _review_state import BOT_LOGINS  # noqa: E402
 
 LIST_THREADS_QUERY = """
 query($owner: String!, $repo: String!, $number: Int!, $after: String) {
@@ -185,8 +189,11 @@ def collect_prior_findings(threads: list[dict]) -> list[dict]:
     `has_author_reply` records whether anyone other than this reviewer has
     written in the thread. It is not evidence about the code either — it says
     a human engaged with the finding and the thread is not just the bot
-    talking to itself. The audit uses it to decide whether re-raising the
-    finding as a NEW inline thread is warranted, never to skip verifying it.
+    talking to itself. Step 3 of the review prompt branches on it to decide
+    whether to open a NEW inline thread for a still-present finding, never to
+    skip verifying one. It is deliberately the axis rather than
+    `thread_resolved`, because most resolved threads here were resolved by
+    should_resolve above rather than by a person.
     """
     findings = []
     for thread in threads:
@@ -206,15 +213,21 @@ def collect_prior_findings(threads: list[dict]) -> list[dict]:
             "excerpt": body.splitlines()[0][:200],
             "thread_resolved": thread["isResolved"],
             "thread_outdated": thread["isOutdated"],
-            # Truncated threads count as replied-to. The query takes only the
+            # A truncated thread counts as replied-to. The query takes the
             # first 20 comments, so on a longer thread a human reply can sit
-            # past the cut and read as "nobody ever answered" — the one
-            # direction that makes the audit MORE willing to re-raise a
-            # finding. A thread that long has been engaged with. (is_resolvable
-            # above treats the same truncation as a reason not to act, for the
-            # same underlying reason: do not act on what was not read.)
+            # past the cut and read as "nobody ever answered".
+            #
+            # Note which way this errs, because it is not the usual one: the
+            # audit suppresses a new inline thread when this is true, so True
+            # buys silence, and for a reviewer silence is the unsafe
+            # direction. It is chosen anyway because a thread past twenty
+            # comments has demonstrably been engaged with, and re-raising into
+            # a conversation that long is the worse failure. should_resolve
+            # above reads the same truncation as a reason not to auto-resolve
+            # — opposite literal value, same instinct: do not act on what was
+            # not read.
             "has_author_reply": (
-                thread["comments"]["totalCount"] != len(comments)
+                thread["comments"]["totalCount"] > len(comments)
                 or any(
                     (c.get("author") or {}).get("login", "") not in BOT_LOGINS
                     for c in comments[1:]
@@ -306,6 +319,13 @@ def main():
     }
 
     write_summary(summary)
+    # DELIBERATELY the pre-mutation snapshot. `resolve_thread` changes GitHub,
+    # not these dicts, so a thread resolved seconds ago is still reported
+    # unresolved and outdated — which is the one path that lets the review
+    # re-anchor that finding at its new location before the resolution takes
+    # effect for good. "Reporting the state we just set" looks like an obvious
+    # cleanup and would silently turn every outdated finding into a summary
+    # line forever. test_prior_findings_report_pre_resolution_state pins it.
     write_prior_findings(collect_prior_findings(threads))
 
     print(f"\nDone: resolved {len(resolved)}/{len(to_resolve)} threads")

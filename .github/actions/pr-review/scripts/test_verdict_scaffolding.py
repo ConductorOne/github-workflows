@@ -1813,6 +1813,19 @@ class PriorFindingsTest(unittest.TestCase):
                 ])
                 self.assertFalse(findings[0]["has_author_reply"])
 
+    def test_prior_findings_report_pre_resolution_state(self):
+        # main() resolves outdated bot-only threads and THEN collects prior
+        # findings from the same, un-refreshed list. That ordering is what
+        # lets the review re-anchor the finding once before the resolution
+        # takes effect; "report the state we just set" would look like a
+        # cleanup and would silently turn every outdated finding into a
+        # summary line forever. If this fails, read the comment in main().
+        thread = self._thread("🟠 Bug: x", outdated=True)
+        self.assertTrue(rot.should_resolve(thread))        # main() would resolve it
+        finding = rot.collect_prior_findings([thread])[0]  # ...and still reports it
+        self.assertFalse(finding["thread_resolved"])       # as unresolved + outdated,
+        self.assertTrue(finding["thread_outdated"])        # which is the re-anchor path
+
     def test_author_reply_survives_a_later_bot_comment(self):
         # Ordering must not matter: the bot replying last does not erase the
         # fact that a human wrote in the thread.
@@ -1837,25 +1850,29 @@ class PriorFindingsTest(unittest.TestCase):
         self.assertTrue(findings[0]["thread_outdated"])
         self.assertTrue(findings[0]["has_author_reply"])
 
-    def test_truncated_thread_counts_as_replied_to(self):
-        # The query takes comments(first: 20). On a longer thread a human
-        # reply can sit past the cut; reading that as "nobody replied" is the
-        # one direction that makes the audit more willing to re-raise.
-        thread = self._thread("\U0001f7e0 Bug: x")
-        thread["comments"]["totalCount"] = 25   # 1 fetched, 25 exist
-        findings = rot.collect_prior_findings([thread])
-        self.assertTrue(findings[0]["has_author_reply"])
+    def _bot_thread_of_length(self, n: int, total: int | None = None) -> dict:
+        """A bot-only thread of n FETCHED comments, totalCount defaulting to n.
 
-    def test_untruncated_bot_only_thread_still_has_no_author_reply(self):
-        # The truncation rule must not swallow the ordinary case: a complete
-        # thread with only bot comments has no author reply.
+        The query is comments(first: 20), so a truncated thread really looks
+        like 20 fetched nodes with a higher totalCount — not one node and a
+        big number, which the API cannot produce.
+        """
         thread = self._thread(
             "\U0001f7e0 Bug: x",
-            replies=[("github-actions[bot]", "re-posting, prior thread outdated")],
+            replies=[("github-actions[bot]", f"bot {i}") for i in range(n - 1)],
         )
-        self.assertEqual(thread["comments"]["totalCount"], 2)
-        findings = rot.collect_prior_findings([thread])
-        self.assertFalse(findings[0]["has_author_reply"])
+        thread["comments"]["totalCount"] = n if total is None else total
+        return thread
+
+    def test_truncation_boundary(self):
+        # 20 fetched of 20 is complete and must stay False; 20 of 21 is the
+        # first truncated shape the query can actually return.
+        complete = self._bot_thread_of_length(20)
+        self.assertEqual(len(complete["comments"]["nodes"]), 20)
+        self.assertFalse(rot.collect_prior_findings([complete])[0]["has_author_reply"])
+
+        truncated = self._bot_thread_of_length(20, total=21)
+        self.assertTrue(rot.collect_prior_findings([truncated])[0]["has_author_reply"])
 
     def test_severity_mapping(self):
         self.assertEqual(rot.severity_of("🔴 Security: s"), "security")

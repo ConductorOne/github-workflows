@@ -127,10 +127,14 @@ PR head tree, not the previous reviewed tree.
 ### Step 3 — Audit prior findings (mandatory)
 
 Read `.github/prior-findings.json` — it lists every finding this reviewer has
-previously posted on this PR (path, line, severity, excerpt, and the thread's
-`thread_resolved` / `thread_outdated` state). Also read
-`.github/resolved-threads.json` and use its `resolved_count` when reporting
-"Threads Resolved" in the summary.
+previously posted on this PR: `path`, `line`, `severity`, `excerpt`, the
+thread's `thread_resolved` / `thread_outdated` state, and `has_author_reply`,
+which is true when anyone other than this reviewer has written in the thread.
+Also read `.github/resolved-threads.json`: use its `resolved_count` when
+reporting "Threads Resolved", and note `resolution_blocked` — when it is true
+this run could not resolve its own outdated threads (the token is denied that
+mutation in some repos), so expect stale `thread_outdated` entries that nobody
+will ever clear.
 
 Thread state is not evidence of code state. A resolved or outdated thread does
 NOT mean the issue was fixed — anyone can resolve a thread without changing
@@ -141,21 +145,32 @@ For EACH entry in `prior_findings`, read the current code at (and around) the
 flagged location and assign exactly one verdict:
 
 - `still present` — the issue exists in the current code. Count it in the
-  summary's Blocking Issues or Suggestions at its severity in every case
+  summary's Blocking Issues or Suggestions at its severity in EVERY case
   below; what changes is only whether you open a NEW inline thread for it.
-  - Thread still open and accurate: do not post a duplicate — the open thread
-    already covers it.
-  - Thread outdated (its line no longer matches the code) and NOT resolved:
-    post a fresh inline comment at the current location, because nothing on
-    the PR currently points at the issue.
-  - Thread resolved, whether or not it is outdated: do NOT open a new thread.
-    Someone closed it deliberately, and `has_author_reply` tells you whether
-    they also wrote a reason. Say "Prior — still present" in the summary
-    instead. An outdated thread stays outdated forever, so re-posting on that
-    basis alone re-raises the same closed finding on every future run — each
-    new thread becoming another prior finding that re-posts in turn.
-    Re-opening the question belongs in the summary, where it is said once, not
-    in a thread the author already answered.
+  Work down these in order and stop at the first that matches:
+  - **`has_author_reply` is true** — a person has written in that thread. Do
+    not open a new one, whether the thread is open, outdated or resolved.
+    Report it as "Prior — still present" in the summary. Re-raising a question
+    someone already answered belongs in the summary, where it is said once.
+  - **Another open, accurate thread already covers this same issue** — do not
+    post a duplicate. Prior findings are one entry per thread, not per issue,
+    so one issue can appear several times here; the open one covers it.
+  - **The thread is outdated and nothing open covers the issue** — post a
+    fresh inline comment at the current location. Nothing on the PR points at
+    it otherwise, and this is also the path that recovers a finding whose
+    thread was resolved automatically rather than by a person.
+  - **Otherwise** (thread open and accurate) — do not post a duplicate.
+
+  This branches on `has_author_reply` rather than on `thread_resolved` because
+  a resolved thread is usually not a human decision: this action resolves its
+  own outdated, reply-free threads on every run. An outdated thread also stays
+  outdated forever, so keying on that alone re-raises the same finding on
+  every future run, each new thread becoming another prior finding that
+  re-posts in turn.
+
+  Scope: all of this is about the flagged location. A distinct occurrence of
+  the same kind of issue somewhere else is a New finding and these rules do
+  not cover it.
 - `fixed` — the current code resolves it. Cite the file:line that fixes it.
 - `obsolete` — the code it applied to was removed or rewritten so the issue no
   longer applies. Say what replaced it.
@@ -263,12 +278,11 @@ confident about is a validated finding at `suggestion` severity with its confide
 noted, not a dropped finding and not an unvalidated guess. The downstream verdict logic,
 not pre-filtering, decides what blocks merge.
 
-Handle prior findings per the Step 3 audit — never silently skip them. Do not
-post a duplicate inline comment for a still-present issue whose thread is open
-and accurate, and never open a new thread for one whose thread is resolved. DO
-count every still-present issue in the summary counts, and DO post a fresh
-inline comment when the old thread is outdated, unresolved, and no longer
-points at the code.
+Handle prior findings per the Step 3 audit — never silently skip them, and
+apply its four thread cases exactly as written there rather than re-deriving
+them. The invariant those cases sit under, and the one thing to carry out of
+Step 3 if you carry nothing else: EVERY still-present issue is counted in the
+summary at its severity, whatever you decide about its thread.
 
 Finally, take stock of your own coverage. If part of the change could not be fully
 reviewed — truncated or dropped diff paths, unreadable generated content, areas you
