@@ -37,9 +37,13 @@ func discoverStores(goos string, command commandRunner) []store {
 			stores = append(stores, store{"python-certifi", strings.TrimSpace(string(path))})
 		}
 	case "darwin":
-		prefix, _ := command("brew", "--prefix")
-		stores = append(stores, store{"macos-etc-ssl-cert-pem", "/etc/ssl/cert.pem"},
-			store{"macos-brew", strings.TrimSpace(string(prefix)) + "/etc/ca-certificates/cert.pem"})
+		stores = append(stores, store{"macos-etc-ssl-cert-pem", "/etc/ssl/cert.pem"})
+		if prefix, err := command("brew", "--prefix"); err == nil && strings.TrimSpace(string(prefix)) != "" {
+			path := filepath.Join(strings.TrimSpace(string(prefix)), "etc", "ca-certificates", "cert.pem")
+			if _, err := os.Stat(path); err == nil {
+				stores = append(stores, store{"macos-brew", path})
+			}
+		}
 	case "windows":
 		output, _ := command("openssl", "version", "-d")
 		parts := strings.Split(string(output), "\"")
