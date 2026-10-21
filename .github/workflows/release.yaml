@@ -259,7 +259,7 @@ jobs:
     steps:
       - name: Checkout caller repo
         if: inputs.go_source_hygiene == true || inputs.go_vulnerability_scan == true
-        uses: actions/checkout@v5
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # actions/checkout@v5
         with:
           path: _caller
           repository: ${{ github.event.repository.full_name }}
@@ -269,7 +269,7 @@ jobs:
 
       - name: Checkout connector workflows
         if: inputs.go_source_hygiene == true || inputs.go_vulnerability_scan == true
-        uses: actions/checkout@v5
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # actions/checkout@v5
         with:
           path: _workflows
           repository: ConductorOne/github-workflows
@@ -425,7 +425,7 @@ jobs:
         run: bash _workflows/scripts/gon-source.sh ref
 
       - name: Checkout locked gon source
-        uses: actions/checkout@v5
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # actions/checkout@v5
         with:
           repository: ConductorOne/gon
           ref: ${{ steps.gon-source.outputs.ref }}
