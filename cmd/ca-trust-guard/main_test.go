@@ -8,6 +8,7 @@ import (
 	"go/version"
 	"os"
 	"path/filepath"
+	"reflect"
 	"runtime"
 	"strings"
 	"testing"
@@ -30,6 +31,42 @@ func fixtureChains(t *testing.T) []chain {
 		t.Fatal(err)
 	}
 	return chains
+}
+
+func TestDiscoverStoresDarwin(t *testing.T) {
+	prefix := filepath.Join(t.TempDir(), "opt", "homebrew")
+	bundle := filepath.Join(prefix, "etc", "ca-certificates", "cert.pem")
+	if err := os.MkdirAll(filepath.Dir(bundle), 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(bundle, []byte("fixture bundle"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	system := store{"macos-etc-ssl-cert-pem", "/etc/ssl/cert.pem"}
+	for _, test := range []struct {
+		name   string
+		output string
+		err    error
+		want   []store
+	}{
+		{"brew unavailable", "", errors.New("brew not found"), []store{system}},
+		{"brew failure with output", prefix + "\n", errors.New("brew failed"), []store{system}},
+		{"empty prefix", " \n", nil, []store{system}},
+		{"bundle present", prefix + "\n", nil, []store{system, {"macos-brew", bundle}}},
+		{"bundle absent", filepath.Join(t.TempDir(), "missing-formula") + "\n", nil, []store{system}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			command := func(name string, args ...string) ([]byte, error) {
+				if name != "brew" || !reflect.DeepEqual(args, []string{"--prefix"}) {
+					t.Fatalf("unexpected discovery command: %s %v", name, args)
+				}
+				return []byte(test.output), test.err
+			}
+			if got := discoverStores("darwin", command); !reflect.DeepEqual(got, test.want) {
+				t.Fatalf("stores=%v, want %v", got, test.want)
+			}
+		})
+	}
 }
 
 func TestClassifyStores(t *testing.T) {

@@ -161,6 +161,7 @@ BEFORE baseline; AFTER rows are the actual per-store retirement observations.
   are not rewritten and may remain residual.
 - macOS denies through System.keychain/SecTrust using root or noninteractive
   sudo. `/etc/ssl/cert.pem` and Homebrew bundles are **not** rewritten.
+  `macos-brew` is observed only when Homebrew and its ca-certificates bundle are present.
 - Elevated Windows imports all six pinned fixture certificates into machine
   Disallowed, independent of prior online chain caching. The four machine/user
   Root/CA stores are still checked for fingerprint/name collisions; their
