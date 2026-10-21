@@ -181,6 +181,7 @@ helpers fetch only that URL, verify the hash **before extraction**, and add the
 verified directory to the next step's PATH. They never run the downloaded
 binary. All tool installations, including cosign and the native gon build,
 finish before Apple certificates, release secrets, or AWS credentials are read.
+Both installers require the expected binary layout before publishing PATH; missing tools never silently fall back to runner-bundled binaries.
 The workflow checks out its own source using GitHub's `job.workflow_sha`
 context, eliminating the previous Python package bootstrap.
 

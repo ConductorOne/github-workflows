@@ -65,14 +65,14 @@ class IntegrityTests(unittest.TestCase):
             return f"node-{version}-{os_name}-{node_arch}/bin/node"
         return tool
 
-    def fixture_download(self, tool: str, platform: str) -> Path:
+    def fixture_download(self, tool: str, platform: str, member: str | None = None, mode: int = 0o755) -> Path:
         archive = self.root / "fixture.tar.gz"
-        member = self.archive_member(tool, platform)
+        member = member or self.archive_member(tool, platform)
         with tarfile.open(archive, "w:gz") as tar:
             data = b"#!/bin/sh\necho 'binary must not be invoked' >&2\nexit 77\n"
             info = tarfile.TarInfo(member)
             info.size = len(data)
-            info.mode = 0o755
+            info.mode = mode
             tar.addfile(info, io.BytesIO(data))
         digest = hashlib.sha256(archive.read_bytes()).hexdigest()
         rows = []
@@ -115,6 +115,26 @@ class IntegrityTests(unittest.TestCase):
                 self.assertNotIn("tar\n", self.calls.read_text())
                 self.assertFalse((self.root / "dest").exists())
                 self.assertFalse(self.path_file.exists())
+
+    def test_node_layout_mismatch_never_publishes_path(self) -> None:
+        for os_name, platform in (("Linux", "linux/amd64"), ("Darwin", "darwin/arm64")):
+            with self.subTest(platform=platform):
+                self.fixture_download("node", platform, member="unexpected-node/bin/node")
+                self.env.update(TEST_OS=os_name, TEST_ARCH="arm64" if os_name == "Darwin" else "x86_64")
+                dest = self.root / f"wrong-layout-{os_name}"
+                result = self.run_script("install-tool.sh", "node", dest, ok=False)
+                self.assertIn("::error title=GF13::node package layout mismatch", result.stderr)
+                self.assertTrue((dest / "unexpected-node/bin/node").is_file(), "fixture must reach extraction")
+                self.assertFalse(self.path_file.exists())
+
+    def test_nonexecutable_binary_never_publishes_environment(self) -> None:
+        for tool in ("go", "node"):
+            with self.subTest(tool=tool):
+                self.fixture_download(tool, "linux/amd64", mode=0o644)
+                result = self.run_script("install-tool.sh", tool, self.root / tool, ok=False)
+                self.assertIn(f"::error title=GF13::{tool} package layout mismatch", result.stderr)
+                self.assertFalse(self.path_file.exists())
+                self.assertFalse(self.env_file.exists())
 
     def test_stale_version_url_and_duplicate_locks_fail_before_network(self) -> None:
         self.fixture_download("syft", "linux/amd64")

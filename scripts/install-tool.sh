@@ -73,7 +73,6 @@ mkdir -p "$dest"
 dest="$(cd "$dest" && pwd)"
 if [ "$tool" = go ]; then
   tar -xzf "$archive" -C "$dest" go
-  printf 'GOROOT=%s/go\n' "$dest" >> "${GITHUB_ENV:?GITHUB_ENV must be set}"
   bin="$dest/go/bin"
 elif [ "$tool" = node ]; then
   tar -xzf "$archive" -C "$dest"
@@ -82,6 +81,13 @@ else
   tar -xzf "$archive" -C "$dest" "$tool"
   chmod +x "$dest/$tool"
   bin="$dest"
+fi
+if [ ! -f "$bin/$tool" ] || [ ! -x "$bin/$tool" ]; then
+  echo "::error title=GF13::$tool package layout mismatch" >&2
+  exit 1
+fi
+if [ "$tool" = go ]; then
+  printf 'GOROOT=%s/go\n' "$dest" >> "${GITHUB_ENV:?GITHUB_ENV must be set}"
 fi
 # GitHub prepends each GITHUB_PATH entry to PATH for subsequent steps.
 printf '%s\n' "$bin" >> "${GITHUB_PATH:?GITHUB_PATH must be set}"

@@ -47,11 +47,19 @@ try {
     New-Item -ItemType Directory -Force -Path $DestDir | Out-Null
     Expand-Archive -Path $archive -DestinationPath $DestDir -Force
     if ($Tool -eq 'go') {
-        if (-not $env:GITHUB_ENV) { throw 'GITHUB_ENV must be set' }
-        "GOROOT=$(Join-Path $DestDir 'go')" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
         $bin = Join-Path $DestDir 'go/bin'
     } else {
         $bin = $DestDir
+    }
+    $binaryName = if ($Tool -eq 'goreleaser-pro') { 'goreleaser.exe' } else { "$Tool.exe" }
+    $binaryPath = Join-Path $bin $binaryName
+    if (-not (Test-Path -LiteralPath $binaryPath -PathType Leaf)) {
+        Write-Host "::error title=GF13::$Tool package layout mismatch"
+        throw "Expected tool binary not found at $binaryPath"
+    }
+    if ($Tool -eq 'go') {
+        if (-not $env:GITHUB_ENV) { throw 'GITHUB_ENV must be set' }
+        "GOROOT=$(Join-Path $DestDir 'go')" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
     }
     if (-not $env:GITHUB_PATH) { throw 'GITHUB_PATH must be set' }
     # GitHub prepends these entries to PATH for subsequent steps.
