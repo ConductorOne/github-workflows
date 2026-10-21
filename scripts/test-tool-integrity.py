@@ -12,9 +12,11 @@ import subprocess
 import tarfile
 import tempfile
 import unittest
+import zipfile
 
 
 ROOT = Path(__file__).resolve().parent.parent
+ACTION = ROOT / ".github/actions/locked-tools"
 
 
 class IntegrityTests(unittest.TestCase):
@@ -24,11 +26,18 @@ class IntegrityTests(unittest.TestCase):
         self.root = Path(self.temp.name)
         self.scripts = self.root / "scripts"
         self.scripts.mkdir()
-        (self.root / "tools").mkdir()
-        for name in ("install-tool.sh", "verify-locked-go.sh", "gon-source.sh", "verify-release-checkout.sh", "setup-release-buildx.sh"):
+        self.action_dir = self.root / ".github/actions/locked-tools"
+        self.action_dir.mkdir(parents=True)
+        for name in ("install-tool.sh", "verify-locked-go.sh", "gon-source.sh"):
+            shutil.copyfile(ACTION / name, self.action_dir / name)
             shutil.copyfile(ROOT / "scripts" / name, self.scripts / name)
-        self.lock = self.root / "tools/tool-locks.txt"
-        self.lock.write_text((ROOT / "tools/tool-locks.txt").read_text())
+        shutil.copyfile(ACTION / "locked-tools.sh", self.action_dir / "locked-tools.sh")
+        for name in ("verify-release-checkout.sh", "setup-release-buildx.sh"):
+            shutil.copyfile(ROOT / "scripts" / name, self.scripts / name)
+        self.lock = self.action_dir / "tool-locks.txt"
+        self.lock.write_text((ACTION / "tool-locks.txt").read_text())
+        self.workspace = self.root / "workspace"
+        self.workspace.mkdir()
         self.bin = self.root / "bin"
         self.bin.mkdir()
         self.path_file = self.root / "github-path"
@@ -38,7 +47,9 @@ class IntegrityTests(unittest.TestCase):
         self.env = dict(os.environ, PATH=f"{self.bin}:{os.environ['PATH']}",
                         GITHUB_PATH=str(self.path_file), GITHUB_ENV=str(self.env_file),
                         GITHUB_OUTPUT=str(self.output_file), GOTOOLCHAIN="local",
-                        TEST_OS="Linux", TEST_ARCH="x86_64", CALLS=str(self.calls))
+                        TEST_OS="Linux", TEST_ARCH="x86_64", CALLS=str(self.calls),
+                        GITHUB_WORKSPACE=str(self.workspace), LOCKED_TOOLS_DEST=str(self.root / "dest"))
+        self.env.pop("TOOL_LOCK_FILE", None)
 
     def executable(self, name: str, content: str) -> None:
         path = self.bin / name
@@ -46,7 +57,10 @@ class IntegrityTests(unittest.TestCase):
         path.chmod(0o755)
 
     def run_script(self, name: str, *args: str, ok: bool = True) -> subprocess.CompletedProcess:
-        result = subprocess.run(["bash", str(self.scripts / name), *map(str, args)],
+        script = self.action_dir / name
+        if not script.exists():
+            script = self.scripts / name
+        result = subprocess.run(["bash", str(script), *map(str, args)],
                                 env=self.env, text=True, capture_output=True)
         if ok:
             self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
@@ -66,14 +80,18 @@ class IntegrityTests(unittest.TestCase):
         return tool
 
     def fixture_download(self, tool: str, platform: str, member: str | None = None, mode: int = 0o755) -> Path:
-        archive = self.root / "fixture.tar.gz"
+        archive = self.root / ("fixture.zip" if tool == "minisign" else "fixture.tar.gz")
         member = member or self.archive_member(tool, platform)
-        with tarfile.open(archive, "w:gz") as tar:
-            data = b"#!/bin/sh\necho 'binary must not be invoked' >&2\nexit 77\n"
-            info = tarfile.TarInfo(member)
-            info.size = len(data)
-            info.mode = mode
-            tar.addfile(info, io.BytesIO(data))
+        data = b"#!/bin/sh\necho 'binary must not be invoked' >&2\nexit 77\n"
+        if tool == "minisign":
+            with zipfile.ZipFile(archive, "w") as zipped:
+                zipped.writestr(member, data)
+        else:
+            with tarfile.open(archive, "w:gz") as tar:
+                info = tarfile.TarInfo(member)
+                info.size = len(data)
+                info.mode = mode
+                tar.addfile(info, io.BytesIO(data))
         digest = hashlib.sha256(archive.read_bytes()).hexdigest()
         rows = []
         for line in self.lock.read_text().splitlines():
@@ -255,6 +273,125 @@ class IntegrityTests(unittest.TestCase):
         self.env["FAIL_BUILDX"] = "1"
         self.run_script("setup-release-buildx.sh", ok=False)
         self.assertEqual(self.calls.read_text(), "buildx version\n")
+
+    def test_minisign_zip_verified_before_extraction(self) -> None:
+        archive = self.fixture_download("minisign", "darwin/arm64")
+        self.env.update(TEST_OS="Darwin", TEST_ARCH="arm64")
+        self.run_script("install-tool.sh", "minisign", self.root / "minisign")
+        self.assertTrue(os.access(self.root / "minisign/minisign", os.X_OK))
+        self.path_file.unlink()
+        archive.write_bytes(archive.read_bytes() + b"tampered")
+        result = self.run_script("install-tool.sh", "minisign", self.root / "bad-minisign", ok=False)
+        self.assertIn("::error title=GF13::minisign sha256 mismatch", result.stderr)
+        self.assertFalse(self.path_file.exists())
+        self.assertFalse((self.root / "bad-minisign").exists())
+
+    def test_custom_lock_and_legacy_forwarders(self) -> None:
+        self.fixture_download("node", "linux/amd64")
+        expected_member = self.archive_member("node", "linux/amd64")
+        custom = self.root / "custom locks.txt"
+        shutil.copyfile(self.lock, custom)
+        self.lock.write_text("# The canonical fixture lock is deliberately unusable.\n")
+        self.env["TOOL_LOCK_FILE"] = str(custom)
+        result = subprocess.run(["bash", str(self.scripts / "install-tool.sh"), "node", str(self.root / "legacy")],
+                                env=self.env, text=True, capture_output=True)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertTrue((self.root / "legacy" / expected_member).is_file())
+        self.run_script("gon-source.sh", "ref")
+        self.assertIn("ref=", self.output_file.read_text())
+        module = self.root / "go.mod"
+        module.write_bytes(b"module fixture\r\ngo 1.27.3\r\n")
+        result = subprocess.run(["bash", str(self.scripts / "verify-locked-go.sh"), "module", str(module)],
+                                env=self.env, text=True, capture_output=True)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.output_file.unlink()
+        result = subprocess.run(["bash", str(self.scripts / "gon-source.sh"), "ref"],
+                                env=self.env, text=True, capture_output=True)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("ref=", self.output_file.read_text())
+
+    def phase_outputs(self) -> dict[str, str]:
+        return dict(line.split("=", 1) for line in self.output_file.read_text().splitlines())
+
+    def test_action_node_phases_and_provenance_outputs(self) -> None:
+        self.fixture_download("node", "linux/amd64")
+        custom = self.root / "custom locks.txt"
+        shutil.copyfile(self.lock, custom)
+        self.env.update(LOCKED_TOOLS=" node ", LOCKS_INPUT=str(custom), ACTION_DIR=str(self.action_dir))
+        self.run_script("locked-tools.sh", "prepare")
+        plan = self.phase_outputs()
+        expected_hash = hashlib.sha256(custom.read_bytes()).hexdigest()
+        self.assertEqual(plan["lock_sha256"], expected_hash)
+        self.env.update(LOCKED_TOOLS=plan["tools"], TOOL_LOCK_FILE=plan["lock_file"],
+                        LOCKED_TOOLS_DEST=plan["dest"], EXPECTED_LOCK_SHA256=plan["lock_sha256"])
+        self.run_script("locked-tools.sh", "install")
+        self.run_script("locked-tools.sh", "outputs")
+        outputs = self.phase_outputs()
+        expected_version = next(line.split()[1] for line in custom.read_text().splitlines() if line.startswith("node "))
+        self.assertEqual(outputs["node"], expected_version)
+        self.assertEqual(json.loads(outputs["versions"]), {"node": expected_version})
+        self.assertEqual(outputs["lock_sha256"], expected_hash)
+        self.assertTrue(self.path_file.exists())
+        custom.write_text(custom.read_text() + "# changed after preparation\n")
+        self.calls.unlink()
+        result = self.run_script("locked-tools.sh", "install", ok=False)
+        self.assertIn("Lock file changed", result.stderr)
+        self.assertFalse(self.calls.exists())
+        self.run_script("locked-tools.sh", "outputs", ok=False)
+
+    def test_action_empty_lock_input_resolves_in_action_context(self) -> None:
+        self.fixture_download("node", "linux/amd64")
+        self.env.update(LOCKED_TOOLS="node", LOCKS_INPUT="", ACTION_DIR=str(self.action_dir),
+                        TOOL_LOCK_FILE="/caller-context/tool-locks.txt")
+        self.run_script("locked-tools.sh", "prepare")
+        plan = self.phase_outputs()
+        self.assertEqual(plan["lock_file"], str(self.lock))
+        self.env.update(TOOL_LOCK_FILE=plan["lock_file"], EXPECTED_LOCK_SHA256=plan["lock_sha256"])
+        self.run_script("locked-tools.sh", "install")
+        self.run_script("locked-tools.sh", "outputs")
+        self.assertEqual(self.phase_outputs()["lock_sha256"], hashlib.sha256(self.lock.read_bytes()).hexdigest())
+
+    def test_action_explicit_missing_lock_fails_without_fallback(self) -> None:
+        self.fixture_download("node", "linux/amd64")
+        self.env.update(LOCKED_TOOLS="node", LOCKS_INPUT=str(self.root / "missing-lock.txt"),
+                        ACTION_DIR=str(self.action_dir))
+        result = self.run_script("locked-tools.sh", "prepare", ok=False)
+        self.assertIn("::error title=GF13::Lock file missing or not readable:", result.stderr)
+        self.assertFalse(self.calls.exists())
+        self.assertFalse(self.path_file.exists())
+
+    def test_action_gon_automatically_adds_go_and_rejects_bad_requests(self) -> None:
+        self.fixture_download("node", "darwin/arm64")
+        self.env.update(TEST_OS="Darwin", TEST_ARCH="arm64", LOCKED_TOOLS="gon,node")
+        self.run_script("locked-tools.sh", "prepare")
+        plan = self.phase_outputs()
+        self.assertEqual(plan["tools"], "go,gon,node")
+        self.assertRegex(plan["gon_ref"], r"^[0-9a-f]{40}$")
+        self.assertTrue((self.workspace / plan["gon_path"]).is_dir())
+        for request in ("unknown", "node,node", "node,", "node,,go", " ", "node\nsyft"):
+            self.env["LOCKED_TOOLS"] = request
+            self.run_script("locked-tools.sh", "prepare", ok=False)
+        self.assertFalse(self.calls.exists(), "preparation must not download or run tools")
+
+    def test_composite_metadata_and_single_canonical_lock(self) -> None:
+        action = json.loads(subprocess.check_output(["yq", ".", str(ACTION / "action.yml")], text=True))
+        self.assertEqual(action["runs"]["using"], "composite")
+        self.assertEqual(action["inputs"]["locks"]["default"], "")
+        prepare = action["runs"]["steps"][0]
+        self.assertEqual(prepare["env"]["ACTION_DIR"], "${{ github.action_path }}")
+        self.assertEqual(prepare["env"]["LOCKS_INPUT"], "${{ inputs.locks }}")
+        self.assertEqual(action["inputs"]["dest"]["default"], "${{ runner.temp }}/locked-tools")
+        self.assertFalse((ROOT / "tools/tool-locks.txt").exists())
+        for step in action["runs"]["steps"]:
+            if "run" in step:
+                self.assertNotIn("\n", step["run"])
+                self.assertIn("$GITHUB_ACTION_PATH/locked-tools.sh", step["run"])
+            else:
+                self.assertRegex(step["uses"], r"@[0-9a-f]{40}$")
+                self.assertEqual(step["with"]["ref"], "${{ steps.prepare.outputs.gon_ref }}")
+                self.assertFalse(step["with"]["persist-credentials"])
+        for tool in ("go", "node", "syft", "goreleaser", "goreleaser-pro", "gon", "minisign", "versions", "lock_sha256"):
+            self.assertIn(tool, action["outputs"])
 
     def test_workflow_security_wiring(self) -> None:
         workflow = json.loads(subprocess.check_output(["yq", ".", str(ROOT / ".github/workflows/release.yaml")], text=True))

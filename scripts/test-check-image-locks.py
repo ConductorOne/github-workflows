@@ -142,6 +142,46 @@ class UpdateConfigTest(unittest.TestCase):
             if tool == "go":
                 self.assertEqual(manager["versioningTemplate"], "semver")
 
+    def test_tool_lock_managers_target_the_action_lock(self):
+        relative_path = ".github/actions/locked-tools/tool-locks.txt"
+        expected_pattern = r"/^\.github/actions/locked-tools/tool-locks\.txt$/"
+        content = (self.root / relative_path).read_text()
+        managers = [manager for manager in self.config["customManagers"]
+                    if "tool-locks" in str(manager["managerFilePatterns"])]
+        expected_sources = {
+            "goreleaser/goreleaser": "github-releases",
+            "goreleaser/goreleaser-pro": "github-releases",
+            "ConductorOne/gon": "github-tags",
+            "anchore/syft": "github-releases",
+            "go": "golang-version",
+            "nodejs/node": "github-releases",
+            "jedisct1/minisign": "github-releases",
+        }
+        self.assertEqual(len(managers), 7)
+        self.assertEqual({manager["depNameTemplate"] for manager in managers}, set(expected_sources))
+        self.assertFalse(self.config["automerge"])
+        for manager in managers:
+            dependency = manager["depNameTemplate"]
+            with self.subTest(dependency=dependency):
+                self.assertEqual(manager["managerFilePatterns"], [expected_pattern])
+                pattern = manager["managerFilePatterns"][0][1:-1]
+                self.assertIsNotNone(re.fullmatch(pattern, relative_path))
+                self.assertIsNone(re.fullmatch(pattern, "tools/tool-locks.txt"))
+                matches = self.extract(manager, content)
+                self.assertGreaterEqual(len(matches), 1)
+                self.assertEqual(manager["datasourceTemplate"], expected_sources[dependency])
+                self.assertTrue(any(
+                    rule.get("draftPR") is True
+                    and "custom.regex" in rule.get("matchManagers", [])
+                    and manager["datasourceTemplate"] in rule.get("matchDatasources", [])
+                    for rule in self.config["packageRules"]
+                ))
+                if dependency in ("nodejs/node", "jedisct1/minisign"):
+                    tool = dependency.split("/")[-1]
+                    locked_versions = [line.split()[1] for line in content.splitlines()
+                                       if line.startswith(f"{tool} ")]
+                    self.assertEqual([match["currentValue"] for match in matches], locked_versions)
+
     def test_gon_tracks_tag_and_source_commit_together(self):
         manager = next(m for m in self.config["customManagers"] if m.get("depNameTemplate") == "ConductorOne/gon")
         matches = self.extract(manager, f"# gon-release v9.8.7\ngon {'b' * 40} darwin/* source\n")

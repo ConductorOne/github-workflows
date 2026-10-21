@@ -198,5 +198,7 @@ repaired; environment coverage alone is not physical-store retirement proof.
 Scoped verification: `go vet ./cmd/ca-trust-guard/...`,
 `go test ./cmd/ca-trust-guard/...`, `bash scripts/test-deny-os.sh`,
 `bash scripts/test-ca-trust-guard.sh`, and shellcheck on the new Bash scripts.
-The reusable verify workflow checks these workflow-repo paths independently of
-its caller's code.
+Repository-owned `.github/workflows/ci.yaml` runs Go vet/tests, the script suites,
+and ShellCheck on relevant pull requests and pushes to main. The reusable
+`verify.yaml` remains caller-scoped; it does not run workflow-repository checks
+for connector callers.

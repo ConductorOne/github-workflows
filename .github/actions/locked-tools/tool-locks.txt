@@ -16,3 +16,5 @@ go go1.27.3 windows/amd64 f26081f438319757f8a1b46d7d0b2c5ec7583d4038e485e0aa725c
 # Node is the approved uniform patched line; hashes from nodejs.org/dist/v26.12.1/SHASUMS256.txt.
 node v26.12.1 linux/amd64 0fd1eb7770598f52a21995edf6ed35fc690400fa437c2386af329519e9143132 https://nodejs.org/dist/v26.12.1/node-v26.12.1-linux-x64.tar.gz
 node v26.12.1 darwin/arm64 1901d539912c02afa10d1cc126943a8855a7eedebe830119463470db5e6c59e8 https://nodejs.org/dist/v26.12.1/node-v26.12.1-darwin-arm64.tar.gz
+# Minisign lock ported verbatim from ductone/multipass PR #953 (release-sign-split); producer/reviewer verified it independently.
+minisign 0.12 darwin/arm64 89000b19535765f9cffc65a65d64a820f433ef6db8020667f7570e06bf6aac63 https://github.com/jedisct1/minisign/releases/download/0.12/minisign-0.12-macos.zip
