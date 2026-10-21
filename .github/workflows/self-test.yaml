@@ -34,11 +34,20 @@ jobs:
         # test-windows-pre-build-script.py, test-release-workflow-tag-pin.sh)
         # and fail hard without it. Present on current GitHub runner images;
         # installed here so the suite does not quietly depend on that.
-        if ! command -v yq >/dev/null 2>&1; then
-          sudo curl -fsSL -o /usr/local/bin/yq \
-            https://github.com/mikefarah/yq/releases/download/v4.44.3/yq_linux_amd64
-          sudo chmod +x /usr/local/bin/yq
+        if command -v yq >/dev/null 2>&1; then
+          yq --version
+          exit 0
         fi
+        # Pinned by digest, not only by tag: a release tag can be repointed,
+        # so the tag alone does not say what ends up running as root here.
+        # SHA-256 of yq_linux_amd64 from the v4.44.3 `checksums` asset.
+        # Verified before the binary is made executable — the step runs under
+        # `set -e`, so a mismatch fails the job rather than installing it.
+        YQ_SHA256=a2c097180dd884a8d50c956ee16a9cec070f30a7947cf4ebf87d5f36213e9ed7
+        curl -fsSL -o "${RUNNER_TEMP}/yq" \
+          https://github.com/mikefarah/yq/releases/download/v4.44.3/yq_linux_amd64
+        echo "${YQ_SHA256}  ${RUNNER_TEMP}/yq" | sha256sum -c -
+        sudo install -m 0755 "${RUNNER_TEMP}/yq" /usr/local/bin/yq
         yq --version
     - name: make test
       shell: bash
