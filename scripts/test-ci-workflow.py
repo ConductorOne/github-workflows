@@ -21,7 +21,7 @@ class RepositoryCiTest(unittest.TestCase):
         self.assertEqual(workflow["on"]["push"]["branches"], ["main"])
         expected_paths = {"cmd/**", ".github/actions/**", "actions/**", "scripts/**", "tools/**",
                           "go.*", "renovate.json", "templates/**", ".github/workflows/ci.yaml",
-                          ".github/workflows/verify.yaml", "Makefile", ".gitattributes"}
+                          ".github/workflows/verify.yaml", ".github/workflows/release.yaml", "Makefile", ".gitattributes"}
         pull_paths = set(workflow["on"]["pull_request"]["paths"])
         self.assertTrue(expected_paths <= pull_paths)
         self.assertEqual(pull_paths, set(workflow["on"]["push"]["paths"]))

@@ -233,6 +233,38 @@ The same event commit remains in the provenance's resolved Git dependency.
 
 Every GoReleaser invocation receives `GORELEASER_CURRENT_TAG` from the workflow input. This pins archive names, release metadata, and image digest files to the requested tag when multiple tags identify the same commit.
 
+### Release Job Bootstrap
+
+Nine release jobs start with the SHA-pinned `ca-trust-guard` action before
+**any checkout or credential access**, using its default
+`enforce`/`true`/`true`/`fail` inputs. Six tool-using jobs then run the pinned
+`locked-tools` action as step 2, followed by source/workflow checkouts, release
+commit verification, module requirements, and release credentials. Both actions
+use commit `99f9b2fc150f0351f2ef6f9bf9f631a17749ef15`; neither requires a caller
+checkout to bootstrap. The guard's measurements and residual-client limits are
+documented in [CA Trust Guard](../.github/actions/ca-trust-guard/README.md).
+
+`notify-release-failure` is deliberately exempt: guard errors must not prevent
+failure reporting. The job remains failure-only and does not install build
+tools. `validate-inputs`, `determine-workflows-ref`, and `verify-release` need
+the guard but no locked-tools installation.
+
+| Tool-using job | `locked-tools` input |
+| --- | --- |
+| release-preflight | `go` |
+| goreleaser-binaries | `go,gon,syft,goreleaser` |
+| goreleaser-windows | `go,syft,goreleaser-pro` |
+| goreleaser-docker | `go,goreleaser` |
+| publish-release-manifest | `go` |
+| record-registry-api | `go` |
+
+Preflight keeps its existing `go_source_hygiene || go_vulnerability_scan`
+condition on the tool action, checkouts, and module gate, avoiding new downloads
+when both checks are disabled. Its guard still runs first unconditionally.
+Job-level `GOTOOLCHAIN=local` and the binaries job's readonly-module/proxy/sumdb
+settings are unchanged. Cosign and bundled-buildx/QEMU setup remain after the
+trust/tool bootstrap and before their signing or AWS credentials.
+
 ### Locked Release Tools
 
 `.github/actions/locked-tools/tool-locks.txt` identifies tool versions, artifact
