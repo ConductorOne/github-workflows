@@ -128,8 +128,9 @@ PR head tree, not the previous reviewed tree.
 
 Read `.github/prior-findings.json` — it lists every finding this reviewer has
 previously posted on this PR: `path`, `line`, `severity`, `excerpt`, the
-thread's `thread_resolved` / `thread_outdated` state, and `has_author_reply`,
-which is true when anyone other than this reviewer has written in the thread.
+thread's `thread_resolved` / `thread_outdated` state, and `human_engaged`,
+which is true when a person has dealt with the thread at all — wrote in it, or
+resolved it themselves.
 Also read `.github/resolved-threads.json`: use its `resolved_count` when
 reporting "Threads Resolved", and note `resolution_blocked` — when it is true
 this run could not resolve its own outdated threads (the token is denied that
@@ -148,10 +149,11 @@ flagged location and assign exactly one verdict:
   summary's Blocking Issues or Suggestions at its severity in EVERY case
   below; what changes is only whether you open a NEW inline thread for it.
   Work down these in order and stop at the first that matches:
-  - **`has_author_reply` is true** — a person has written in that thread. Do
-    not open a new one, whether the thread is open, outdated or resolved.
-    Report it as "Prior — still present" in the summary. Re-raising a question
-    someone already answered belongs in the summary, where it is said once.
+  - **`human_engaged` is true** — a person replied in that thread or resolved
+    it. Do not open a new one, whether the thread is open, outdated or
+    resolved. Report it as "Prior — still present" in the summary. Re-raising
+    something a person already dealt with belongs in the summary, where it is
+    said once.
   - **Another open, accurate thread already covers this same issue** — do not
     post a duplicate. Prior findings are one entry per thread, not per issue,
     so one issue can appear several times here; the open one covers it.
@@ -161,9 +163,12 @@ flagged location and assign exactly one verdict:
     thread was resolved automatically rather than by a person.
   - **Otherwise** (thread open and accurate) — do not post a duplicate.
 
-  This branches on `has_author_reply` rather than on `thread_resolved` because
-  a resolved thread is usually not a human decision: this action resolves its
-  own outdated, reply-free threads on every run. An outdated thread also stays
+  This branches on `human_engaged` rather than on `thread_resolved` because
+  resolution alone does not say who did it: this action resolves its own
+  outdated, reply-free threads on every run, so most resolved threads are its
+  doing rather than a decision. `human_engaged` covers both ways a person
+  signals they have dealt with a finding — replying, and simply clicking
+  Resolve, which is the more common of the two. An outdated thread also stays
   outdated forever, so keying on that alone re-raises the same finding on
   every future run, each new thread becoming another prior finding that
   re-posts in turn.

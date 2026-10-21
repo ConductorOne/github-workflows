@@ -35,6 +35,7 @@ query($owner: String!, $repo: String!, $number: Int!, $after: String) {
           id
           isResolved
           isOutdated
+          resolvedBy { login }
           path
           line
           comments(first: 20) {
@@ -186,14 +187,19 @@ def collect_prior_findings(threads: list[dict]) -> list[dict]:
     present), so the reviewer re-verifies each entry against the current code.
     Unresolved entries sort first, then by path.
 
-    `has_author_reply` records whether anyone other than this reviewer has
-    written in the thread. It is not evidence about the code either — it says
-    a human engaged with the finding and the thread is not just the bot
-    talking to itself. Step 3 of the review prompt branches on it to decide
-    whether to open a NEW inline thread for a still-present finding, never to
-    skip verifying one. It is deliberately the axis rather than
-    `thread_resolved`, because most resolved threads here were resolved by
-    should_resolve above rather than by a person.
+    `human_engaged` records whether a person has dealt with the thread at all:
+    wrote in it, or resolved it. It is not evidence about the code either —
+    it says the thread is not just this bot talking to itself. Step 3 of the
+    review prompt branches on it to decide whether to open a NEW inline thread
+    for a still-present finding, never to skip verifying one.
+
+    It is deliberately the axis rather than `thread_resolved`, which does not
+    separate the populations: should_resolve above resolves this reviewer's
+    own outdated, reply-free threads on every run, so most resolved threads
+    are the action's doing. `resolvedBy` is what tells those apart from a
+    person clicking Resolve — which people do far more often than they reply,
+    and which an earlier version of this rule read as "nobody engaged" and
+    re-posted into.
     """
     findings = []
     for thread in threads:
@@ -213,7 +219,7 @@ def collect_prior_findings(threads: list[dict]) -> list[dict]:
             "excerpt": body.splitlines()[0][:200],
             "thread_resolved": thread["isResolved"],
             "thread_outdated": thread["isOutdated"],
-            # A truncated thread counts as replied-to. The query takes the
+            # A truncated thread counts as engaged-with. The query takes the
             # first 20 comments, so on a longer thread a human reply can sit
             # past the cut and read as "nobody ever answered".
             #
@@ -226,11 +232,18 @@ def collect_prior_findings(threads: list[dict]) -> list[dict]:
             # above reads the same truncation as a reason not to auto-resolve
             # — opposite literal value, same instinct: do not act on what was
             # not read.
-            "has_author_reply": (
+            "human_engaged": (
                 thread["comments"]["totalCount"] > len(comments)
                 or any(
                     (c.get("author") or {}).get("login", "") not in BOT_LOGINS
                     for c in comments[1:]
+                )
+                # Resolved by a person rather than by should_resolve. The bot's
+                # own resolutions carry a BOT_LOGINS resolver, so they stay
+                # false here and keep the re-anchor path.
+                or (
+                    (thread.get("resolvedBy") or {}).get("login", "")
+                    not in BOT_LOGINS | {""}
                 )
             ),
         })
