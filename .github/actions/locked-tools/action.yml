@@ -1,0 +1,94 @@
+name: Locked release tools
+description: Install checksum-verified release tools before configuring release credentials.
+inputs:
+  tools:
+    description: Comma-separated tools (go,node,syft,goreleaser,goreleaser-pro,gon,minisign). Gon automatically adds Go.
+    required: true
+  locks:
+    description: Path to the reviewed tool lock file.
+    default: ${{ github.action_path }}/tool-locks.txt
+  dest:
+    description: Destination root for verified tools.
+    default: ${{ runner.temp }}/locked-tools
+outputs:
+  go:
+    description: Installed Go version, when requested or required by gon.
+    value: ${{ steps.result.outputs.go }}
+  node:
+    description: Installed Node version, when requested.
+    value: ${{ steps.result.outputs.node }}
+  syft:
+    description: Installed Syft version, when requested.
+    value: ${{ steps.result.outputs.syft }}
+  goreleaser:
+    description: Installed GoReleaser version, when requested.
+    value: ${{ steps.result.outputs.goreleaser }}
+  goreleaser-pro:
+    description: Installed GoReleaser Pro version, when requested.
+    value: ${{ steps.result.outputs['goreleaser-pro'] }}
+  gon:
+    description: Built gon source commit, when requested.
+    value: ${{ steps.result.outputs.gon }}
+  minisign:
+    description: Installed Minisign version, when requested.
+    value: ${{ steps.result.outputs.minisign }}
+  versions:
+    description: JSON object mapping installed tools to locked versions or source commits.
+    value: ${{ steps.result.outputs.versions }}
+  lock_sha256:
+    description: SHA256 of the exact lock file used by every phase, for provenance.
+    value: ${{ steps.result.outputs.lock_sha256 }}
+runs:
+  using: composite
+  steps:
+    - name: Prepare locked tools
+      id: prepare
+      shell: bash
+      env:
+        LOCKED_TOOLS: ${{ inputs.tools }}
+        TOOL_LOCK_FILE: ${{ inputs.locks }}
+        LOCKED_TOOLS_DEST: ${{ inputs.dest }}
+      run: bash "$GITHUB_ACTION_PATH/locked-tools.sh" prepare
+
+    - name: Checkout locked gon source
+      if: steps.prepare.outputs.gon_ref != ''
+      uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # actions/checkout@v5
+      with:
+        repository: ConductorOne/gon
+        ref: ${{ steps.prepare.outputs.gon_ref }}
+        path: ${{ steps.prepare.outputs.gon_path }}
+        persist-credentials: false
+
+    - name: Install verified artifacts
+      shell: bash
+      env:
+        LOCKED_TOOLS: ${{ steps.prepare.outputs.tools }}
+        TOOL_LOCK_FILE: ${{ steps.prepare.outputs.lock_file }}
+        LOCKED_TOOLS_DEST: ${{ steps.prepare.outputs.dest }}
+        EXPECTED_LOCK_SHA256: ${{ steps.prepare.outputs.lock_sha256 }}
+      run: bash "$GITHUB_ACTION_PATH/locked-tools.sh" install
+
+    - name: Build locked gon source
+      if: steps.prepare.outputs.gon_ref != ''
+      shell: bash
+      env:
+        LOCKED_TOOLS: ${{ steps.prepare.outputs.tools }}
+        TOOL_LOCK_FILE: ${{ steps.prepare.outputs.lock_file }}
+        LOCKED_TOOLS_DEST: ${{ steps.prepare.outputs.dest }}
+        EXPECTED_LOCK_SHA256: ${{ steps.prepare.outputs.lock_sha256 }}
+        LOCKED_GON_PATH: ${{ steps.prepare.outputs.gon_path }}
+        GOTOOLCHAIN: local
+        GOFLAGS: -mod=readonly
+        GOPROXY: https://proxy.golang.org
+        GOSUMDB: sum.golang.org
+      run: bash "$GITHUB_ACTION_PATH/locked-tools.sh" gon
+
+    - name: Report installed tool versions and lock hash
+      id: result
+      shell: bash
+      env:
+        LOCKED_TOOLS: ${{ steps.prepare.outputs.tools }}
+        TOOL_LOCK_FILE: ${{ steps.prepare.outputs.lock_file }}
+        LOCKED_TOOLS_DEST: ${{ steps.prepare.outputs.dest }}
+        EXPECTED_LOCK_SHA256: ${{ steps.prepare.outputs.lock_sha256 }}
+      run: bash "$GITHUB_ACTION_PATH/locked-tools.sh" outputs

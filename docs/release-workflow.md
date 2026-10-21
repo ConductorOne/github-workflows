@@ -255,7 +255,7 @@ Every GoReleaser invocation receives `GORELEASER_CURRENT_TAG` from the workflow 
 
 ### Locked Release Tools
 
-`tools/tool-locks.txt` is the single source of truth for tool versions, artifact
+`.github/actions/locked-tools/tool-locks.txt` is the single source of truth for tool versions, artifact
 URLs, and committed SHA256 values. The Bash and PowerShell `install-tool`
 helpers fetch only that URL, verify the hash **before extraction**, and add the
 verified directory to the next step's PATH. They never run the downloaded
@@ -278,6 +278,28 @@ the integrity boundary during a release is the reviewed, committed lock.
 
 Node.js 26.12.1, consumed by axiomatic, is the approved single tool-version change in this series: the uniform patched Node line, superseding the earlier 22.23.4 choice and locked using [SHASUMS256.txt](https://nodejs.org/dist/v26.12.1/SHASUMS256.txt).
 
+The `ConductorOne/github-workflows/.github/actions/locked-tools@<commit-sha>`
+composite action accepts a comma-separated `tools` list, an optional reviewed
+`locks` file (default: the action's canonical lock), and `dest` (default:
+`${{ runner.temp }}/locked-tools`). Invoke it before configuring release
+credentials. Supported tools are `go`, `node`, `syft`, `goreleaser`,
+`goreleaser-pro`, `gon`, and `minisign`; missing platform locks and unknown or
+duplicate tool names fail closed. Requesting `gon` automatically adds Go,
+installs/verifies it first, then builds the SHA-checked-out gon source with the
+existing readonly-module/proxy/checksum-database constraints.
+
+Outputs include each installed tool's version (`gon` reports its source commit),
+a `versions` JSON object, and `lock_sha256` for provenance. The action verifies
+that the lock bytes have not changed between preparation, installation, and
+output publication. Each phase is a one-line script call in the composite.
+Standalone helpers honor `TOOL_LOCK_FILE` as the same reviewed-lock override.
+
+During the consumer transition, `scripts/install-tool.sh`, `install-tool.ps1`,
+`gon-source.sh`, and `verify-locked-go.sh` are thin forwarding wrappers to the
+canonical action-local implementations. This keeps this branch's release
+workflow unchanged and executable without duplicating implementation or lock
+files. The old `tools/tool-locks.txt` is removed, not copied or mirrored.
+
 | Tool / version | Lock platform | SHA256 or source commit | Committed artifact/source |
 | --- | --- | --- | --- |
 | goreleaser v2.13.3 | linux/amd64 | `4b66f2f78f78561330350651ade557b70328664718490f37834749073af21d20` | [Linux archive](https://github.com/goreleaser/goreleaser/releases/download/v2.13.3/goreleaser_Linux_x86_64.tar.gz) |
@@ -292,6 +314,7 @@ Node.js 26.12.1, consumed by axiomatic, is the approved single tool-version chan
 | go go1.27.3 | windows/amd64 | `f26081f438319757f8a1b46d7d0b2c5ec7583d4038e485e0aa725cfde7885fff` | [Windows toolchain](https://go.dev/dl/go1.27.3.windows-amd64.zip) |
 | node v26.12.1 | linux/amd64 | `0fd1eb7770598f52a21995edf6ed35fc690400fa437c2386af329519e9143132` | [Linux package](https://nodejs.org/dist/v26.12.1/node-v26.12.1-linux-x64.tar.gz) |
 | node v26.12.1 | darwin/arm64 | `1901d539912c02afa10d1cc126943a8855a7eedebe830119463470db5e6c59e8` | [Darwin package](https://nodejs.org/dist/v26.12.1/node-v26.12.1-darwin-arm64.tar.gz) |
+| minisign 0.12 | darwin/arm64 | `89000b19535765f9cffc65a65d64a820f433ef6db8020667f7570e06bf6aac63` | [macOS ZIP](https://github.com/jedisct1/minisign/releases/download/0.12/minisign-0.12-macos.zip), ported from [multipass #953](https://github.com/ductone/multipass/pull/953) |
 
 The gon fork publishes only an amd64 asset for v0.2.10. Rather than using
 Rosetta, `actions/checkout` fetches the locked commit by object ID and
