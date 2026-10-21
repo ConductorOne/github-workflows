@@ -1,0 +1,343 @@
+name: SH10 runner trust-store probe
+description: >-
+  Offline, fixture-verified incident trust probe with fingerprint-checked OS
+  denial and a committed clean CA bundle. Can run before any checkout.
+inputs:
+  mode:
+    description: 'report or enforce; probe errors always fail closed'
+    required: false
+    default: enforce
+  apply-distrust:
+    description: 'Apply the clean-bundle environment for subsequent steps (true or false)'
+    required: false
+    default: 'true'
+  os-deny:
+    description: 'Deny the four incident roots in supported OS stores (true or false); persists on self-hosted runners'
+    required: false
+    default: 'true'
+runs:
+  using: composite
+  steps:
+    - name: SH10 probe BEFORE, deny, clean-bundle env, probe AFTER, summary
+      shell: bash
+      env:
+        SH10_MODE: ${{ inputs.mode }}
+        SH10_APPLY_DISTRUST: ${{ inputs.apply-distrust }}
+        SH10_OS_DENY: ${{ inputs.os-deny }}
+        SH10_DIR: ${{ github.action_path }}/fixtures
+      run: |
+        set -euo pipefail
+        case "$SH10_MODE" in report|enforce) ;; *) echo '::error title=SH10::mode must be report or enforce'; exit 1;; esac
+        case "$SH10_APPLY_DISTRUST:$SH10_OS_DENY" in true:true|true:false|false:true|false:false) ;; *) echo '::error title=SH10::apply-distrust and os-deny must be true or false'; exit 1;; esac
+        scratch=$(mktemp -d)
+        trap 'rm -rf "$scratch"' EXIT
+        img="${ImageVersion:-${ImageOS:-unknown}}"; os="$(uname -s)"; BAD=0; ERR=0; UNK=0; CLEAN_OK=0; PHYS_BAD=0; PHASE=before
+        cd "$SH10_DIR" || { echo "::error title=SH10::fixtures dir missing"; exit 1; }
+        sha256sum -c --quiet SHA256SUMS 2>/dev/null || shasum -a 256 -c --quiet SHA256SUMS || { echo "::error title=SH10::fixture checksum mismatch"; exit 1; }
+        bdate=$(sed -n 's/^## Certificate data from Mozilla as of: //p' clean-ca-bundle.pem | head -1); if [ -n "$bdate" ]; then bts=$(date -u -d "$bdate" +%s 2>/dev/null || date -j -u -f "%a %b %d %H:%M:%S %Y %Z" "$bdate" +%s 2>/dev/null || echo 0); [ "$bts" -gt 0 ] && [ $(( $(date -u +%s) - bts )) -gt $((90*86400)) ] && echo "::warning title=SH10::clean-ca-bundle.pem Mozilla data is older than 90 days ($bdate); refresh via PR"; fi
+        EPOCH=$(python3 -c 'import json;print(json.load(open("expected-1.json"))["capture_epoch"])' 2>/dev/null || sed -n 's/.*"capture_epoch": *\([0-9]*\).*/\1/p' expected-1.json)
+        emit() { echo "sh10-probe {\"image\":\"$img\",\"os\":\"$os\",\"phase\":\"$PHASE\",\"store\":\"$1\",\"chain\":\"$2\",\"verdict\":\"$3\",\"detail\":\"$4\"}"; case "$3" in TRUSTS) BAD=1;; ERROR) ERR=1;; REJECTED-UNKNOWN-CAUSE|UNKNOWN) UNK=$((${UNK:-0}+1));; esac; [ "$1" = clean-ca-bundle ] && [ "$3" = VERIFIED-DISTRUST ] && CLEAN_OK=$((${CLEAN_OK:-0}+1)) || true; }
+        classify() { # $1=store-label $2=chain-N $3=CAfile
+          rc=0; out=$(openssl verify -no-CApath -no-CAfile -no-CAstore -CAfile "$3" -untrusted "intermediates-$2.pem" -attime "$EPOCH" "leaf-$2.pem" 2>&1) || rc=$?
+          if [ $rc -eq 0 ]; then emit "$1" "$2" TRUSTS ""
+          elif echo "$out" | grep -qE "error (20|2) at [0-9]+ depth lookup: unable to get (local )?issuer certificate"; then emit "$1" "$2" VERIFIED-DISTRUST "$(echo "$out" | grep -oE 'error [0-9]+ at [0-9]+ depth[^,]*' | head -1)"
+          else emit "$1" "$2" ERROR "$(echo "$out" | head -1 | tr '"' "'" | cut -c1-120)"; fi
+        }
+        check_store() { # $1=label $2=path
+          [ -s "$2" ] || { emit "$1" "-" ERROR "store missing or empty: $2"; return; }
+          for n in 1 2; do classify "$1" "$n" "$2"; done
+        }
+        # 0) positive control: EVERY chain MUST verify against the vulnerable roots (fixture completeness + -attime sanity)
+        PHASE=positive-control; PC_OK=0
+        for n in 1 2; do rc=0; openssl verify -no-CApath -no-CAfile -no-CAstore -CAfile vulnerable-roots.pem -untrusted "intermediates-$n.pem" -attime "$EPOCH" "leaf-$n.pem" >/dev/null 2>&1 || rc=$?; if [ "$rc" = 0 ]; then PC_OK=$((PC_OK+1)); emit vulnerable-roots "$n" TRUSTS "positive-control"; else emit vulnerable-roots "$n" ERROR "positive-control failed rc=$rc"; fi; done
+        if [ "$PC_OK" != 2 ]; then echo "::error title=SH10::positive control failed for $((2-PC_OK)) chain(s) (fixtures incomplete, wrong -attime, or openssl issue)"; exit 1; fi
+        BAD=0; PHASE=before
+        node_store() { # measures the EFFECTIVE Node store; under NODE_OPTIONS=--use-openssl-ca Node defers to OpenSSL (SSL_CERT_FILE), whose verdict is the clean-ca-bundle row
+          command -v node >/dev/null || return 0
+          if [ -n "${NPM_CONFIG_CAFILE:-}" ] && [ -r "${NPM_CONFIG_CAFILE}" ]; then check_store npm-effective-cafile "${NPM_CONFIG_CAFILE}"; fi
+          if printf '%s' "${NODE_OPTIONS:-}" | grep -q -- '--use-openssl-ca'; then emit "$1" "-" DELEGATED-OPENSSL "NODE_OPTIONS=--use-openssl-ca -> SSL_CERT_FILE=${SSL_CERT_FILE:-unset}; see clean-ca-bundle rows"; return 0; fi
+          node -e 'const t=require("tls"); const l=(t.getCACertificates? t.getCACertificates("default") : t.rootCertificates); for (const c of l) process.stdout.write(c+"\n")' > "$scratch/node.pem" 2>/dev/null || return 0
+          check_store "$1" "$scratch/node.pem"
+        }
+        run_checks() {
+          case "$os" in
+            Linux)  check_store ubuntu-system /etc/ssl/certs/ca-certificates.crt
+                    node_store node-effective
+                    p=$(python3 -c 'import certifi,sys;sys.stdout.write(certifi.where())' 2>/dev/null || true); [ -n "$p" ] && check_store python-certifi "$p" ;;
+            Darwin) check_store macos-etc-ssl-cert-pem /etc/ssl/cert.pem
+                    check_store macos-brew "$(brew --prefix 2>/dev/null)/etc/ca-certificates/cert.pem"
+                    for n in 1 2; do   # Apple keychain / SecTrust (.NET + Node-on-macOS path)
+                      rc=0; out=$(security verify-cert -c "leaf-$n.pem" -c "intermediates-$n.pem" -p ssl -L 2>&1) || rc=$?
+                      if [ $rc -eq 0 ]; then emit macos-sectrust "$n" TRUSTS ""
+                      elif echo "$out" | grep -qiE "not[_ ]trusted|revoked|untrusted|CSSMERR_TP_NOT_TRUSTED"; then emit macos-sectrust "$n" VERIFIED-DISTRUST "$(echo "$out"|head -1|cut -c1-120)"
+                      elif echo "$out" | grep -q "CSSMERR_TP_VERIFY_ACTION_FAILED"; then emit macos-sectrust "$n" REJECTED-UNKNOWN-CAUSE "$(echo "$out"|head -1|cut -c1-120)"
+                      else emit macos-sectrust "$n" ERROR "$(echo "$out"|head -1|cut -c1-120)"; fi
+                    done
+                    node_store node-effective ;;
+            MINGW*|MSYS*|CYGWIN*)
+                    check_store windows-gitbash-openssl "$(openssl version -d 2>/dev/null | sed 's/.*"\(.*\)"/\1/')/cert.pem"
+                    # Windows CryptoAPI: OFFLINE evidence = intermediate thumbprints present in the Disallowed store
+                    for n in 1 2; do
+                      rc=0; tp=$(openssl x509 -in "intermediates-$n.pem" -noout -fingerprint -sha1 2>/dev/null | sed 's/.*=//; s/://g') || rc=$?; [ -n "$tp" ] || { emit windows-disallowed-store "$n" ERROR "could not compute thumbprint rc=$rc"; continue; }
+                      prc=0; powershell -NoProfile -Command "if (Get-ChildItem Cert:\LocalMachine\Disallowed | Where-Object Thumbprint -eq '$tp') { exit 0 } else { exit 3 }" || prc=$?; if [ "$prc" = 0 ]; then emit windows-disallowed-store "$n" VERIFIED-DISTRUST "thumbprint $tp in Disallowed"; else emit windows-disallowed-store "$n" UNKNOWN "thumbprint $tp not in Disallowed (revocation-based block not provable offline)"; fi
+                    done ;;
+          esac
+          return 0
+        }
+        apply_distrust() {
+          # Preferred mechanism (SH10-R2): point OpenSSL-based clients at a COMMITTED, hash-verified Mozilla bundle that already lacks
+          # the two roots (clean-ca-bundle.pem, checked by SHA256SUMS above). No download at job start, no sudo, inherited by later steps.
+          B="$PWD/clean-ca-bundle.pem"
+          case "$os" in
+            MINGW*|MSYS*|CYGWIN*)
+              # Native Windows tooling (Python/AWS CLI, cosign, Go) uses CryptoAPI and cannot read a /d/a/... path: set ONLY the Git-Bash
+              # clients, in native path form. Everything else on Windows already rejects the chains by revocation.
+              W=$(cygpath -w "$B"); WJ=${W//\\/\\\\}; { echo "GIT_SSL_CAINFO=$W"; echo "CURL_CA_BUNDLE=$W"; } >> "$GITHUB_ENV"
+              export GIT_SSL_CAINFO="$W" CURL_CA_BUNDLE="$W"; git config --global http.sslCAInfo "$W"
+              echo "sh10-probe {\"distrust\":\"clean-ca-bundle-env-windows\",\"bundle\":\"$WJ\",\"not_covered\":\"CryptoAPI clients rely on revocation (already rejecting); runner agent; action downloads before step 1\"}" ;;
+            *)
+              # NODE_OPTIONS is REFUSED by the runner through $GITHUB_ENV (canary-proven). npm/pnpm honour NPM_CONFIG_CAFILE; any step that
+              # runs arbitrary Node scripts must set `env: NODE_OPTIONS: --use-openssl-ca` at the STEP level (document per workflow).
+              { echo "SSL_CERT_FILE=$B"; echo "CURL_CA_BUNDLE=$B"; echo "GIT_SSL_CAINFO=$B"; echo "REQUESTS_CA_BUNDLE=$B"; echo "AWS_CA_BUNDLE=$B"; echo "NPM_CONFIG_CAFILE=$B"; } >> "$GITHUB_ENV"
+              export SSL_CERT_FILE="$B" CURL_CA_BUNDLE="$B" GIT_SSL_CAINFO="$B" REQUESTS_CA_BUNDLE="$B" AWS_CA_BUNDLE="$B" NPM_CONFIG_CAFILE="$B"
+              git config --global http.sslCAInfo "$B"; git config --global http.sslVerify true
+              echo "sh10-probe {\"distrust\":\"clean-ca-bundle-env\",\"bundle\":\"$B\",\"node\":\"npm/pnpm via NPM_CONFIG_CAFILE; other Node steps need step-level NODE_OPTIONS=--use-openssl-ca\",\"not_covered\":\"macOS SecTrust clients; runner agent; action downloads before step 1; Go on macOS; dockerd/BuildKit TLS (additive certs.d cannot remove trust; buildx container has its own store)\"}" ;;
+          esac
+        }
+        apply_os_deny() {
+          # A child bash keeps errexit active even though the parent captures its rc.
+          # No network/package upgrade: only the four incident roots, never the full
+          # emSign fleet inventory from multipass #951. SHA-1 identifies certificates;
+          # fixture integrity itself is SHA-256 pinned and checked before this runs.
+          bash -euo pipefail <<'SH10_OS_DENY'
+        os=$(uname -s)
+        row() { printf 'sh10-probe {"phase":"os-deny","os":"%s","store":"os-deny","chain":"-","verdict":"%s","detail":"%s"}\n' "$os" "$1" "$2"; }
+        DENY_CERTS=(
+          "emSign ECC Root CA - G3:3043FA4FF257DCA0C380EE2E58EA78B23FE6BBC1"
+          "emSign Root TLS CA - G3:39D3236E4A609AB6190CBFA1AD02B3CC61DFC2C3"
+          "emSign Root CS CA - G3:1F74B6010A219FD9CA058D07AA053D15EFD9300D"
+          "AAA Certificate Services:D1EB23A46D17D68FD92564C2F1F1601764D8E349"
+        )
+        # Three emSign SHA-1s are from #951. AAA was deliberately excluded there;
+        # its SHA-1 is derived from our SHA256SUMS-pinned vulnerable-roots.pem.
+        work=$(mktemp -d)
+        trap 'rm -rf "$work"' EXIT
+        fingerprint() { openssl x509 -in "$1" -noout -fingerprint -sha1 | sed 's/.*=//; s/://g'; }
+        check_fingerprint() {
+          got_sha1=$(fingerprint "$1")
+          if [ "$got_sha1" != "$2" ]; then
+            echo "::error title=SH10::$3 fingerprint mismatch (got $got_sha1, expected $2) -- refusing to touch an unexpected cert"
+            exit 1
+          fi
+        }
+        elevated() {
+          if [ "$(id -u)" = 0 ]; then "$@"; else sudo -n "$@"; fi
+        }
+        case "$os" in
+          Linux|Darwin)
+            if [ "$(id -u)" != 0 ]; then
+              command -v sudo >/dev/null 2>&1 || { echo '::error title=SH10::OS deny requires root or sudo'; exit 1; }
+            fi ;;
+        esac
+        case "$os" in
+          Linux)
+            CONF=/etc/ca-certificates.conf
+            if [ ! -f "$CONF" ]; then
+              row SKIPPED-NO-CONFIG 'no /etc/ca-certificates.conf; physical AFTER probe remains authoritative'
+              exit 0
+            fi
+            # Discover by exact fingerprint OR expected CN, then refuse on mismatch.
+            # Preflight ALL candidates before changing any config. File names are not
+            # certificate identities (and a same-name replacement must never be denied).
+            find /usr/share/ca-certificates -type f -name '*.crt' > "$work/candidates"
+            : > "$work/entries"
+            while IFS= read -r cert; do
+              subject=$(openssl x509 -in "$cert" -noout -subject -nameopt RFC2253)
+              got_sha1=$(fingerprint "$cert")
+              for pair in "${DENY_CERTS[@]}"; do
+                name=${pair%%:*}; want_sha1=${pair##*:}; candidate=0
+                [ "$got_sha1" = "$want_sha1" ] && candidate=1
+                case "$subject" in *"CN=$name,"*|*"CN=$name") candidate=1;; esac
+                [ "$candidate" = 1 ] || continue
+                check_fingerprint "$cert" "$want_sha1" "$name"
+                printf '%s\n' "${cert#/usr/share/ca-certificates/}" >> "$work/entries"
+              done
+            done < "$work/candidates"
+            changed=0
+            while IFS= read -r entry; do
+              if grep -qxF "$entry" "$CONF"; then
+                # Literal comparison, not a sed regex that can match other file names.
+                awk -v entry="$entry" '{if ($0 == entry) print "!" $0; else print}' "$CONF" > "$work/conf"
+                elevated cp "$work/conf" "$CONF"
+                row BLACKLISTED "$entry"
+                changed=1
+              elif grep -qxF "!$entry" "$CONF"; then
+                row ALREADY-DENIED "$entry"
+              fi
+            done < "$work/entries"
+            if [ "$changed" = 1 ]; then
+              elevated update-ca-certificates
+            fi
+            # Keep #951's compiled-bundle verification loop, narrowed from a broad
+            # emSign subject grep to these four fingerprints/expected names. Private
+            # scratch paths avoid deleting another concurrent action's /tmp/dca-*.
+            BUNDLE=/etc/ssl/certs/ca-certificates.crt
+            if [ -f "$BUNDLE" ]; then
+              awk -v dir="$work" '/-----BEGIN CERTIFICATE-----/{n++} n {print > sprintf("%s/dca-%03d.pem", dir, n)}' "$BUNDLE"
+              for f in "$work"/dca-*.pem; do
+                [ -s "$f" ] || continue
+                subj=$(openssl x509 -in "$f" -noout -subject -nameopt RFC2253)
+                got_sha1=$(fingerprint "$f")
+                for pair in "${DENY_CERTS[@]}"; do
+                  name=${pair%%:*}; want_sha1=${pair##*:}; still_trusted=0
+                  [ "$got_sha1" = "$want_sha1" ] && still_trusted=1
+                  case "$subj" in *"CN=$name,"*|*"CN=$name") still_trusted=1;; esac
+                  if [ "$still_trusted" = 1 ]; then
+                    echo "::error title=SH10::still trusted after blacklist: $subj ($got_sha1)"
+                    exit 1
+                  fi
+                done
+              done
+            else
+              echo '::error title=SH10::compiled system bundle missing after blacklist'
+              exit 1
+            fi
+            row VERIFIED-DISTRUST 'none of the four incident roots remains in compiled Linux bundle' ;;
+          Darwin)
+            # Bash 3.2: indexed arrays and name:sha1 strings, no associative arrays.
+            i=0
+            for pair in "${DENY_CERTS[@]}"; do
+              name=${pair%%:*}; want_sha1=${pair##*:}; pem="$work/deny-$i.pem"; found=0
+              for kc in /System/Library/Keychains/SystemRootCertificates.keychain /Library/Keychains/System.keychain; do
+                if security find-certificate -c "$name" -p "$kc" > "$pem" 2>/dev/null; then
+                  found=1
+                  break
+                fi
+              done
+              if [ "$found" != 1 ]; then
+                row NOT-PRESENT "$name"
+              else
+                check_fingerprint "$pem" "$want_sha1" "$name"
+              fi
+              i=$((i+1))
+            done
+            # All exported certificates were verified before the first mutation.
+            i=0
+            for pair in "${DENY_CERTS[@]}"; do
+              name=${pair%%:*}; want_sha1=${pair##*:}; pem="$work/deny-$i.pem"
+              if [ -s "$pem" ]; then
+                check_fingerprint "$pem" "$want_sha1" "$name"
+                elevated security add-trusted-cert -d -r deny -k /Library/Keychains/System.keychain "$pem"
+                row DENIED "$name ($want_sha1) in System.keychain"
+              fi
+              i=$((i+1))
+            done
+            # SecTrust only: /etc/ssl/cert.pem and Homebrew bundles are NOT rewritten.
+            # AFTER reports their real residual trust; env leg covers different clients.
+            ;;
+          MINGW*|MSYS*|CYGWIN*)
+            cat > "$work/deny.ps1" <<'SH10_POWERSHELL'
+        $ErrorActionPreference = 'Stop'
+        function Row($verdict, $detail) {
+          Write-Host ('sh10-probe ' + (@{phase='os-deny'; os='Windows'; store='os-deny'; chain='-'; verdict=$verdict; detail=$detail} | ConvertTo-Json -Compress))
+        }
+        $denyList = @(
+          @{ Name = 'emSign ECC Root CA - G3'; Thumbprint = '3043FA4FF257DCA0C380EE2E58EA78B23FE6BBC1' },
+          @{ Name = 'emSign Root TLS CA - G3'; Thumbprint = '39D3236E4A609AB6190CBFA1AD02B3CC61DFC2C3' },
+          @{ Name = 'emSign Root CS CA - G3'; Thumbprint = '1F74B6010A219FD9CA058D07AA053D15EFD9300D' },
+          @{ Name = 'AAA Certificate Services'; Thumbprint = 'D1EB23A46D17D68FD92564C2F1F1601764D8E349' }
+        )
+        $isAdmin = ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltinRole]::Administrator)
+        if (-not $isAdmin) {
+          Row 'SKIPPED-NOT-ELEVATED' 'requires Administrator to write Cert:\LocalMachine\Disallowed; no mutation attempted'
+          exit 0
+        }
+        $stores = @('Cert:\LocalMachine\Root', 'Cert:\LocalMachine\CA', 'Cert:\CurrentUser\Root', 'Cert:\CurrentUser\CA')
+        $failures = @()
+        $pending = @()
+        # Preflight before any mutation, retaining #951's thumbprint-keyed selection
+        # AND subject/name guard; also reject a same-name certificate with another hash.
+        foreach ($entry in $denyList) {
+          $anyFound = $false
+          foreach ($storePath in $stores) {
+            $matches = @(Get-ChildItem -Path $storePath -ErrorAction SilentlyContinue | Where-Object {
+              $_.Thumbprint -eq $entry.Thumbprint -or $_.GetNameInfo([Security.Cryptography.X509Certificates.X509NameType]::SimpleName, $false) -eq $entry.Name
+            })
+            foreach ($cert in $matches) {
+              $anyFound = $true
+              if ($cert.Thumbprint -ne $entry.Thumbprint -or $cert.Subject -notmatch [regex]::Escape($entry.Name)) {
+                Write-Host "::error title=SH10::fingerprint/name mismatch for $($entry.Name): $($cert.Thumbprint), $($cert.Subject) -- refusing to touch an unexpected cert"
+                $failures += $entry.Thumbprint
+                continue
+              }
+              $pending += @{ Cert = $cert; Entry = $entry; StorePath = $storePath }
+            }
+          }
+          if (-not $anyFound) { Row 'NOT-PRESENT' "$($entry.Name) ($($entry.Thumbprint))" }
+        }
+        if ($failures.Count -gt 0) { exit 1 }
+        foreach ($item in $pending) {
+          $tmp = $null
+          try {
+            $cert = $item.Cert
+            $entry = $item.Entry
+            if ($cert.Thumbprint -ne $entry.Thumbprint -or $cert.Subject -notmatch [regex]::Escape($entry.Name)) {
+              throw 'fingerprint/name mismatch before import'
+            }
+            $bytes = $cert.Export('Cert')
+            $tmp = [System.IO.Path]::GetTempFileName()
+            [System.IO.File]::WriteAllBytes($tmp, $bytes)
+            Import-Certificate -FilePath $tmp -CertStoreLocation Cert:\LocalMachine\Disallowed | Out-Null
+            Row 'DENIED' "$($entry.Name) [$($item.StorePath)] ($($entry.Thumbprint)) in Disallowed"
+          } catch {
+            Write-Host "::error title=SH10::failed to deny '$($item.Entry.Name)' in $($item.StorePath) -- $_"
+            $failures += $item.Entry.Thumbprint
+          } finally {
+            if ($tmp) { Remove-Item $tmp -ErrorAction SilentlyContinue }
+          }
+        }
+        if ($failures.Count -gt 0) {
+          Write-Host "::error title=SH10::failed to deny trust for $($failures.Count) cert(s): $($failures -join ', ')"
+          exit 1
+        }
+        exit 0
+        SH10_POWERSHELL
+            powershell -NoProfile -NonInteractive -File "$(cygpath -w "$work/deny.ps1")" ;;
+          *) row SKIPPED-UNSUPPORTED-OS 'no OS deny implementation for this platform' ;;
+        esac
+        SH10_OS_DENY
+        }
+        # Preserve the v3.11 BEFORE baseline and final summary/enforce contract.
+        run_checks; PHYS_BAD=$BAD
+        if [ "$SH10_OS_DENY" = true ]; then
+          PHASE=os-deny
+          rc=0; apply_os_deny || rc=$?
+          if [ "$rc" != 0 ]; then emit os-deny - ERROR "OS deny failed rc=$rc (refused mismatch or mutation/verification failure)"; fi
+        else
+          PHASE=os-deny; emit os-deny - SKIPPED 'disabled by os-deny=false'
+        fi
+        MITIGATED=0
+        if [ "$SH10_APPLY_DISTRUST" = true ]; then
+          apply_distrust
+        fi
+        # Always re-read physical stores AFTER both legs. These per-store rows are
+        # R3 retirement observations, NOT a new gate. On macOS, SecTrust denial does
+        # not rewrite the /etc or brew PEM bundles; Node/certifi may remain residual.
+        BAD=0; PHASE=after-distrust
+        if [ "$SH10_APPLY_DISTRUST" = true ]; then
+          check_store clean-ca-bundle "$PWD/clean-ca-bundle.pem"
+        fi
+        run_checks
+        if [ "$SH10_APPLY_DISTRUST" = true ] && [ "$CLEAN_OK" = 2 ] && [ "$ERR" = 0 ]; then MITIGATED=1; fi
+        summary=ok; [ "${UNK:-0}" -gt 0 ] && summary="ok-with-${UNK}-unknown-cause-rejections"
+        if [ "$PHYS_BAD" = 1 ]; then summary=STILL_TRUSTS_COMPROMISED; [ "$MITIGATED" = 1 ] && summary=PHYSICAL_STORE_TRUSTS_BUT_MITIGATED_BY_CLEAN_BUNDLE; fi
+        [ "$ERR" = 1 ] && summary=ERROR
+        echo "sh10-probe {\"image\":\"$img\",\"os\":\"$os\",\"summary\":\"$summary\",\"mode\":\"$SH10_MODE\",\"apply_distrust\":\"$SH10_APPLY_DISTRUST\",\"residual\":\"$([ "$PHYS_BAD" = 1 ] && echo physical-store-trusts-chain || echo none)\",\"not_covered\":\"action-tarball-downloads-before-step-1;runner-agent-dotnet-client;go(version-gated>=1.27.3);js-actions-and-node-steps-without-NODE_OPTIONS=--use-openssl-ca;dockerd-and-buildkit-TLS-on-all-platforms(mitigated-by-image-digests+immutable-tags);windows-node-bundled-roots\"}"
+        if [ "$ERR" = 1 ]; then echo "::error title=SH10::probe ERROR (fixture/store problem) — failing closed"; exit 1; fi
+        if [ "$SH10_MODE" = enforce ]; then
+          if [ "$SH10_APPLY_DISTRUST" = true ]; then
+            if [ "$PHYS_BAD" = 1 ] && [ "$MITIGATED" != 1 ]; then echo "::error title=SH10::runner image $img trusts an eMudhra intermediate and the clean bundle could not be verified effective"; exit 1; fi
+          else
+            if [ "$PHYS_BAD" = 1 ]; then echo "::error title=SH10::runner image $img still trusts an eMudhra intermediate (offline check); release jobs are frozen until GitHub ships patched images"; exit 1; fi
+          fi
+        fi
