@@ -91,7 +91,7 @@ Windows config generation verifies that the safe repo-relative path exists as a
 file in `_caller`. The config adds a `before.hooks` command, `bash ./<path>`,
 which GoReleaser runs in that same tagged caller checkout after its normal
 clean-tree/tag validation and before compilation. Only the Windows GoReleaser
-action forwards `RELEASE_TAG` from the validated `tag` input to the hook. Hook
+step forwards `RELEASE_TAG` from the validated `tag` input to the hook. Hook
 failures fail the release; generated resources remain local to the Windows
 build workspace. The workflow does not run this hook on macOS, Linux, Docker,
 or callers with the default empty input, and does not skip validation, build
@@ -164,12 +164,76 @@ in release identity data.
 
 ### Release Source Identity
 
-Release jobs check out caller code from `refs/tags/<tag>` and verify the
-checked-out commit matches the tag target before building artifacts or recording
-registry metadata. This prevents a release run from publishing artifacts for one
-commit while labeling them as a different tag.
+Release jobs check out caller code by the caller event's `${{ github.sha }}`,
+not by a mutable tag reference. `scripts/verify-release-checkout.sh` requires
+both HEAD and `refs/tags/<tag>^{commit}` to equal that event SHA before building
+or recording metadata. Peeling supports lightweight and annotated tags; a
+missing tag, a moved tag, or an event SHA that is a tag object fails closed.
+The same event commit remains in the provenance's resolved Git dependency.
 
 Every GoReleaser invocation receives `GORELEASER_CURRENT_TAG` from the workflow input. This pins archive names, release metadata, and image digest files to the requested tag when multiple tags identify the same commit.
+
+### Locked Release Tools
+
+`tools/tool-locks.txt` is the single source of truth for tool versions, artifact
+URLs, and committed SHA256 values. The Bash and PowerShell `install-tool`
+helpers fetch only that URL, verify the hash **before extraction**, and add the
+verified directory to the next step's PATH. They never run the downloaded
+binary. All tool installations, including cosign and the native gon build,
+finish before Apple certificates, release secrets, or AWS credentials are read.
+Both installers require the expected binary layout before publishing PATH; missing tools never silently fall back to runner-bundled binaries.
+The workflow checks out its own source using GitHub's `job.workflow_sha`
+context, eliminating the previous Python package bootstrap.
+
+Go is installed once per job, with `GOTOOLCHAIN=local`. Separate assertions
+check `go version` against the lock and reject any caller/workflow `go.mod`
+directive newer than the locked toolchain. Module caching from the former
+setup action is intentionally dropped.
+
+The versions below were observed in [release run 38979848074](https://github.com/ConductorOne/baton-github-test/actions/runs/38979848074).
+Artifact hashes were fetched once from the upstream release checksums and
+[Go's release metadata](https://go.dev/dl/?mode=json), then checked against real
+downloads before committing. Checksums and artifacts share upstream TLS origins;
+the integrity boundary during a release is the reviewed, committed lock.
+
+Node.js 26.12.1, consumed by axiomatic, is the approved single tool-version change in this series: the uniform patched Node line, superseding the earlier 22.23.4 choice and locked using [SHASUMS256.txt](https://nodejs.org/dist/v26.12.1/SHASUMS256.txt).
+
+| Tool / version | Lock platform | SHA256 or source commit | Committed artifact/source |
+| --- | --- | --- | --- |
+| goreleaser v2.13.3 | linux/amd64 | `4b66f2f78f78561330350651ade557b70328664718490f37834749073af21d20` | [Linux archive](https://github.com/goreleaser/goreleaser/releases/download/v2.13.3/goreleaser_Linux_x86_64.tar.gz) |
+| goreleaser v2.13.3 | darwin/arm64 | `5516c37779efb3935d5b213cda3b0b9025ae94ddbcb51df6919acbcdef4194b0` | [Universal Darwin archive](https://github.com/goreleaser/goreleaser/releases/download/v2.13.3/goreleaser_Darwin_all.tar.gz) |
+| goreleaser-pro v2.13.3 | windows/amd64 | `8f65fca431ae6aa083805c9287d4b98b7937d54649712f1185b0590ae02001de` | [Windows archive](https://github.com/goreleaser/goreleaser-pro/releases/download/v2.13.3/goreleaser-pro_Windows_x86_64.zip) |
+| gon v0.2.10 | darwin/* | `f4c3f2be10a2ee8d50067d2c8a8828a14c83977c` (Git commit, not SHA256) | [Pinned source](https://github.com/ConductorOne/gon/commit/f4c3f2be10a2ee8d50067d2c8a8828a14c83977c) |
+| syft v1.42.3 | linux/amd64 | `0d6be741479eddd2c8644a288990c04f3df0d609bbc1599a005532a9dff63509` | [Linux archive](https://github.com/anchore/syft/releases/download/v1.42.3/syft_1.42.3_linux_amd64.tar.gz) |
+| syft v1.42.3 | darwin/arm64 | `d71ee7db2be0fe2e96f679fd9d69ef04274cc86c8604707797080a21070b3f32` | [Darwin archive](https://github.com/anchore/syft/releases/download/v1.42.3/syft_1.42.3_darwin_arm64.tar.gz) |
+| syft v1.42.3 | windows/amd64 | `e1b9f4945aa64c2b34970bec617623d7f803d0661b48a50b966768b363322e2d` | [Windows archive](https://github.com/anchore/syft/releases/download/v1.42.3/syft_1.42.3_windows_amd64.zip) |
+| go go1.27.3 | linux/amd64 | `65efbc80fdc1fa2cd2631cad5b481777a68e8725f34e89f50fc6ac714e379b40` | [Linux toolchain](https://go.dev/dl/go1.27.3.linux-amd64.tar.gz) |
+| go go1.27.3 | darwin/arm64 | `dd3908cf20959d798c1e06ebe5b72213f0505ce01373b40ce3110975a6cd99c2` | [Darwin toolchain](https://go.dev/dl/go1.27.3.darwin-arm64.tar.gz) |
+| go go1.27.3 | windows/amd64 | `f26081f438319757f8a1b46d7d0b2c5ec7583d4038e485e0aa725cfde7885fff` | [Windows toolchain](https://go.dev/dl/go1.27.3.windows-amd64.zip) |
+| node v26.12.1 | linux/amd64 | `0fd1eb7770598f52a21995edf6ed35fc690400fa437c2386af329519e9143132` | [Linux package](https://nodejs.org/dist/v26.12.1/node-v26.12.1-linux-x64.tar.gz) |
+| node v26.12.1 | darwin/arm64 | `1901d539912c02afa10d1cc126943a8855a7eedebe830119463470db5e6c59e8` | [Darwin package](https://nodejs.org/dist/v26.12.1/node-v26.12.1-darwin-arm64.tar.gz) |
+
+The gon fork publishes only an amd64 asset for v0.2.10. Rather than using
+Rosetta, `actions/checkout` fetches the locked commit by object ID and
+`scripts/gon-source.sh` builds it natively with the already-verified Go.
+It checks gon's Go requirement, requires `GOFLAGS=-mod=readonly`,
+`GOPROXY=https://proxy.golang.org`, and `GOSUMDB=sum.golang.org`, and logs the
+built binary's SHA256 for cross-run comparison. A native darwin-arm64 release
+asset is a follow-up improvement, not a prerequisite for this source-locked build.
+
+Cosign remains on its observed v2.5.2, installed by
+`sigstore/cosign-installer@398d4b0eeef1380460a10c8013a76f728fb906ac`.
+That action verifies its bootstrap binary against hashes embedded in the
+pinned action and verifies other requested versions by signature. The
+failure-only Datadog action is also commit-pinned.
+
+Buildx is never downloaded: `scripts/setup-release-buildx.sh` prints the
+runner-bundled plugin's version, fails if it is absent, and creates a builder
+with `moby/buildkit@sha256:cec9f139f45e93c5c69c60f8b07cfad9f43f4ef6b6a6cd917527fea5ff2e3dea`.
+QEMU uses `tonistiigi/binfmt@sha256:400a4873b838d1b89194d982c45e5fb3cda4593fbfd7e08a02e76b03b21166f0`.
+The setup-buildx action was not retained because even `install: false` can
+download a plugin when the runner's plugin is unavailable.
+
 
 ### Keyless Signing
 
@@ -316,6 +380,24 @@ Use test connectors for validation:
    ```bash
    ./scripts/validate-release-artifacts.sh ConductorOne/baton-github-test v0.1.xxx
    ```
+
+### Local Tool and Source Integrity Checks
+
+`python3 scripts/test-tool-integrity.py` exercises verified archive extraction,
+tampered hashes failing before extraction/PATH changes, stale version/URL and
+duplicate locks, newer or malformed Go requirements, the source-locked gon
+build gates, bundled-buildx failure, and event-SHA checks with both lightweight
+and annotated tags. It also checks workflow credential ordering. These are
+deterministic local fixtures, not deployed macOS or Windows proof.
+
+Before release adoption, run canaries on `ConductorOne/baton-github-test`:
+mutate one artifact hash at a time for GoReleaser and Syft and require the
+installer to fail before credentials or binary invocation; mutate the gon
+source commit and require checkout/verification to fail before certificates.
+Run positive lightweight and annotated tag releases with correct locks and
+validate the published artifacts with `scripts/validate-release-artifacts.sh`.
+Real platform runs, including PowerShell extraction and native macOS gon
+compilation/signing, remain mandatory integration evidence.
 
 ### Local Windows Hook Checks
 

@@ -24,6 +24,7 @@ test-scripts:
 	python3 scripts/test-windows-pre-build-script.py
 	python3 scripts/test-safe-relative-path.py
 	bash scripts/test-release-workflow-tag-pin.sh
+	python3 scripts/test-tool-integrity.py
 	bash scripts/test-s3-release-uploads.sh
 	bash scripts/test-validate-release-artifacts.sh
 	bash scripts/test-cosign-retry.sh
