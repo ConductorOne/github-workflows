@@ -404,7 +404,9 @@ function Invoke-WebRequest {
                     self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
                     package = dest / f"node-{version}-win-x64"
                     self.assertTrue((package / "node.exe").is_file())
-                    self.assertIn(str(package), self.path_file.read_text(encoding="utf-8-sig").splitlines())
+                    # PowerShell may expand the Windows 8.3 temporary-directory alias.
+                    published = self.path_file.read_text(encoding="utf-8-sig").splitlines()
+                    self.assertTrue(any(Path(path).samefile(package) for path in published))
                     self.assertFalse(self.env_file.exists(), "Node must not publish GOROOT")
                 else:
                     self.assertNotEqual(result.returncode, 0, result.stdout + result.stderr)
