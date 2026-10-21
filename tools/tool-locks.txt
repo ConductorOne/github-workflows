@@ -6,7 +6,7 @@ goreleaser v2.13.3 linux/amd64 4b66f2f78f78561330350651ade557b70328664718490f378
 goreleaser v2.13.3 darwin/arm64 5516c37779efb3935d5b213cda3b0b9025ae94ddbcb51df6919acbcdef4194b0 https://github.com/goreleaser/goreleaser/releases/download/v2.13.3/goreleaser_Darwin_all.tar.gz
 goreleaser-pro v2.13.3 windows/amd64 8f65fca431ae6aa083805c9287d4b98b7937d54649712f1185b0590ae02001de https://github.com/goreleaser/goreleaser-pro/releases/download/v2.13.3/goreleaser-pro_Windows_x86_64.zip
 # gon-release v0.2.10
-gon f4c3f2be10a2ee8d50067d2c8a8828a14c83977c darwin/* source
+gon f4c3f2be10a2ee8d50067d2c8a8828a14c83977d darwin/* source
 syft v1.42.3 linux/amd64 0d6be741479eddd2c8644a288990c04f3df0d609bbc1599a005532a9dff63509 https://github.com/anchore/syft/releases/download/v1.42.3/syft_1.42.3_linux_amd64.tar.gz
 syft v1.42.3 darwin/arm64 d71ee7db2be0fe2e96f679fd9d69ef04274cc86c8604707797080a21070b3f32 https://github.com/anchore/syft/releases/download/v1.42.3/syft_1.42.3_darwin_arm64.tar.gz
 syft v1.42.3 windows/amd64 e1b9f4945aa64c2b34970bec617623d7f803d0661b48a50b966768b363322e2d https://github.com/anchore/syft/releases/download/v1.42.3/syft_1.42.3_windows_amd64.zip
