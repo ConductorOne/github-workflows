@@ -140,11 +140,22 @@ have been fixed since. Only the current code decides.
 For EACH entry in `prior_findings`, read the current code at (and around) the
 flagged location and assign exactly one verdict:
 
-- `still present` — the issue exists in the current code. If the existing
-  thread is outdated (its line no longer matches the code), post a fresh inline
-  comment at the current location; if the thread is still open and accurate, do
-  not post a duplicate — the open thread already covers it. Either way, count
-  it in the summary's Blocking Issues or Suggestions at its severity.
+- `still present` — the issue exists in the current code. Count it in the
+  summary's Blocking Issues or Suggestions at its severity in every case
+  below; what changes is only whether you open a NEW inline thread for it.
+  - Thread still open and accurate: do not post a duplicate — the open thread
+    already covers it.
+  - Thread outdated (its line no longer matches the code) and NOT resolved:
+    post a fresh inline comment at the current location, because nothing on
+    the PR currently points at the issue.
+  - Thread resolved, whether or not it is outdated: do NOT open a new thread.
+    Someone closed it deliberately, and `has_author_reply` tells you whether
+    they also wrote a reason. Say "Prior — still present" in the summary
+    instead. An outdated thread stays outdated forever, so re-posting on that
+    basis alone re-raises the same closed finding on every future run — each
+    new thread becoming another prior finding that re-posts in turn.
+    Re-opening the question belongs in the summary, where it is said once, not
+    in a thread the author already answered.
 - `fixed` — the current code resolves it. Cite the file:line that fixes it.
 - `obsolete` — the code it applied to was removed or rewritten so the issue no
   longer applies. Say what replaced it.

@@ -1755,17 +1755,18 @@ class PriorFindingsTest(unittest.TestCase):
         outdated: bool = False,
         path: str = "pkg/foo.go",
         line: int | None = 42,
+        replies: list[tuple[str, str]] | None = None,
     ) -> dict:
+        nodes = [{"body": body, "author": {"login": author}}]
+        for reply_author, reply_body in replies or []:
+            nodes.append({"body": reply_body, "author": {"login": reply_author}})
         return {
             "id": "PRRT_x",
             "isResolved": resolved,
             "isOutdated": outdated,
             "path": path,
             "line": line,
-            "comments": {
-                "totalCount": 1,
-                "nodes": [{"body": body, "author": {"login": author}}],
-            },
+            "comments": {"totalCount": len(nodes), "nodes": nodes},
         }
 
     def test_collects_bot_findings_only(self):
@@ -1795,6 +1796,46 @@ class PriorFindingsTest(unittest.TestCase):
     def test_outdated_state_preserved(self):
         findings = rot.collect_prior_findings([self._thread("🟠 Bug: x", outdated=True)])
         self.assertTrue(findings[0]["thread_outdated"])
+
+    def test_author_reply_detected(self):
+        # The signal the audit needs to tell "a human engaged with this" from
+        # "the bot has been talking to itself".
+        findings = rot.collect_prior_findings([
+            self._thread("🟠 Bug: x", replies=[("octocat", "fixed in abc1234")]),
+        ])
+        self.assertTrue(findings[0]["has_author_reply"])
+
+    def test_bot_only_thread_has_no_author_reply(self):
+        for replies in (None, [("github-actions[bot]", "re-posting, prior thread outdated")]):
+            with self.subTest(replies=replies):
+                findings = rot.collect_prior_findings([
+                    self._thread("🟠 Bug: x", replies=replies),
+                ])
+                self.assertFalse(findings[0]["has_author_reply"])
+
+    def test_author_reply_survives_a_later_bot_comment(self):
+        # Ordering must not matter: the bot replying last does not erase the
+        # fact that a human wrote in the thread.
+        findings = rot.collect_prior_findings([
+            self._thread("🟠 Bug: x", replies=[
+                ("octocat", "accepted trade-off, see the docs"),
+                ("github-actions[bot]", "acknowledged"),
+            ]),
+        ])
+        self.assertTrue(findings[0]["has_author_reply"])
+
+    def test_resolved_and_outdated_thread_still_reported(self):
+        # The entry is still produced — the audit must re-verify it against
+        # the code. What changed is the prompt'"'"'s instruction about opening a
+        # NEW thread for it, not whether the finding is surfaced at all.
+        findings = rot.collect_prior_findings([
+            self._thread("🟠 Bug: x", resolved=True, outdated=True,
+                         replies=[("octocat", "accepted")]),
+        ])
+        self.assertEqual(len(findings), 1)
+        self.assertTrue(findings[0]["thread_resolved"])
+        self.assertTrue(findings[0]["thread_outdated"])
+        self.assertTrue(findings[0]["has_author_reply"])
 
     def test_severity_mapping(self):
         self.assertEqual(rot.severity_of("🔴 Security: s"), "security")

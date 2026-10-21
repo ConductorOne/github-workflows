@@ -181,6 +181,12 @@ def collect_prior_findings(threads: list[dict]) -> list[dict]:
     not mean the issue was fixed; an open one does not mean it is still
     present), so the reviewer re-verifies each entry against the current code.
     Unresolved entries sort first, then by path.
+
+    `has_author_reply` records whether anyone other than this reviewer has
+    written in the thread. It is not evidence about the code either — it says
+    a human engaged with the finding and the thread is not just the bot
+    talking to itself. The audit uses it to decide whether re-raising the
+    finding as a NEW inline thread is warranted, never to skip verifying it.
     """
     findings = []
     for thread in threads:
@@ -200,6 +206,10 @@ def collect_prior_findings(threads: list[dict]) -> list[dict]:
             "excerpt": body.splitlines()[0][:200],
             "thread_resolved": thread["isResolved"],
             "thread_outdated": thread["isOutdated"],
+            "has_author_reply": any(
+                (c.get("author") or {}).get("login", "") not in BOT_LOGINS
+                for c in comments[1:]
+            ),
         })
     findings.sort(key=lambda f: (f["thread_resolved"], f["path"] or "", f["line"] or 0))
     return findings
