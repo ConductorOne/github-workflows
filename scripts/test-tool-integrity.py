@@ -32,6 +32,7 @@ class IntegrityTests(unittest.TestCase):
             shutil.copyfile(ACTION / name, self.action_dir / name)
             shutil.copyfile(ROOT / "scripts" / name, self.scripts / name)
         shutil.copyfile(ACTION / "locked-tools.sh", self.action_dir / "locked-tools.sh")
+        shutil.copyfile(ACTION / "install-tool.ps1", self.action_dir / "install-tool.ps1")
         for name in ("verify-release-checkout.sh", "setup-release-buildx.sh"):
             shutil.copyfile(ROOT / "scripts" / name, self.scripts / name)
         self.lock = self.action_dir / "tool-locks.txt"
@@ -76,14 +77,17 @@ class IntegrityTests(unittest.TestCase):
                            if line.startswith("node ") and line.split()[2] == platform)
             os_name, arch = platform.split("/")
             node_arch = "x64" if arch == "amd64" else arch
+            if os_name == "windows":
+                return f"node-{version}-win-{node_arch}/node.exe"
             return f"node-{version}-{os_name}-{node_arch}/bin/node"
         return tool
 
     def fixture_download(self, tool: str, platform: str, member: str | None = None, mode: int = 0o755) -> Path:
-        archive = self.root / ("fixture.zip" if tool == "minisign" else "fixture.tar.gz")
+        is_zip = tool == "minisign" or (tool == "node" and platform == "windows/amd64")
+        archive = self.root / ("fixture.zip" if is_zip else "fixture.tar.gz")
         member = member or self.archive_member(tool, platform)
         data = b"#!/bin/sh\necho 'binary must not be invoked' >&2\nexit 77\n"
-        if tool == "minisign":
+        if is_zip:
             with zipfile.ZipFile(archive, "w") as zipped:
                 zipped.writestr(member, data)
         else:
@@ -338,6 +342,77 @@ class IntegrityTests(unittest.TestCase):
         self.assertIn("Lock file changed", result.stderr)
         self.assertFalse(self.calls.exists())
         self.run_script("locked-tools.sh", "outputs", ok=False)
+
+    def test_windows_node_zip_and_action_dispatch(self) -> None:
+        row = next(line.split() for line in self.lock.read_text().splitlines()
+                   if line.startswith("node ") and line.split()[2] == "windows/amd64")
+        version = row[1]
+        self.assertEqual(row[4], f"https://nodejs.org/dist/{version}/node-{version}-win-x64.zip")
+        archive = self.fixture_download("node", "windows/amd64")
+        member = f"node-{version}-win-x64/node.exe"
+        with zipfile.ZipFile(archive) as zipped:
+            self.assertEqual(zipped.namelist(), [member])
+            self.assertFalse(zipped.getinfo(member).is_dir())
+        self.env.update(TEST_OS="MINGW64_NT", TEST_ARCH="x86_64", LOCKED_TOOLS="node",
+                        LOCKS_INPUT="", ACTION_DIR=str(self.action_dir))
+        self.executable("cygpath", '[[ "$1" = -u || "$1" = -w ]]; printf "%s\\n" "$2"\n')
+        self.executable("pwsh", 'printf "pwsh %s\\n" "$*" >> "$CALLS"\n')
+        self.run_script("locked-tools.sh", "prepare")
+        plan = self.phase_outputs()
+        self.assertEqual(plan["tools"], "node")
+        self.env.update(TOOL_LOCK_FILE=plan["lock_file"], EXPECTED_LOCK_SHA256=plan["lock_sha256"])
+        self.run_script("locked-tools.sh", "install")
+        self.assertEqual(self.calls.read_text().splitlines(), [
+            f"pwsh -NoProfile -File {self.action_dir}/install-tool.ps1 -Tool node -DestDir {self.root / 'dest/node'}"
+        ])
+        self.run_script("locked-tools.sh", "outputs")
+        self.assertEqual(self.phase_outputs()["node"], version)
+        self.assertEqual(json.loads(self.phase_outputs()["versions"]), {"node": version})
+
+    @unittest.skipUnless(os.name == "nt" and shutil.which("pwsh"), "requires native Windows PowerShell")
+    def test_windows_node_installer_fixture(self) -> None:
+        original = (ACTION / "tool-locks.txt").read_text()
+        version = next(line.split()[1] for line in original.splitlines()
+                       if line.startswith("node ") and line.split()[2] == "windows/amd64")
+        harness = """
+$ErrorActionPreference = 'Stop'
+function Invoke-WebRequest {
+    param([string]$Uri, [string]$OutFile, [int]$MaximumRetryCount)
+    Add-Content -LiteralPath $env:CALLS -Value "download $Uri"
+    Copy-Item -LiteralPath $env:ARCHIVE -Destination $OutFile
+}
+& $env:INSTALLER -Tool node -DestDir $env:INSTALL_DEST
+"""
+        for case in ("valid", "bad-hash", "bad-layout", "bad-url"):
+            with self.subTest(case=case):
+                self.lock.write_text(original)
+                member = "unexpected-node/node.exe" if case == "bad-layout" else None
+                archive = self.fixture_download("node", "windows/amd64", member=member)
+                if case == "bad-hash":
+                    archive.write_bytes(archive.read_bytes() + b"tampered")
+                if case == "bad-url":
+                    self.lock.write_text(self.lock.read_text().replace(
+                        f"node-{version}-win-x64.zip", "unexpected-node.zip"))
+                for path in (self.path_file, self.env_file, self.calls):
+                    path.unlink(missing_ok=True)
+                dest = self.root / case
+                env = dict(self.env, TOOL_LOCK_FILE=str(self.lock),
+                           INSTALLER=str(self.action_dir / "install-tool.ps1"), INSTALL_DEST=str(dest))
+                result = subprocess.run([shutil.which("pwsh"), "-NoProfile", "-NonInteractive", "-Command", harness],
+                                        env=env, text=True, capture_output=True)
+                if case == "valid":
+                    self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+                    package = dest / f"node-{version}-win-x64"
+                    self.assertTrue((package / "node.exe").is_file())
+                    self.assertIn(str(package), self.path_file.read_text(encoding="utf-8-sig").splitlines())
+                    self.assertFalse(self.env_file.exists(), "Node must not publish GOROOT")
+                else:
+                    self.assertNotEqual(result.returncode, 0, result.stdout + result.stderr)
+                    self.assertFalse(self.path_file.exists())
+                    if case in ("bad-hash", "bad-url"):
+                        self.assertFalse(dest.exists(), "must reject before extraction")
+                    if case == "bad-url":
+                        self.assertFalse(self.calls.exists(), "must reject before downloading")
 
     def test_action_empty_lock_input_resolves_in_action_context(self) -> None:
         self.fixture_download("node", "linux/amd64")

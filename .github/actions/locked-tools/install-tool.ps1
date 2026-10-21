@@ -27,6 +27,10 @@ switch ($Tool) {
     'go' { $canonical = "https://go.dev/dl/$version.windows-amd64.zip" }
     'syft' { $canonical = "https://github.com/anchore/syft/releases/download/$version/syft_$($version.TrimStart('v'))_windows_amd64.zip" }
     'goreleaser-pro' { $canonical = "https://github.com/goreleaser/goreleaser-pro/releases/download/$version/goreleaser-pro_Windows_x86_64.zip" }
+    'node' {
+        $package = "node-$version-win-x64"
+        $canonical = "https://nodejs.org/dist/$version/$package.zip"
+    }
     default { throw "::error title=GF13::Unsupported artifact tool: $Tool" }
 }
 if ($url -cne $canonical) {
@@ -48,6 +52,8 @@ try {
     Expand-Archive -Path $archive -DestinationPath $DestDir -Force
     if ($Tool -eq 'go') {
         $bin = Join-Path $DestDir 'go/bin'
+    } elseif ($Tool -eq 'node') {
+        $bin = Join-Path $DestDir $package
     } else {
         $bin = $DestDir
     }
