@@ -5,13 +5,14 @@ set -euo pipefail
 cd "$(git rev-parse --show-toplevel)"
 
 digest_pattern='@sha256:[a-f0-9]{64}$'
+ignore_pattern='(^|[[:space:]])#[[:space:]]*image-locks:[[:space:]]*ignore([[:space:]]|$)'
 
 git ls-files --cached --others --exclude-standard -z | (
 failed=0
 while IFS= read -r -d '' file; do
-  # These contain the check's patterns and deliberately invalid test fixtures.
+  # Test sources contain deliberately invalid image fixtures, not build inputs.
   case "$file" in
-    scripts/check-image-locks.sh|scripts/test-check-image-locks.py) continue ;;
+    scripts/test-*) continue ;;
   esac
   [[ -f "$file" ]] || continue
 
@@ -20,7 +21,7 @@ while IFS= read -r -d '' file; do
     *[Dd]ockerfile*) from_pattern='[Ff][Rr][Oo][Mm]' ;;
   esac
   status=0
-  matches=$(grep -nIE "^[[:space:]]*$from_pattern[[:space:]]|image=|^[[:space:]]*image:" "$file") || status=$?
+  matches=$(grep -nIE "^[[:space:]]*$from_pattern[[:space:]]|image=|^[[:space:]]*image:" "$file") || status=$? # image-locks: ignore - checker pattern, not an image
   if (( status > 1 )); then
     exit "$status"
   fi
@@ -29,6 +30,9 @@ while IFS= read -r -d '' file; do
   while IFS= read -r match; do
     line_number=${match%%:*}
     line=${match#*:}
+    if [[ "$line" =~ $ignore_pattern ]]; then
+      continue
+    fi
     references=()
     if [[ "$line" =~ ^[[:space:]]*[Ff][Rr][Oo][Mm][[:space:]] ]]; then
       read -r -a fields <<< "$line"
@@ -40,10 +44,10 @@ while IFS= read -r -d '' file; do
       references+=("${fields[$index]:-}")
     fi
     # Check each helper separately, even when a line contains several images.
-    # Also cover setup-qemu-action's YAML `image:` input (not just image=).
+    # Also cover setup-qemu-action's YAML `image:` input (not just image=). # image-locks: ignore - checker documentation
     while IFS= read -r reference; do
       references+=("$reference")
-    done < <(printf '%s\n' "$line" | grep -oE "image=[^[:space:],]*|^[[:space:]]*image:[[:space:]]*[^[:space:]]*" | sed -E 's/^[[:space:]]*image[=:][[:space:]]*//' || true)
+    done < <(printf '%s\n' "$line" | grep -oE "image=[^[:space:],]*|^[[:space:]]*image:[[:space:]]*[^[:space:]]*" | sed -E 's/^[[:space:]]*image[=:][[:space:]]*//' || true) # image-locks: ignore - checker pattern, not an image
 
     for reference in "${references[@]}"; do
       reference=${reference//\"/}

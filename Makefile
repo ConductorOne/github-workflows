@@ -21,6 +21,7 @@ test-scripts:
 	bash scripts/test-derive-iam-role-name.sh
 	bash scripts/test-normalize-release-options.sh
 	python3 scripts/test-release-config-templates.py
+	python3 scripts/test-check-image-locks.py
 	python3 scripts/test-windows-pre-build-script.py
 	python3 scripts/test-safe-relative-path.py
 	bash scripts/test-release-workflow-tag-pin.sh

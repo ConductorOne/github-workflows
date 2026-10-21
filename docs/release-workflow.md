@@ -157,9 +157,15 @@ docker-container BuildKit driver.
 
 Resolved on **2026-10-21** with `crane digest <ref>`:
 
-| Image reference / lock line | Index digest |
+| Image reference / lock line or distroless platform | Index / platform manifest digest |
 | --- | --- |
 | `gcr.io/distroless/static-debian13:nonroot` | `sha256:d62067879de890a1def9da0e7766b7d20810a5e5555cef8506b752437d7a3e88` |
+| ↳ `linux/amd64` | `sha256:d4df213e27178b79e05ee2bdf8a23d8c54baab3b5a0dc083b039ad9929fa4219` |
+| ↳ `linux/arm64/v8` | `sha256:8a198f3cf5e9b249577c18010ec18382a3e9f94a6e5676d57b1ff8438ae113e9` |
+| ↳ `linux/arm/v7` | `sha256:38489751a0d2feecbe3b7a840d979e6c4db380558f15c61ee025f378b84b2cf3` |
+| ↳ `linux/s390x` | `sha256:c63ef2a68c5ffa9bd31feaa573d606208c10d54b1bee2caf3c168dc5ddec78d9` |
+| ↳ `linux/ppc64le` | `sha256:be4a6d22e53c1118d0c026dc08be71ec3f1954ae75f6e5ff4a10ce97b837ff80` |
+| ↳ `linux/riscv64` | `sha256:0b160fd367891825201f06378982d59900bf35992cfcc453daf7449892d91226` |
 | `public.ecr.aws/lambda/provided:al2023` | `sha256:49c8b85e353ea6052759c3dcf6761b35c055c29c8016a9cd734ac4d24a060729` |
 | `tonistiigi/binfmt:latest` | `sha256:400a4873b838d1b89194d982c45e5fb3cda4593fbfd7e08a02e76b03b21166f0` |
 | `moby/buildkit:buildx-stable-1` | `sha256:cec9f139f45e93c5c69c60f8b07cfad9f43f4ef6b6a6cd917527fea5ff2e3dea` |
@@ -185,6 +191,7 @@ the cutoff, which applies to the distroless runtime base, not these helpers.
 inputs for complete SHA-256 pins. The repository's pull-request workflow runs the
 check and its isolated positive/negative fixture tests without release secrets.
 Custom Dockerfiles in caller repositories are still the caller's responsibility.
+Test sources under `scripts/test-*` are excluded; `FROM scratch` and `FROM <stage>` multi-stage forms fail closed unless explicitly annotated with `# image-locks: ignore`.
 
 #### Updating Locks
 

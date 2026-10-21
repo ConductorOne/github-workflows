@@ -64,6 +64,29 @@ class ImageLockCheckTest(unittest.TestCase):
     def test_ignores_python_imports_and_non_declarations(self):
         self.check_files({"script.py": "from pathlib import Path\n", "notes.txt": "Attesting image: output\n"}, 0)
 
+    def test_fixture_sources_are_not_image_inputs(self):
+        self.check_files({
+            "scripts/test-new-fixture.py": "assert '--driver-opt image=moby/buildkit@sha256:' in source\n",
+            "scripts/test-new-fixture.sh": "FROM unlocked\n",
+        }, 0)
+
+    def test_non_test_scripts_are_still_checked(self):
+        self.check_files({"scripts/build.py": "command = '--driver-opt image=unlocked'\n"}, 1)
+
+    def test_scratch_and_stage_references_fail_closed(self):
+        for reference in ("scratch", "base"):
+            self.check_files({"Dockerfile": f"FROM {reference}\n"}, 1)
+
+    def test_inline_ignore_marker_allows_explicit_exceptions(self):
+        self.check_files({
+            "Dockerfile": "FROM scratch AS base # image-locks: ignore\nFROM base # image-locks: ignore\n",
+            "script.sh": "docker buildx create --driver-opt image=fixture # image-locks: ignore\n",
+        }, 0)
+
+    def test_ignore_marker_applies_only_to_annotated_line(self):
+        diagnostic = self.check_files({"Dockerfile": "FROM scratch # image-locks: ignore\nFROM unlocked\n"}, 1)
+        self.assertIn("Dockerfile:2:", diagnostic)
+
     def test_empty_repository(self):
         self.check_files({}, 0)
 
@@ -97,10 +120,12 @@ class UpdateConfigTest(unittest.TestCase):
         ]
         for path_fragment, prefix, channel in cases:
             manager = next(m for m in self.config["customManagers"] if path_fragment in str(m["managerFilePatterns"]))
-            matches = self.extract(manager, prefix + "@sha256:" + "a" * 64 + "'\n")
-            self.assertEqual(len(matches), 1, path_fragment)
-            self.assertEqual(matches[0]["currentDigest"], "sha256:" + "a" * 64)
-            self.assertEqual(manager["currentValueTemplate"], channel)
+            for tag in ("", ":" + channel):
+                matches = self.extract(manager, prefix + tag + "@sha256:" + "a" * 64 + "'\n")
+                self.assertEqual(len(matches), 1, path_fragment)
+                self.assertEqual(matches[0]["currentDigest"], "sha256:" + "a" * 64)
+                self.assertEqual(manager["currentValueTemplate"], channel)
+                self.assertEqual(matches[0]["currentValue"], channel if tag else None)
 
     def test_binary_tool_proposals_preserve_go_prefix(self):
         for manager in self.config["customManagers"]:
