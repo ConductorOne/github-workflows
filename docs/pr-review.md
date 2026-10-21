@@ -5,15 +5,9 @@ Internals and all options for `pr-review.yaml`, `general-pr-review.yaml` and the
 version, the input table, and how to call it; this file is the detail behind
 it and does not repeat it.
 
-Runs Claude-powered PR review for same-repository pull requests. Fork PRs are skipped
-because they do not receive automatic Claude review. Review jobs check out the exact PR
-head SHA so Claude can inspect the proposed source tree locally. The action builds its
-prompt from a shared base prompt plus optional built-in mixins. The default profile is
-`connector`, which adds the connector mixin for repos covered by connector required
-workflows or rulesets.
-
-Repos that need non-connector review can use the `general-pr-review.yaml` required
-workflow, or reusable workflow callers can pass `review_prompt: general`.
+Review jobs check out the exact PR head SHA so Claude can inspect the proposed
+source tree locally. The `connector` profile adds the connector mixin for repos
+covered by connector required workflows or rulesets.
 
 Prompt layers are additive:
 
