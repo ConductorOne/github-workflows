@@ -1,0 +1,45 @@
+# Tests for THIS repository's own code.
+#
+# verify.yaml is a reusable workflow that tests a CALLER repo's checkout, so
+# until now nothing ran this repo's Go tests or script tests on a pull request:
+# `make test` existed but only ever ran by hand. The pr-review scripts are the
+# sharpest case — they carry the most logic here and had no automated run at
+# all.
+name: self-test
+on:
+  pull_request:
+  push:
+    branches: [main]
+concurrency:
+  group: self-test-${{ github.workflow_ref }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+permissions:
+  contents: read
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+    - name: Checkout
+      uses: actions/checkout@v5
+      with:
+        persist-credentials: false
+    - name: Install Go
+      uses: actions/setup-go@v6
+      with:
+        go-version-file: go.mod
+    - name: Ensure yq
+      shell: bash
+      run: |
+        # Three script tests shell out to it (test-safe-relative-path.py,
+        # test-windows-pre-build-script.py, test-release-workflow-tag-pin.sh)
+        # and fail hard without it. Present on current GitHub runner images;
+        # installed here so the suite does not quietly depend on that.
+        if ! command -v yq >/dev/null 2>&1; then
+          sudo curl -fsSL -o /usr/local/bin/yq \
+            https://github.com/mikefarah/yq/releases/download/v4.44.3/yq_linux_amd64
+          sudo chmod +x /usr/local/bin/yq
+        fi
+        yq --version
+    - name: make test
+      shell: bash
+      run: make test
