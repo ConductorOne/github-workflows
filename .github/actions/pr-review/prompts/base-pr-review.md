@@ -154,10 +154,15 @@ flagged location and assign exactly one verdict:
     resolved. Report it as "Prior — still present" in the summary. Re-raising
     something a person already dealt with belongs in the summary, where it is
     said once.
-  - **Another open, accurate thread already covers this same issue** — do not
-    post a duplicate. Prior findings are one entry per thread, not per issue,
-    so one issue can appear several times here; the open one covers it.
-  - **The thread is outdated and nothing open covers the issue** — post a
+  - **Another thread for this same issue is open and accurate, OR has
+    `human_engaged` true** — do not post a duplicate. Prior findings are one
+    entry per thread, not per issue, so one issue appears here once per thread
+    it has ever had, and the bot's own superseded threads stay in that list
+    forever. Without the `human_engaged` half, dealing with the newest thread
+    would still leave an older bot-resolved one matching the outdated case
+    below, and it would post again — and again after that one is dealt with
+    too. One person dealing with any thread for an issue settles all of them.
+  - **The thread is outdated and nothing above covers the issue** — post a
     fresh inline comment at the current location. Nothing on the PR points at
     it otherwise, and this is also the path that recovers a finding whose
     thread was resolved automatically rather than by a person.

@@ -193,13 +193,11 @@ def collect_prior_findings(threads: list[dict]) -> list[dict]:
     review prompt branches on it to decide whether to open a NEW inline thread
     for a still-present finding, never to skip verifying one.
 
-    It is deliberately the axis rather than `thread_resolved`, which does not
-    separate the populations: should_resolve above resolves this reviewer's
-    own outdated, reply-free threads on every run, so most resolved threads
-    are the action's doing. `resolvedBy` is what tells those apart from a
-    person clicking Resolve — which people do far more often than they reply,
-    and which an earlier version of this rule read as "nobody engaged" and
-    re-posted into.
+    It is the axis rather than `thread_resolved`, which does not separate the
+    populations: should_resolve above resolves this reviewer's own outdated,
+    reply-free threads on every run, so most resolved threads are the action's
+    doing. `resolvedBy` is what tells those apart from a person clicking
+    Resolve, which people do far more often than they reply.
     """
     findings = []
     for thread in threads:
@@ -229,8 +227,8 @@ def collect_prior_findings(threads: list[dict]) -> list[dict]:
             # direction. It is chosen anyway because a thread past twenty
             # comments has demonstrably been engaged with, and re-raising into
             # a conversation that long is the worse failure. should_resolve
-            # above reads the same truncation as a reason not to auto-resolve
-            # — opposite literal value, same instinct: do not act on what was
+            # above reads the same truncation as a reason not to auto-resolve:
+            # opposite literal value, same instinct — do not act on what was
             # not read.
             "human_engaged": (
                 thread["comments"]["totalCount"] > len(comments)
