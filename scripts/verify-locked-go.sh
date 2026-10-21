@@ -27,7 +27,7 @@ case "${1:-}" in
       exit 1
     fi
     for module in "$@"; do
-      required="$(awk '$1 == "go" { print $2; count++ } END { if (count != 1) exit 1 }' "$module")" || {
+      required="$(awk '{ sub(/\r$/, "") } $1 == "go" { print $2; count++ } END { if (count != 1) exit 1 }' "$module")" || {
         echo "::error title=GF13::Cannot read exactly one go directive from $module" >&2
         exit 1
       }

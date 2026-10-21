@@ -174,6 +174,11 @@ class IntegrityTests(unittest.TestCase):
         for version in ("1.13", "1.27", "1.27.3"):
             module.write_text(f"module example.com/fixture\n\ngo {version}\n")
             self.run_script("verify-locked-go.sh", "module", module)
+        module.write_bytes(b"module example.com/fixture\r\n\r\ngo 1.27.3\r\n")
+        self.run_script("verify-locked-go.sh", "module", module)
+        module.write_bytes(b"module example.com/fixture\r\n\r\ngo 1.27.4\r\n")
+        result = self.run_script("verify-locked-go.sh", "module", module, ok=False)
+        self.assertIn(f"::error title=GF13::{module} requires Go 1.27.4, newer than locked go1.27.3", result.stderr)
         for directive in ("go 1.27.4", "go 1.28", "go 2.0", "go 1.28rc1", "", "go 1.27\ngo 1.26"):
             module.write_text(f"module example.com/fixture\n\n{directive}\n")
             self.run_script("verify-locked-go.sh", "module", module, ok=False)
