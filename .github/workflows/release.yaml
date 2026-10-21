@@ -172,24 +172,16 @@ jobs:
       actions: read
       contents: read
     outputs:
-      ref: ${{ steps.workflow-version.outputs.sha }}
+      ref: ${{ job.workflow_sha }}
       go_main_package: ${{ steps.release-options.outputs.go_main_package }}
       brew_tap: ${{ steps.release-options.outputs.brew_tap }}
     steps:
-      - name: Determine workflows ref
-        id: workflow-version
-        uses: canonical/get-workflow-version-action@v1
-        with:
-          repository-name: "ConductorOne/github-workflows"
-          file-name: "release.yaml"
-          github-token: ${{ secrets.GITHUB_TOKEN }}
-
       - name: Checkout pinned connector workflows
         uses: actions/checkout@v5
         with:
           path: _workflows
           repository: ConductorOne/github-workflows
-          ref: ${{ steps.workflow-version.outputs.sha }}
+          ref: ${{ job.workflow_sha }}
           persist-credentials: false
 
       - name: Validate dockerfile_template has safe path
@@ -258,11 +250,52 @@ jobs:
   release-preflight:
     needs: determine-workflows-ref
     runs-on: ubuntu-latest
+    env:
+      GOTOOLCHAIN: local
     permissions:
       contents: read
     outputs:
       github_prerelease: ${{ steps.github-release.outputs.prerelease }}
     steps:
+      - name: Checkout caller repo
+        if: inputs.go_source_hygiene == true || inputs.go_vulnerability_scan == true
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # actions/checkout@v5
+        with:
+          path: _caller
+          repository: ${{ github.event.repository.full_name }}
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Checkout connector workflows
+        if: inputs.go_source_hygiene == true || inputs.go_vulnerability_scan == true
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # actions/checkout@v5
+        with:
+          path: _workflows
+          repository: ConductorOne/github-workflows
+          ref: ${{ needs.determine-workflows-ref.outputs.ref }}
+          persist-credentials: false
+
+      - name: Verify caller checkout matches release tag
+        if: inputs.go_source_hygiene == true || inputs.go_vulnerability_scan == true
+        shell: bash
+        env:
+          RELEASE_TAG: ${{ inputs.tag }}
+          EXPECTED_COMMIT: ${{ github.sha }}
+        run: bash _workflows/scripts/verify-release-checkout.sh _caller
+
+      - name: Install locked Go
+        if: inputs.go_source_hygiene == true || inputs.go_vulnerability_scan == true
+        run: bash _workflows/scripts/install-tool.sh go "$RUNNER_TEMP/locked-go"
+
+      - name: Verify locked Go version
+        if: inputs.go_source_hygiene == true || inputs.go_vulnerability_scan == true
+        run: bash _workflows/scripts/verify-locked-go.sh version
+
+      - name: Check caller Go requirement
+        if: inputs.go_source_hygiene == true || inputs.go_vulnerability_scan == true
+        run: bash _workflows/scripts/verify-locked-go.sh module _caller/go.mod _workflows/go.mod
+
       - name: Capture GitHub Release pre-release setting
         id: github-release
         env:
@@ -308,38 +341,6 @@ jobs:
           fi
           echo "prerelease=$prerelease" >> "$GITHUB_OUTPUT"
 
-      - name: Checkout caller repo
-        if: inputs.go_source_hygiene == true || inputs.go_vulnerability_scan == true
-        uses: actions/checkout@v5
-        with:
-          path: _caller
-          repository: ${{ github.event.repository.full_name }}
-          ref: refs/tags/${{ inputs.tag }}
-          fetch-depth: 0
-          persist-credentials: false
-
-      - name: Verify caller checkout matches release tag
-        if: inputs.go_source_hygiene == true || inputs.go_vulnerability_scan == true
-        working-directory: _caller
-        shell: bash
-        env:
-          RELEASE_TAG: ${{ inputs.tag }}
-        run: |
-          set -euo pipefail
-          tag_commit="$(git rev-list -n 1 "refs/tags/$RELEASE_TAG")"
-          head_commit="$(git rev-parse HEAD)"
-          if [ "$head_commit" != "$tag_commit" ]; then
-            echo "::error::Checked out $head_commit but refs/tags/$RELEASE_TAG resolves to $tag_commit"
-            exit 1
-          fi
-
-      - name: Set up Go for caller
-        if: inputs.go_source_hygiene == true || inputs.go_vulnerability_scan == true
-        uses: actions/setup-go@v6
-        with:
-          go-version-file: "_caller/go.mod"
-          cache: false
-
       - name: Verify generated source and module hygiene
         if: inputs.go_source_hygiene == true
         working-directory: _caller
@@ -358,8 +359,6 @@ jobs:
         if: inputs.go_vulnerability_scan == true
         working-directory: _caller
         shell: bash
-        env:
-          GOTOOLCHAIN: auto
         run: |
           set -euo pipefail
           go install golang.org/x/vuln/cmd/govulncheck@v1.7.0
@@ -370,6 +369,11 @@ jobs:
   goreleaser-binaries:
     needs: [determine-workflows-ref, release-preflight]
     runs-on: macos-latest-xlarge
+    env:
+      GOTOOLCHAIN: local
+      GOFLAGS: -mod=readonly
+      GOPROXY: https://proxy.golang.org
+      GOSUMDB: sum.golang.org
     permissions:
       contents: read
       id-token: write # <-- needed for cosign keyless (OIDC)
@@ -384,24 +388,9 @@ jobs:
         with:
           path: _caller
           repository: ${{ github.event.repository.full_name }}
-          ref: refs/tags/${{ inputs.tag }}
+          ref: ${{ github.sha }}
           fetch-depth: 0
           persist-credentials: false
-
-      - name: Verify caller checkout matches release tag
-        working-directory: _caller
-        shell: bash
-        env:
-          RELEASE_TAG: ${{ inputs.tag }}
-        run: |
-          set -euo pipefail
-          tag_commit="$(git rev-list -n 1 "refs/tags/$RELEASE_TAG")"
-          head_commit="$(git rev-parse HEAD)"
-          if [ "$head_commit" != "$tag_commit" ]; then
-            echo "::error::Checked out $head_commit but refs/tags/$RELEASE_TAG resolves to $tag_commit"
-            exit 1
-          fi
-          echo "Verified $RELEASE_TAG at $head_commit"
 
       - name: Checkout connector workflows
         uses: actions/checkout@v5
@@ -410,6 +399,13 @@ jobs:
           repository: ConductorOne/github-workflows
           ref: ${{ needs.determine-workflows-ref.outputs.ref }}
           persist-credentials: false
+
+      - name: Verify caller checkout matches release tag
+        shell: bash
+        env:
+          RELEASE_TAG: ${{ inputs.tag }}
+          EXPECTED_COMMIT: ${{ github.sha }}
+        run: bash _workflows/scripts/verify-release-checkout.sh _caller
 
       - name: Derive AWS role names
         id: role-names
@@ -424,11 +420,40 @@ jobs:
             --suffix "${REPO_OWNER}-${REPO_NAME}" \
             --output-name gha_artifacts_role_name >> "$GITHUB_OUTPUT"
 
-      - name: Set up Go for caller
-        uses: actions/setup-go@v6
+      - name: Read locked gon source commit
+        id: gon-source
+        run: bash _workflows/scripts/gon-source.sh ref
+
+      - name: Checkout locked gon source
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # actions/checkout@v5
         with:
-          go-version-file: "_caller/go.mod"
-          cache: false
+          repository: ConductorOne/gon
+          ref: ${{ steps.gon-source.outputs.ref }}
+          path: _gon
+          persist-credentials: false
+
+      - name: Install locked Go
+        run: bash _workflows/scripts/install-tool.sh go "$RUNNER_TEMP/locked-go"
+
+      - name: Verify locked Go version
+        run: bash _workflows/scripts/verify-locked-go.sh version
+
+      - name: Check caller Go requirement
+        run: bash _workflows/scripts/verify-locked-go.sh module _caller/go.mod _workflows/go.mod
+
+      - name: Build native gon from locked source
+        run: bash _workflows/scripts/gon-source.sh build _gon "$RUNNER_TEMP/locked-gon"
+
+      - name: Install locked syft
+        run: bash _workflows/scripts/install-tool.sh syft "$RUNNER_TEMP/locked-syft"
+
+      - name: Install locked GoReleaser
+        run: bash _workflows/scripts/install-tool.sh goreleaser "$RUNNER_TEMP/locked-goreleaser"
+
+      - name: Install cosign
+        uses: sigstore/cosign-installer@398d4b0eeef1380460a10c8013a76f728fb906ac # v3
+        with:
+          cosign-release: v2.5.2
 
       - name: Calculate S3 directory
         id: s3-directory
@@ -463,20 +488,11 @@ jobs:
           envsubst < templates/.goreleaser-binaries-template.yaml.tmpl | tee "${GENERATED_DIR}/.goreleaser.binaries.yaml"
           envsubst < templates/.slsa-provenance-predicate-template.json.tmpl | tee "${GENERATED_DIR}/predicate.json"
 
-      - name: Set up Gon
-        run: brew tap conductorone/gon && brew install conductorone/gon/gon
-
       - name: Import Keychain Certs
         uses: apple-actions/import-codesign-certs@v1
         with:
           p12-file-base64: ${{ secrets.APPLE_SIGNING_KEY_P12 }}
           p12-password: ${{ secrets.APPLE_SIGNING_KEY_P12_PASSWORD }}
-
-      - name: Install cosign
-        uses: sigstore/cosign-installer@v3
-
-      - name: Download syft
-        uses: anchore/sbom-action/download-syft@v0
 
       - name: Configure AWS credentials via OIDC
         uses: aws-actions/configure-aws-credentials@v5
@@ -485,11 +501,8 @@ jobs:
           aws-region: us-west-2
 
       - name: Run GoReleaser
-        uses: goreleaser/goreleaser-action@v6
-        with:
-          workdir: _caller
-          version: "~> v2.13"
-          args: release --clean --config ../_workflows/_generated/.goreleaser.binaries.yaml
+        working-directory: _caller
+        run: goreleaser release --clean --config ../_workflows/_generated/.goreleaser.binaries.yaml
         env:
           GITHUB_TOKEN: ${{ secrets.RELENG_GITHUB_TOKEN }}
           GORELEASER_CURRENT_TAG: ${{ inputs.tag }}
@@ -621,12 +634,6 @@ jobs:
             --directory "$S3_DIRECTORY" \
             --base-dir "../_caller/dist"
 
-      - name: Set up Go for workflows
-        uses: actions/setup-go@v6
-        with:
-          go-version-file: "_workflows/go.mod"
-          cache: false
-
       - name: Fetch release metadata
         id: release-meta
         working-directory: _workflows
@@ -701,6 +708,8 @@ jobs:
     if: inputs.msi == true
     needs: [determine-workflows-ref, release-preflight]
     runs-on: windows-latest
+    env:
+      GOTOOLCHAIN: local
     permissions:
       contents: read
       id-token: write
@@ -716,24 +725,9 @@ jobs:
         with:
           path: _caller
           repository: ${{ github.event.repository.full_name }}
-          ref: refs/tags/${{ inputs.tag }}
+          ref: ${{ github.sha }}
           fetch-depth: 0
           persist-credentials: false
-
-      - name: Verify caller checkout matches release tag
-        working-directory: _caller
-        shell: bash
-        env:
-          RELEASE_TAG: ${{ inputs.tag }}
-        run: |
-          set -euo pipefail
-          tag_commit="$(git rev-list -n 1 "refs/tags/$RELEASE_TAG")"
-          head_commit="$(git rev-parse HEAD)"
-          if [ "$head_commit" != "$tag_commit" ]; then
-            echo "::error::Checked out $head_commit but refs/tags/$RELEASE_TAG resolves to $tag_commit"
-            exit 1
-          fi
-          echo "Verified $RELEASE_TAG at $head_commit"
 
       - name: Checkout connector workflows
         uses: actions/checkout@v5
@@ -742,6 +736,13 @@ jobs:
           repository: ConductorOne/github-workflows
           ref: ${{ needs.determine-workflows-ref.outputs.ref }}
           persist-credentials: false
+
+      - name: Verify caller checkout matches release tag
+        shell: bash
+        env:
+          RELEASE_TAG: ${{ inputs.tag }}
+          EXPECTED_COMMIT: ${{ github.sha }}
+        run: bash _workflows/scripts/verify-release-checkout.sh _caller
 
       - name: Derive AWS role names
         id: role-names
@@ -756,11 +757,25 @@ jobs:
             --suffix "${REPO_OWNER}-${REPO_NAME}" \
             --output-name gha_artifacts_role_name >> "$GITHUB_OUTPUT"
 
-      - name: Set up Go for caller
-        uses: actions/setup-go@v6
-        with:
-          go-version-file: "_caller/go.mod"
-          cache: false
+      - name: Install locked Go
+        shell: pwsh
+        run: ./_workflows/scripts/install-tool.ps1 go "$env:RUNNER_TEMP/locked-go"
+
+      - name: Verify locked Go version
+        shell: bash
+        run: bash _workflows/scripts/verify-locked-go.sh version
+
+      - name: Check caller Go requirement
+        shell: bash
+        run: bash _workflows/scripts/verify-locked-go.sh module _caller/go.mod _workflows/go.mod
+
+      - name: Install locked syft
+        shell: pwsh
+        run: ./_workflows/scripts/install-tool.ps1 syft "$env:RUNNER_TEMP/locked-syft"
+
+      - name: Install locked GoReleaser Pro
+        shell: pwsh
+        run: ./_workflows/scripts/install-tool.ps1 goreleaser-pro "$env:RUNNER_TEMP/locked-goreleaser"
 
       - name: Generate or locate WXS file
         id: wxs
@@ -800,10 +815,9 @@ jobs:
           }
 
       - name: Install cosign
-        uses: sigstore/cosign-installer@v3
-
-      - name: Download syft
-        uses: anchore/sbom-action/download-syft@v0
+        uses: sigstore/cosign-installer@398d4b0eeef1380460a10c8013a76f728fb906ac # v3
+        with:
+          cosign-release: v2.5.2
 
       - name: Generate configs for Windows
         working-directory: _workflows
@@ -826,12 +840,8 @@ jobs:
           envsubst < templates/.slsa-provenance-predicate-template.json.tmpl | tee "_generated/predicate.json"
 
       - name: Run GoReleaser for Windows
-        uses: goreleaser/goreleaser-action@v6
-        with:
-          distribution: goreleaser-pro
-          workdir: _caller
-          version: "~> v2.13"
-          args: release --clean --skip=publish --config ../_workflows/_generated/.goreleaser.windows.yaml
+        working-directory: _caller
+        run: goreleaser release --clean --skip=publish --config ../_workflows/_generated/.goreleaser.windows.yaml
         env:
           GITHUB_TOKEN: ${{ secrets.RELENG_GITHUB_TOKEN }}
           GORELEASER_CURRENT_TAG: ${{ inputs.tag }}
@@ -959,12 +969,6 @@ jobs:
             -BaseDir "../_caller/dist" `
             -IncludeSbomDocuments
 
-      - name: Set up Go for workflows tools
-        uses: actions/setup-go@v6
-        with:
-          go-version-file: "_workflows/go.mod"
-          cache: false
-
       - name: Generate Windows manifest
         id: generate-windows-manifest
         working-directory: _workflows
@@ -995,30 +999,17 @@ jobs:
     outputs:
       images_manifest: ${{ steps.extract-images.outputs.images_manifest }}
     runs-on: ubuntu-latest
+    env:
+      GOTOOLCHAIN: local
     steps:
       - name: Checkout caller repo
         uses: actions/checkout@v5
         with:
           path: _caller
           repository: ${{ github.event.repository.full_name }}
-          ref: refs/tags/${{ inputs.tag }}
+          ref: ${{ github.sha }}
           fetch-depth: 0
           persist-credentials: false
-
-      - name: Verify caller checkout matches release tag
-        working-directory: _caller
-        shell: bash
-        env:
-          RELEASE_TAG: ${{ inputs.tag }}
-        run: |
-          set -euo pipefail
-          tag_commit="$(git rev-list -n 1 "refs/tags/$RELEASE_TAG")"
-          head_commit="$(git rev-parse HEAD)"
-          if [ "$head_commit" != "$tag_commit" ]; then
-            echo "::error::Checked out $head_commit but refs/tags/$RELEASE_TAG resolves to $tag_commit"
-            exit 1
-          fi
-          echo "Verified $RELEASE_TAG at $head_commit"
 
       - name: Checkout connector workflows
         if: inputs.docker == true || inputs.lambda == true
@@ -1028,6 +1019,13 @@ jobs:
           repository: ConductorOne/github-workflows
           ref: ${{ needs.determine-workflows-ref.outputs.ref }}
           persist-credentials: false
+
+      - name: Verify caller checkout matches release tag
+        shell: bash
+        env:
+          RELEASE_TAG: ${{ inputs.tag }}
+          EXPECTED_COMMIT: ${{ github.sha }}
+        run: bash _workflows/scripts/verify-release-checkout.sh _caller
 
       - name: Derive AWS role names
         id: role-names
@@ -1047,16 +1045,23 @@ jobs:
             --suffix "${REPO_NAME}" \
             --output-name ecr_push_role_name >> "$GITHUB_OUTPUT"
 
-      - name: Set up Go for caller
-        if: inputs.docker == true || inputs.lambda == true
-        uses: actions/setup-go@v6
-        with:
-          go-version-file: "_caller/go.mod"
-          cache: false
+      - name: Install locked Go
+        run: bash _workflows/scripts/install-tool.sh go "$RUNNER_TEMP/locked-go"
+
+      - name: Verify locked Go version
+        run: bash _workflows/scripts/verify-locked-go.sh version
+
+      - name: Check caller Go requirement
+        run: bash _workflows/scripts/verify-locked-go.sh module _caller/go.mod _workflows/go.mod
+
+      - name: Install locked GoReleaser
+        run: bash _workflows/scripts/install-tool.sh goreleaser "$RUNNER_TEMP/locked-goreleaser"
 
       - name: Install cosign
         if: inputs.docker == true
-        uses: sigstore/cosign-installer@v3
+        uses: sigstore/cosign-installer@398d4b0eeef1380460a10c8013a76f728fb906ac # v3
+        with:
+          cosign-release: v2.5.2
 
       - name: Generate configs for Docker OCI
         if: inputs.docker == true
@@ -1137,10 +1142,11 @@ jobs:
         uses: docker/setup-qemu-action@v3
         with:
           platforms: linux/arm64
+          image: tonistiigi/binfmt@sha256:400a4873b838d1b89194d982c45e5fb3cda4593fbfd7e08a02e76b03b21166f0
 
       - name: Set up Docker Buildx
         if: inputs.docker == true || inputs.lambda == true
-        uses: docker/setup-buildx-action@v3
+        run: bash _workflows/scripts/setup-release-buildx.sh
 
       - name: Configure Public ECR AWS credentials via OIDC
         if: inputs.docker == true
@@ -1157,22 +1163,12 @@ jobs:
 
       - name: Run GoReleaser for Docker OCI
         if: inputs.docker == true
-        uses: goreleaser/goreleaser-action@v6
-        with:
-          workdir: _caller
-          version: "~> v2.13"
-          args: release --clean --config ../_workflows/_generated/.goreleaser.docker.yaml
+        working-directory: _caller
+        run: goreleaser release --clean --config ../_workflows/_generated/.goreleaser.docker.yaml
         env:
           GITHUB_TOKEN: ${{ secrets.RELENG_GITHUB_TOKEN }}
           GORELEASER_CURRENT_TAG: ${{ inputs.tag }}
           COSIGN_EXPERIMENTAL: "1"
-
-      - name: Set up Go for Public ECR helper
-        if: inputs.docker == true
-        uses: actions/setup-go@v6
-        with:
-          go-version-file: "_workflows/go.mod"
-          cache: false
 
       - name: Preflight and publish Public ECR release tags
         if: inputs.docker == true
@@ -1202,30 +1198,13 @@ jobs:
         if: inputs.lambda == true
         uses: aws-actions/amazon-ecr-login@v2
 
-      - name: Set up Go for caller Lambda release
-        if: inputs.docker == true && inputs.lambda == true
-        uses: actions/setup-go@v6
-        with:
-          go-version-file: "_caller/go.mod"
-          cache: false
-
       - name: Run GoReleaser for Lambda
         if: inputs.lambda == true
-        uses: goreleaser/goreleaser-action@v6
-        with:
-          workdir: _caller
-          version: "~> v2.13"
-          args: release --clean --config ../_workflows/_generated/.goreleaser.lambda.yaml
+        working-directory: _caller
+        run: goreleaser release --clean --config ../_workflows/_generated/.goreleaser.lambda.yaml
         env:
           GITHUB_TOKEN: ${{ secrets.RELENG_GITHUB_TOKEN }}
           GORELEASER_CURRENT_TAG: ${{ inputs.tag }}
-
-      - name: Set up Go for workflows
-        if: inputs.docker == true || inputs.lambda == true
-        uses: actions/setup-go@v6
-        with:
-          go-version-file: "_workflows/go.mod"
-          cache: false
 
       - name: Extract image digests from GoReleaser assets
         id: extract-images
@@ -1313,6 +1292,8 @@ jobs:
       id-token: write
       contents: read
     runs-on: ubuntu-latest
+    env:
+      GOTOOLCHAIN: local
     steps:
       - name: Checkout connector workflows
         uses: actions/checkout@v5
@@ -1335,11 +1316,14 @@ jobs:
             --suffix "${REPO_OWNER}-${REPO_NAME}" \
             --output-name gha_artifacts_role_name >> "$GITHUB_OUTPUT"
 
-      - name: Set up Go for workflows
-        uses: actions/setup-go@v6
-        with:
-          go-version-file: "_workflows/go.mod"
-          cache: false
+      - name: Install locked Go
+        run: bash _workflows/scripts/install-tool.sh go "$RUNNER_TEMP/locked-go"
+
+      - name: Verify locked Go version
+        run: bash _workflows/scripts/verify-locked-go.sh version
+
+      - name: Check workflows Go requirement
+        run: bash _workflows/scripts/verify-locked-go.sh module _workflows/go.mod
 
       - name: Merge binaries, Windows, and images manifests
         working-directory: _workflows
@@ -1358,7 +1342,9 @@ jobs:
             | tee "${OUTPUT_DIR}/manifest.json"
 
       - name: Install cosign
-        uses: sigstore/cosign-installer@v3
+        uses: sigstore/cosign-installer@398d4b0eeef1380460a10c8013a76f728fb906ac # v3
+        with:
+          cosign-release: v2.5.2
 
       - name: Configure AWS credentials via OIDC
         uses: aws-actions/configure-aws-credentials@v5
@@ -1561,6 +1547,8 @@ jobs:
       id-token: write
       contents: read
     runs-on: ubuntu-latest
+    env:
+      GOTOOLCHAIN: local
     steps:
       - name: Checkout connector workflows
         uses: actions/checkout@v5
@@ -1570,37 +1558,31 @@ jobs:
           ref: ${{ needs.determine-workflows-ref.outputs.ref }}
           persist-credentials: false
 
-      - name: Set up Go for workflows
-        uses: actions/setup-go@v6
-        with:
-          go-version-file: "_workflows/go.mod"
-          cache: false
-
       - name: Checkout connector repo
         uses: actions/checkout@v5
         with:
           path: _connector
           repository: ${{ github.event.repository.full_name }}
-          ref: refs/tags/${{ inputs.tag }}
+          ref: ${{ github.sha }}
           fetch-depth: 0
           persist-credentials: false
 
       - name: Verify connector checkout matches release tag
         id: verify-connector-checkout
-        working-directory: _connector
         shell: bash
         env:
           RELEASE_TAG: ${{ inputs.tag }}
-        run: |
-          set -euo pipefail
-          tag_commit="$(git rev-list -n 1 "refs/tags/$RELEASE_TAG")"
-          head_commit="$(git rev-parse HEAD)"
-          if [ "$head_commit" != "$tag_commit" ]; then
-            echo "::error::Checked out $head_commit but refs/tags/$RELEASE_TAG resolves to $tag_commit"
-            exit 1
-          fi
-          echo "commit_sha=$head_commit" >> "$GITHUB_OUTPUT"
-          echo "Verified $RELEASE_TAG at $head_commit"
+          EXPECTED_COMMIT: ${{ github.sha }}
+        run: bash _workflows/scripts/verify-release-checkout.sh _connector
+
+      - name: Install locked Go
+        run: bash _workflows/scripts/install-tool.sh go "$RUNNER_TEMP/locked-go"
+
+      - name: Verify locked Go version
+        run: bash _workflows/scripts/verify-locked-go.sh version
+
+      - name: Check workflows Go requirement
+        run: bash _workflows/scripts/verify-locked-go.sh module _workflows/go.mod
 
       - name: Read connector documentation
         id: read-docs
@@ -1738,7 +1720,9 @@ jobs:
           persist-credentials: false
 
       - name: Install cosign
-        uses: sigstore/cosign-installer@v3
+        uses: sigstore/cosign-installer@398d4b0eeef1380460a10c8013a76f728fb906ac # v3
+        with:
+          cosign-release: v2.5.2
 
       # Pull-only role: authenticated pulls are not subject to Public ECR's
       # anonymous rate limit, which shared runner addresses exhaust.
@@ -1841,7 +1825,7 @@ jobs:
           } >> "$GITHUB_OUTPUT"
 
       - name: Send Datadog event on failure
-        uses: masci/datadog@v1
+        uses: masci/datadog@93a16378298f4e1980f13f6b412c0b8e66b96185 # v1
         with:
           api-key: ${{ secrets.DATADOG_API_KEY }}
           api-url: https://us3.datadoghq.com/

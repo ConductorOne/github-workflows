@@ -1,0 +1,68 @@
+name: CA Trust Guard
+description: Offline incident-chain trust checks with fingerprint-checked OS denial and a committed clean CA bundle.
+inputs:
+  mode:
+    description: 'report or enforce; probe errors always fail closed'
+    default: enforce
+  apply-distrust:
+    description: 'Apply the clean-bundle environment for subsequent steps (true or false)'
+    default: 'true'
+  os-deny:
+    description: 'Deny the four roots and two compromised intermediates where supported (true or false)'
+    default: 'true'
+  os-deny-elevation:
+    description: 'fail or warn when OS denial cannot run elevated; warn does not waive physical evidence'
+    default: fail
+runs:
+  using: composite
+  steps:
+    - name: Probe BEFORE
+      id: before
+      shell: bash
+      env:
+        GUARD_ROOT: ${{ github.action_path }}/../../..
+        GUARD_MODE: ${{ inputs.mode }}
+        GUARD_APPLY_DISTRUST: ${{ inputs.apply-distrust }}
+        GUARD_OS_DENY: ${{ inputs.os-deny }}
+        GUARD_OS_DENY_ELEVATION: ${{ inputs.os-deny-elevation }}
+      run: bash "$GUARD_ROOT/scripts/ca-trust-guard.sh" probe before
+    - name: Deny incident certificates in OS stores
+      if: inputs.os-deny == 'true'
+      shell: bash
+      env:
+        GUARD_ROOT: ${{ github.action_path }}/../../..
+        GUARD_MODE: ${{ inputs.mode }}
+        GUARD_APPLY_DISTRUST: ${{ inputs.apply-distrust }}
+        GUARD_OS_DENY: ${{ inputs.os-deny }}
+        GUARD_OS_DENY_ELEVATION: ${{ inputs.os-deny-elevation }}
+      run: bash "$GUARD_ROOT/scripts/ca-trust-guard.sh" deny-os
+    - name: Apply clean-bundle environment
+      if: ${{ !cancelled() && steps.before.outcome == 'success' && inputs.apply-distrust == 'true' }}
+      shell: bash
+      env:
+        GUARD_ROOT: ${{ github.action_path }}/../../..
+        GUARD_MODE: ${{ inputs.mode }}
+        GUARD_APPLY_DISTRUST: ${{ inputs.apply-distrust }}
+        GUARD_OS_DENY: ${{ inputs.os-deny }}
+        GUARD_OS_DENY_ELEVATION: ${{ inputs.os-deny-elevation }}
+      run: bash "$GUARD_ROOT/scripts/ca-trust-guard.sh" apply-clean-bundle
+    - name: Probe AFTER
+      if: ${{ !cancelled() }}
+      shell: bash
+      env:
+        GUARD_ROOT: ${{ github.action_path }}/../../..
+        GUARD_MODE: ${{ inputs.mode }}
+        GUARD_APPLY_DISTRUST: ${{ inputs.apply-distrust }}
+        GUARD_OS_DENY: ${{ inputs.os-deny }}
+        GUARD_OS_DENY_ELEVATION: ${{ inputs.os-deny-elevation }}
+      run: bash "$GUARD_ROOT/scripts/ca-trust-guard.sh" probe after
+    - name: Summarize and enforce
+      if: ${{ !cancelled() }}
+      shell: bash
+      env:
+        GUARD_ROOT: ${{ github.action_path }}/../../..
+        GUARD_MODE: ${{ inputs.mode }}
+        GUARD_APPLY_DISTRUST: ${{ inputs.apply-distrust }}
+        GUARD_OS_DENY: ${{ inputs.os-deny }}
+        GUARD_OS_DENY_ELEVATION: ${{ inputs.os-deny-elevation }}
+      run: bash "$GUARD_ROOT/scripts/ca-trust-guard.sh" summarize

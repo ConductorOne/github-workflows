@@ -3,6 +3,8 @@ set -euo pipefail
 
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 workflow="${script_dir}/../.github/workflows/release.yaml"
+# Compare the literal GitHub expression, not a Bash expansion.
+# shellcheck disable=SC2016
 expected='${{ inputs.tag }}'
 
 assert_tag_pin() {

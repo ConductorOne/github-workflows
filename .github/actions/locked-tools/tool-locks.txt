@@ -1,0 +1,20 @@
+# Artifact: <tool> <version> <os>/<arch> <sha256> <url>
+# gon source: <tool> <commit> darwin/* source (checkout by object ID, build with locked Go).
+# Versions observed in baton-github-test release run 38979848074; Go hashes from go.dev/dl/?mode=json.
+# Artifact hashes fetched once from each release's checksums.txt (Syft: syft_1.42.3_checksums.txt).
+goreleaser v2.13.3 linux/amd64 4b66f2f78f78561330350651ade557b70328664718490f37834749073af21d20 https://github.com/goreleaser/goreleaser/releases/download/v2.13.3/goreleaser_Linux_x86_64.tar.gz
+goreleaser v2.13.3 darwin/arm64 5516c37779efb3935d5b213cda3b0b9025ae94ddbcb51df6919acbcdef4194b0 https://github.com/goreleaser/goreleaser/releases/download/v2.13.3/goreleaser_Darwin_all.tar.gz
+goreleaser-pro v2.13.3 windows/amd64 8f65fca431ae6aa083805c9287d4b98b7937d54649712f1185b0590ae02001de https://github.com/goreleaser/goreleaser-pro/releases/download/v2.13.3/goreleaser-pro_Windows_x86_64.zip
+# gon-release v0.2.10
+gon f4c3f2be10a2ee8d50067d2c8a8828a14c83977c darwin/* source
+syft v1.42.3 linux/amd64 0d6be741479eddd2c8644a288990c04f3df0d609bbc1599a005532a9dff63509 https://github.com/anchore/syft/releases/download/v1.42.3/syft_1.42.3_linux_amd64.tar.gz
+syft v1.42.3 darwin/arm64 d71ee7db2be0fe2e96f679fd9d69ef04274cc86c8604707797080a21070b3f32 https://github.com/anchore/syft/releases/download/v1.42.3/syft_1.42.3_darwin_arm64.tar.gz
+syft v1.42.3 windows/amd64 e1b9f4945aa64c2b34970bec617623d7f803d0661b48a50b966768b363322e2d https://github.com/anchore/syft/releases/download/v1.42.3/syft_1.42.3_windows_amd64.zip
+go go1.27.3 linux/amd64 65efbc80fdc1fa2cd2631cad5b481777a68e8725f34e89f50fc6ac714e379b40 https://go.dev/dl/go1.27.3.linux-amd64.tar.gz
+go go1.27.3 darwin/arm64 dd3908cf20959d798c1e06ebe5b72213f0505ce01373b40ce3110975a6cd99c2 https://go.dev/dl/go1.27.3.darwin-arm64.tar.gz
+go go1.27.3 windows/amd64 f26081f438319757f8a1b46d7d0b2c5ec7583d4038e485e0aa725cfde7885fff https://go.dev/dl/go1.27.3.windows-amd64.zip
+# Node is the approved uniform patched line; hashes from nodejs.org/dist/v26.12.1/SHASUMS256.txt.
+node v26.12.1 linux/amd64 0fd1eb7770598f52a21995edf6ed35fc690400fa437c2386af329519e9143132 https://nodejs.org/dist/v26.12.1/node-v26.12.1-linux-x64.tar.gz
+node v26.12.1 darwin/arm64 1901d539912c02afa10d1cc126943a8855a7eedebe830119463470db5e6c59e8 https://nodejs.org/dist/v26.12.1/node-v26.12.1-darwin-arm64.tar.gz
+# Minisign lock ported verbatim from ductone/multipass PR #953 (release-sign-split); producer/reviewer verified it independently.
+minisign 0.12 darwin/arm64 89000b19535765f9cffc65a65d64a820f433ef6db8020667f7570e06bf6aac63 https://github.com/jedisct1/minisign/releases/download/0.12/minisign-0.12-macos.zip

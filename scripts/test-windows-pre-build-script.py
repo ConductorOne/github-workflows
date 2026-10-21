@@ -32,9 +32,9 @@ def verify_forwarding() -> None:
     assert query(f"{input_path}.default") == ""
     assert step_field("Generate configs for Windows", "env.WINDOWS_PRE_BUILD_SCRIPT") == "${{ inputs.windows_pre_build_script }}"
     assert step_field("Run GoReleaser for Windows", "env.RELEASE_TAG") == "${{ inputs.tag }}"
-    assert step_field("Run GoReleaser for Windows", "with.workdir") == "_caller"
-    assert step_field("Run GoReleaser for Windows", "with.args") == "release --clean --skip=publish --config ../_workflows/_generated/.goreleaser.windows.yaml"
-    # No pre-build opt-in or RELEASE_TAG forwarding on the other GoReleaser actions.
+    assert step_field("Run GoReleaser for Windows", '"working-directory"') == "_caller"
+    assert step_field("Run GoReleaser for Windows", "run") == "goreleaser release --clean --skip=publish --config ../_workflows/_generated/.goreleaser.windows.yaml"
+    # No pre-build opt-in or RELEASE_TAG forwarding on the other GoReleaser invocations.
     for job, name in (
         ("goreleaser-binaries", "Run GoReleaser"),
         ("goreleaser-docker", "Run GoReleaser for Docker OCI"),

@@ -15,19 +15,26 @@ test: test-go test-scripts
 .PHONY: test-go
 test-go:
 	go test ./...
+	GOTOOLCHAIN=local GOPROXY=off go test ./cmd/ca-trust-guard/...
 
 .PHONY: test-scripts
 test-scripts:
 	bash scripts/test-derive-iam-role-name.sh
 	bash scripts/test-normalize-release-options.sh
 	python3 scripts/test-release-config-templates.py
+	python3 scripts/test-check-image-locks.py
 	python3 scripts/test-windows-pre-build-script.py
 	python3 scripts/test-safe-relative-path.py
 	bash scripts/test-release-workflow-tag-pin.sh
+	python3 scripts/test-tool-integrity.py
+	python3 scripts/test-ci-workflow.py
+	python3 scripts/test-account-status-lifecycle.py
 	bash scripts/test-s3-release-uploads.sh
 	bash scripts/test-validate-release-artifacts.sh
 	bash scripts/test-cosign-retry.sh
 	bash scripts/test-publish-homebrew-formula.sh
+	bash scripts/test-deny-os.sh
+	bash scripts/test-ca-trust-guard.sh
 	python3 -m unittest discover -b -s .github/actions/pr-review/scripts -p 'test_*.py'
 	if command -v pwsh >/dev/null 2>&1; then pwsh -NoProfile -File scripts/test-s3-release-uploads.ps1; else echo "pwsh not found; skipping PowerShell S3 release upload tests"; fi
 

@@ -1,0 +1,15 @@
+{
+ "chain": "dv-g3b-aaa-emudhra.we-have-a-problem.com",
+ "capture_epoch": 1792540800,
+ "leaf_sha256": "7E02622AB6D745C1EDB4B431BB1C551E667305C3DD3EB0C7CC6DFDB523807424",
+ "intermediates_sha256": [
+  "45A883F349AEDFD5F3A649B5498FFB121712BA8B448F3F2A91DBC5A766FCDDBE"
+ ],
+ "leaf": "subject=CN = dv-g3b-aaa-emudhra.we-have-a-problem.com\nissuer=C = NL, O = eMudhra BV, CN = EM DV TLS CA - G3B\nnotBefore=Oct 20 02:22:41 2026 GMT\nnotAfter=May  3 02:27:41 2027 GMT",
+ "intermediates": [
+  "subject=C = NL, O = eMudhra BV, CN = EM DV TLS CA - G3B\nissuer=C = GB, ST = Greater Manchester, L = Salford, O = Comodo CA Limited, CN = AAA Certificate Services\nnotBefore=May 14 00:00:00 2025 GMT\nnotAfter=Dec 31 23:59:59 2028 GMT"
+ ],
+ "impacted_match": [
+  "EM DV TLS CA - G3B"
+ ]
+}

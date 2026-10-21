@@ -11,7 +11,7 @@ if [ -z "$BATON" ]; then
   BATON=baton
 fi
 
-if ! command -v $BATON &> /dev/null; then
+if ! command -v "$BATON" &> /dev/null; then
   echo "$BATON not found"
   exit 1
 fi
