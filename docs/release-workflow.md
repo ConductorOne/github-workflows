@@ -195,6 +195,8 @@ Artifact hashes were fetched once from the upstream release checksums and
 downloads before committing. Checksums and artifacts share upstream TLS origins;
 the integrity boundary during a release is the reviewed, committed lock.
 
+Node.js 22.23.4, consumed by axiomatic, is the architect-sanctioned single permitted version change in this series: the October 2026 Node security release, locked using [SHASUMS256.txt](https://nodejs.org/dist/v22.23.4/SHASUMS256.txt).
+
 | Tool / version | Lock platform | SHA256 or source commit | Committed artifact/source |
 | --- | --- | --- | --- |
 | goreleaser v2.13.3 | linux/amd64 | `4b66f2f78f78561330350651ade557b70328664718490f37834749073af21d20` | [Linux archive](https://github.com/goreleaser/goreleaser/releases/download/v2.13.3/goreleaser_Linux_x86_64.tar.gz) |
@@ -207,6 +209,8 @@ the integrity boundary during a release is the reviewed, committed lock.
 | go go1.27.3 | linux/amd64 | `65efbc80fdc1fa2cd2631cad5b481777a68e8725f34e89f50fc6ac714e379b40` | [Linux toolchain](https://go.dev/dl/go1.27.3.linux-amd64.tar.gz) |
 | go go1.27.3 | darwin/arm64 | `dd3908cf20959d798c1e06ebe5b72213f0505ce01373b40ce3110975a6cd99c2` | [Darwin toolchain](https://go.dev/dl/go1.27.3.darwin-arm64.tar.gz) |
 | go go1.27.3 | windows/amd64 | `f26081f438319757f8a1b46d7d0b2c5ec7583d4038e485e0aa725cfde7885fff` | [Windows toolchain](https://go.dev/dl/go1.27.3.windows-amd64.zip) |
+| node v22.23.4 | linux/amd64 | `b8492284c76a54baf58d61668dd0e41ee0fc98adabf9503d30f05d08f55b4406` | [Linux package](https://nodejs.org/dist/v22.23.4/node-v22.23.4-linux-x64.tar.gz) |
+| node v22.23.4 | darwin/arm64 | `c9e1dbc748b33ed2d14f42445191ecaf14c56259c7a9a26d0042c49ec2b66428` | [Darwin package](https://nodejs.org/dist/v22.23.4/node-v22.23.4-darwin-arm64.tar.gz) |
 
 The gon fork publishes only an amd64 asset for v0.2.10. Rather than using
 Rosetta, `actions/checkout` fetches the locked commit by object ID and

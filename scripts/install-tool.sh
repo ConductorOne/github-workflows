@@ -33,6 +33,14 @@ fi
 case "$tool" in
   go) canonical="https://go.dev/dl/${version}.${os}-${arch}.tar.gz" ;;
   syft) canonical="https://github.com/anchore/syft/releases/download/${version}/syft_${version#v}_${os}_${arch}.tar.gz" ;;
+  node)
+    node_arch="$arch"
+    if [ "$arch" = amd64 ]; then
+      node_arch=x64
+    fi
+    package="node-${version}-${os}-${node_arch}"
+    canonical="https://nodejs.org/dist/${version}/${package}.tar.gz"
+    ;;
   goreleaser)
     case "$os/$arch" in
       linux/amd64) asset=goreleaser_Linux_x86_64.tar.gz ;;
@@ -67,6 +75,9 @@ if [ "$tool" = go ]; then
   tar -xzf "$archive" -C "$dest" go
   printf 'GOROOT=%s/go\n' "$dest" >> "${GITHUB_ENV:?GITHUB_ENV must be set}"
   bin="$dest/go/bin"
+elif [ "$tool" = node ]; then
+  tar -xzf "$archive" -C "$dest"
+  bin="$dest/$package/bin"
 else
   tar -xzf "$archive" -C "$dest" "$tool"
   chmod +x "$dest/$tool"

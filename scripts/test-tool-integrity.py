@@ -54,9 +54,20 @@ class IntegrityTests(unittest.TestCase):
             self.assertNotEqual(result.returncode, 0, result.stdout + result.stderr)
         return result
 
+    def archive_member(self, tool: str, platform: str) -> str:
+        if tool == "go":
+            return "go/bin/go"
+        if tool == "node":
+            version = next(line.split()[1] for line in self.lock.read_text().splitlines()
+                           if line.startswith("node ") and line.split()[2] == platform)
+            os_name, arch = platform.split("/")
+            node_arch = "x64" if arch == "amd64" else arch
+            return f"node-{version}-{os_name}-{node_arch}/bin/node"
+        return tool
+
     def fixture_download(self, tool: str, platform: str) -> Path:
         archive = self.root / "fixture.tar.gz"
-        member = "go/bin/go" if tool == "go" else tool
+        member = self.archive_member(tool, platform)
         with tarfile.open(archive, "w:gz") as tar:
             data = b"#!/bin/sh\necho 'binary must not be invoked' >&2\nexit 77\n"
             info = tarfile.TarInfo(member)
@@ -80,21 +91,21 @@ class IntegrityTests(unittest.TestCase):
         return archive
 
     def test_verified_install_never_invokes_binary(self) -> None:
-        for tool in ("syft", "goreleaser", "go"):
+        for tool in ("syft", "goreleaser", "go", "node"):
             for os_name, platform in (("Linux", "linux/amd64"), ("Darwin", "darwin/arm64")):
                 with self.subTest(tool=tool, platform=platform):
                     self.fixture_download(tool, platform)
                     self.env.update(TEST_OS=os_name, TEST_ARCH="arm64" if os_name == "Darwin" else "x86_64")
                     dest = self.root / f"{tool}-{os_name}"
                     self.run_script("install-tool.sh", tool, dest)
-                    installed = dest / ("go/bin/go" if tool == "go" else tool)
+                    installed = dest / self.archive_member(tool, platform)
                     self.assertTrue(installed.is_file())
                     self.assertIn(str(installed.parent), self.path_file.read_text().splitlines())
                     if tool == "go":
                         self.assertIn(f"GOROOT={dest}/go", self.env_file.read_text())
 
     def test_mismatch_fails_before_extraction_or_path_update(self) -> None:
-        for tool in ("syft", "goreleaser", "go"):
+        for tool in ("syft", "goreleaser", "go", "node"):
             with self.subTest(tool=tool):
                 archive = self.fixture_download(tool, "linux/amd64")
                 archive.write_bytes(archive.read_bytes() + b"tampered")
@@ -117,6 +128,20 @@ class IntegrityTests(unittest.TestCase):
         self.assertFalse(self.calls.exists())
         self.env["TEST_ARCH"] = "unsupported"
         self.run_script("install-tool.sh", "syft", self.root / "dest", ok=False)
+        self.assertFalse(self.calls.exists())
+
+    def test_node_stale_url_and_duplicate_locks_fail_before_network(self) -> None:
+        self.fixture_download("node", "linux/amd64")
+        original = self.lock.read_text()
+        row = next(line for line in original.splitlines() if line.startswith("node ") and "linux/amd64" in line)
+        fields = row.split()
+        fields[1] = "v0.0.0"
+        self.lock.write_text(original.replace(row, " ".join(fields)))
+        result = self.run_script("install-tool.sh", "node", self.root / "dest", ok=False)
+        self.assertIn("does not match its URL", result.stderr)
+        self.assertFalse(self.calls.exists())
+        self.lock.write_text(original + row + "\n")
+        self.run_script("install-tool.sh", "node", self.root / "dest", ok=False)
         self.assertFalse(self.calls.exists())
 
     def test_go_version_and_module_gates(self) -> None:
