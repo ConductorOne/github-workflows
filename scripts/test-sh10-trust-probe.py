@@ -100,6 +100,41 @@ class ProbeTests(unittest.TestCase):
             thumbprint = result.stdout.strip().split("=")[-1].replace(":", "")
             self.assertIn(thumbprint, IDENTITIES.values())
 
+    def test_macos_sectrust_explicit_deny_outcomes(self):
+        self.executable("security", """#!/bin/sh
+printf '%s\\n' "$TEST_SECTRUST_OUTPUT"
+exit 1
+""")
+        self.executable("brew", "#!/bin/sh\nprintf '%s\\n' /fixture-brew\n")
+        # Execute the actual run_checks branch, isolating only unrelated PEM
+        # stores and Node. No keychain mutation or native macOS runtime needed.
+        script = SCRIPT[:SCRIPT.index("# 0) positive control")]
+        script += SCRIPT[SCRIPT.index("run_checks() {"):SCRIPT.index("apply_distrust() {")]
+        script += """
+check_store() { :; }
+node_store() { :; }
+os=Darwin; PHASE=after-distrust
+run_checks
+[ "$ERR" = "$TEST_EXPECT_ERR" ]
+"""
+        outcomes = (
+            ("SecTrustEvaluate result: kSecTrustResultDeny", "VERIFIED-DISTRUST", "0"),
+            ("kSecTrustResultDeny", "VERIFIED-DISTRUST", "0"),
+            ("SecTrust result: explicit Deny (trust setting)", "VERIFIED-DISTRUST", "0"),
+            ("Cert Verify Result: CSSMERR_TP_NOT_TRUSTED", "VERIFIED-DISTRUST", "0"),
+            ("Cert Verify Result: CSSMERR_TP_VERIFY_ACTION_FAILED", "REJECTED-UNKNOWN-CAUSE", "0"),
+            ("SecTrustEvaluate result: unexpected failure", "ERROR", "1"),
+        )
+        for output, verdict, expected_err in outcomes:
+            with self.subTest(output=output):
+                result = self.run_script(script, TEST_SECTRUST_OUTPUT=output,
+                                         TEST_EXPECT_ERR=expected_err)
+                self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+                rows = self.rows(result)
+                self.assertEqual(len(rows), 2)
+                self.assertTrue(all(row["store"] == "macos-sectrust" for row in rows))
+                self.assertEqual([row["verdict"] for row in rows], [verdict, verdict])
+
     def test_modes_and_before_baseline_gate(self):
         for mode in ("report", "enforce"):
             for apply in ("true", "false"):

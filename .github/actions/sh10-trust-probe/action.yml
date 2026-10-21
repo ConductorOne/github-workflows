@@ -69,7 +69,7 @@ runs:
                     for n in 1 2; do   # Apple keychain / SecTrust (.NET + Node-on-macOS path)
                       rc=0; out=$(security verify-cert -c "leaf-$n.pem" -c "intermediates-$n.pem" -p ssl -L 2>&1) || rc=$?
                       if [ $rc -eq 0 ]; then emit macos-sectrust "$n" TRUSTS ""
-                      elif echo "$out" | grep -qiE "not[_ ]trusted|revoked|untrusted|CSSMERR_TP_NOT_TRUSTED"; then emit macos-sectrust "$n" VERIFIED-DISTRUST "$(echo "$out"|head -1|cut -c1-120)"
+                      elif echo "$out" | grep -qiE "not[_ ]trusted|revoked|untrusted|CSSMERR_TP_NOT_TRUSTED|kSecTrustResultDeny|result:.*Deny"; then emit macos-sectrust "$n" VERIFIED-DISTRUST "$(echo "$out"|head -1|cut -c1-120)"
                       elif echo "$out" | grep -q "CSSMERR_TP_VERIFY_ACTION_FAILED"; then emit macos-sectrust "$n" REJECTED-UNKNOWN-CAUSE "$(echo "$out"|head -1|cut -c1-120)"
                       else emit macos-sectrust "$n" ERROR "$(echo "$out"|head -1|cut -c1-120)"; fi
                     done

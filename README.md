@@ -45,6 +45,13 @@ retirement signal, not a claim that every client has been repaired:
   Windows probe checks intermediate thumbprints, so a root deny alone does
   not turn that observation into verified CryptoAPI chain rejection.
 
+Known macOS SecTrust outcomes: explicit `kSecTrustResultDeny` (including
+`SecTrustEvaluate result: kSecTrustResultDeny` and other `result: ...Deny...`
+variants) and `CSSMERR_TP_NOT_TRUSTED` mean `VERIFIED-DISTRUST`.
+`CSSMERR_TP_VERIFY_ACTION_FAILED` remains `REJECTED-UNKNOWN-CAUSE`; unrecognized
+failures remain `ERROR`. Explicit-deny recognition extends the v3.11
+classifier because the OS-deny leg can now produce that result.
+
 The clean bundle covers different clients: OpenSSL, curl, Git, Requests,
 AWS CLI and npm/pnpm on Linux/macOS. Arbitrary Node script steps must also set
 step-level `env: { NODE_OPTIONS: --use-openssl-ca }`; GitHub does not permit
