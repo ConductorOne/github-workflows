@@ -2,77 +2,11 @@
 
 Shared GitHub workflows and actions for ConductorOne connector repositories.
 
-## SH10 Trust Probe Action
+## CA Trust Guard
 
-Use `ConductorOne/github-workflows/.github/actions/sh10-trust-probe@<commit-sha>`
-as the first step in a job, before checkout or credential setup. The action
-ships its own SHA-256-verified fixtures and makes no network requests.
-
-```yaml
-steps:
-  - uses: ConductorOne/github-workflows/.github/actions/sh10-trust-probe@<commit-sha>
-    with:
-      mode: enforce
-      apply-distrust: 'true'
-      os-deny: 'true'
-```
-
-These are the defaults. `mode` accepts `report` or `enforce`; the two switches
-accept `true` or `false`. To observe without changing trust, use `mode: report`
-and disable **both** switches. Probe errors always fail closed, including in
-report mode. The v3.11 summary and gate retain the BEFORE physical-store
-baseline: enforce with `apply-distrust: 'true'` requires a verified effective
-clean bundle when that baseline trusts either incident chain; with
-`apply-distrust: 'false'`, baseline trust freezes the job. AFTER observations
-do not add a new gate.
-
-The sequence is positive control → BEFORE probe → optional OS deny → optional
-clean-bundle environment → AFTER probe → summary. Every phase emits
-`sh10-probe` records. The AFTER per-store `VERIFIED-DISTRUST` rows are the
-retirement signal, not a claim that every client has been repaired:
-
-- Linux blacklists the four fingerprint-checked roots in
-  `/etc/ca-certificates.conf`, runs `update-ca-certificates` when changed, and
-  verifies the compiled system bundle. It does not rewrite private certifi or
-  bundled Node stores.
-- macOS adds explicit denies to System.keychain/SecTrust using root or sudo.
-  It does **not** rewrite `/etc/ssl/cert.pem` or Homebrew PEM bundles; their
-  actual AFTER verdicts may remain residual.
-- Elevated Windows imports matching certificates from machine/user Root and
-  CA stores into machine Disallowed, retaining the original certificates as
-  in the source implementation. Without Administrator, it emits an explicit
-  `SKIPPED-NOT-ELEVATED` row and performs no OS mutation. The existing offline
-  Windows probe checks intermediate thumbprints, so a root deny alone does
-  not turn that observation into verified CryptoAPI chain rejection.
-
-Known macOS SecTrust outcomes: explicit `kSecTrustResultDeny` (including
-`SecTrustEvaluate result: kSecTrustResultDeny` and other `result: ...Deny...`
-variants) and `CSSMERR_TP_NOT_TRUSTED` mean `VERIFIED-DISTRUST`.
-`CSSMERR_TP_VERIFY_ACTION_FAILED` remains `REJECTED-UNKNOWN-CAUSE`; unrecognized
-failures remain `ERROR`. Explicit-deny recognition extends the v3.11
-classifier because the OS-deny leg can now produce that result.
-
-The clean bundle covers different clients: OpenSSL, curl, Git, Requests,
-AWS CLI and npm/pnpm on Linux/macOS. Arbitrary Node script steps must also set
-step-level `env: { NODE_OPTIONS: --use-openssl-ca }`; GitHub does not permit
-writing `NODE_OPTIONS` through `GITHUB_ENV`. On Windows only Git/curl receive
-native-path CA settings; native CryptoAPI clients are not redirected. Action
-downloads before step 1, the runner agent, and dockerd/BuildKit TLS remain
-outside this mitigation. Do not disable TLS verification.
-
-The three emSign SHA-1 identities come from multipass #951; AAA Certificate
-Services comes from the committed incident `vulnerable-roots.pem` fixture
-(AAA was excluded from #951). Only those four roots are denied, not the
-source's wider emSign inventory. Each discovered candidate is fingerprint
-checked before mutation; mismatches fail closed. There is no package upgrade
-or online certificate fetch.
-
-OS changes persist on self-hosted runners: use ephemeral runners or plan
-explicit rollback. macOS rollback is `sudo security remove-trusted-cert -d`
-with each denied certificate; Linux rollback removes the affected `!` prefixes
-then runs `update-ca-certificates`; Windows rollback removes only the denied
-thumbprints from `Cert:\LocalMachine\Disallowed`. The clean-bundle leg also
-sets global Git CA configuration and later-step environment variables.
+Use the [CA Trust Guard action](.github/actions/ca-trust-guard/README.md) as a
+job's first step for offline incident-chain checks, fingerprint-checked OS
+denial and a committed clean-bundle environment. No caller checkout is needed.
 
 ## PR Review Workflow
 

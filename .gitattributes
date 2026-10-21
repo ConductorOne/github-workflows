@@ -1,1 +1,5 @@
-.github/actions/sh10-trust-probe/fixtures/** -text
+.github/actions/ca-trust-guard/fixtures/** -text
+scripts/ca-trust-guard.sh text eol=lf
+scripts/deny-os.sh text eol=lf
+scripts/apply-clean-bundle.sh text eol=lf
+scripts/test-deny-os.sh text eol=lf

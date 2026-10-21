@@ -1,0 +1,52 @@
+{
+  "certs": [
+    {
+      "name": "emSign ECC Root CA - G3",
+      "sha1": "3043FA4FF257DCA0C380EE2E58EA78B23FE6BBC1",
+      "sha256": "86A1ECBA089C4A8D3BBE2734C612BA341D813E043CF9E8A862CD5C57A36BBE6B",
+      "source": "multipass #951; cross-checked against incident fixture vulnerable-roots.pem",
+      "kind": "root",
+      "pem": "vulnerable-roots.pem"
+    },
+    {
+      "name": "emSign Root TLS CA - G3",
+      "sha1": "39D3236E4A609AB6190CBFA1AD02B3CC61DFC2C3",
+      "sha256": "7DD78D5F4F13459A83DFF9ABBBA62EDBAF6F2D102BF257FD712F4D9F2746ED8D",
+      "source": "multipass #951; cross-checked against incident fixture vulnerable-roots.pem",
+      "kind": "root",
+      "pem": "vulnerable-roots.pem"
+    },
+    {
+      "name": "emSign Root CS CA - G3",
+      "sha1": "1F74B6010A219FD9CA058D07AA053D15EFD9300D",
+      "sha256": "F2EDAAFF3D9B701FB4D14C9F285F8C0BAD90FC3BCC1FA07D47F4718EDABA34A5",
+      "source": "multipass #951; cross-checked against incident fixture vulnerable-roots.pem",
+      "kind": "root",
+      "pem": "vulnerable-roots.pem"
+    },
+    {
+      "name": "AAA Certificate Services",
+      "sha1": "D1EB23A46D17D68FD92564C2F1F1601764D8E349",
+      "sha256": "D7A7A0FB5D7E2731D771E9484EBCDEF71D5F0C3E0A2948782BC83EE0EA699EF4",
+      "source": "incident fixture vulnerable-roots.pem (AAA excluded from multipass #951)",
+      "kind": "root",
+      "pem": "vulnerable-roots.pem"
+    },
+    {
+      "kind": "intermediate",
+      "name": "EM DV TLS CA - G3B",
+      "sha1": "A99B289464F3B44343270A7A1E910F02370483FE",
+      "sha256": "42C4ACCD12C4F59597925E1A08A7A90102608543809308D50EC427E118BA1493",
+      "source": "SHA256SUMS-pinned intermediates-1.pem, first certificate; compromised EM DV TLS CA - G3B emSign cross-sign",
+      "pem": "intermediates-1.pem"
+    },
+    {
+      "kind": "intermediate",
+      "name": "EM DV TLS CA - G3B",
+      "sha1": "1396BE1372BC93DFA2A433CA964DBA91548A6E57",
+      "sha256": "45A883F349AEDFD5F3A649B5498FFB121712BA8B448F3F2A91DBC5A766FCDDBE",
+      "source": "SHA256SUMS-pinned intermediates-2.pem, first certificate; compromised EM DV TLS CA - G3B AAA cross-sign",
+      "pem": "intermediates-2.pem"
+    }
+  ]
+}
