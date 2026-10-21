@@ -1826,7 +1826,7 @@ class PriorFindingsTest(unittest.TestCase):
 
     def test_resolved_and_outdated_thread_still_reported(self):
         # The entry is still produced — the audit must re-verify it against
-        # the code. What changed is the prompt'"'"'s instruction about opening a
+        # the code. What changed is the prompt's instruction about opening a
         # NEW thread for it, not whether the finding is surfaced at all.
         findings = rot.collect_prior_findings([
             self._thread("🟠 Bug: x", resolved=True, outdated=True,
@@ -1836,6 +1836,26 @@ class PriorFindingsTest(unittest.TestCase):
         self.assertTrue(findings[0]["thread_resolved"])
         self.assertTrue(findings[0]["thread_outdated"])
         self.assertTrue(findings[0]["has_author_reply"])
+
+    def test_truncated_thread_counts_as_replied_to(self):
+        # The query takes comments(first: 20). On a longer thread a human
+        # reply can sit past the cut; reading that as "nobody replied" is the
+        # one direction that makes the audit more willing to re-raise.
+        thread = self._thread("\U0001f7e0 Bug: x")
+        thread["comments"]["totalCount"] = 25   # 1 fetched, 25 exist
+        findings = rot.collect_prior_findings([thread])
+        self.assertTrue(findings[0]["has_author_reply"])
+
+    def test_untruncated_bot_only_thread_still_has_no_author_reply(self):
+        # The truncation rule must not swallow the ordinary case: a complete
+        # thread with only bot comments has no author reply.
+        thread = self._thread(
+            "\U0001f7e0 Bug: x",
+            replies=[("github-actions[bot]", "re-posting, prior thread outdated")],
+        )
+        self.assertEqual(thread["comments"]["totalCount"], 2)
+        findings = rot.collect_prior_findings([thread])
+        self.assertFalse(findings[0]["has_author_reply"])
 
     def test_severity_mapping(self):
         self.assertEqual(rot.severity_of("🔴 Security: s"), "security")

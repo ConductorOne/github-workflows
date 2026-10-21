@@ -206,9 +206,19 @@ def collect_prior_findings(threads: list[dict]) -> list[dict]:
             "excerpt": body.splitlines()[0][:200],
             "thread_resolved": thread["isResolved"],
             "thread_outdated": thread["isOutdated"],
-            "has_author_reply": any(
-                (c.get("author") or {}).get("login", "") not in BOT_LOGINS
-                for c in comments[1:]
+            # Truncated threads count as replied-to. The query takes only the
+            # first 20 comments, so on a longer thread a human reply can sit
+            # past the cut and read as "nobody ever answered" — the one
+            # direction that makes the audit MORE willing to re-raise a
+            # finding. A thread that long has been engaged with. (is_resolvable
+            # above treats the same truncation as a reason not to act, for the
+            # same underlying reason: do not act on what was not read.)
+            "has_author_reply": (
+                thread["comments"]["totalCount"] != len(comments)
+                or any(
+                    (c.get("author") or {}).get("login", "") not in BOT_LOGINS
+                    for c in comments[1:]
+                )
             ),
         })
     findings.sort(key=lambda f: (f["thread_resolved"], f["path"] or "", f["line"] or 0))

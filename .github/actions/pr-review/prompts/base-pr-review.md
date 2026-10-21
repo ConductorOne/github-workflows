@@ -265,8 +265,10 @@ not pre-filtering, decides what blocks merge.
 
 Handle prior findings per the Step 3 audit — never silently skip them. Do not
 post a duplicate inline comment for a still-present issue whose thread is open
-and accurate, but DO count it in the summary counts, and DO post a fresh inline
-comment when the old thread is outdated and no longer points at the code.
+and accurate, and never open a new thread for one whose thread is resolved. DO
+count every still-present issue in the summary counts, and DO post a fresh
+inline comment when the old thread is outdated, unresolved, and no longer
+points at the code.
 
 Finally, take stock of your own coverage. If part of the change could not be fully
 reviewed — truncated or dropped diff paths, unreadable generated content, areas you
