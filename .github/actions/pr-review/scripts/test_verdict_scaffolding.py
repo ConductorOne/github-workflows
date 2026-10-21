@@ -1807,7 +1807,7 @@ class PriorFindingsTest(unittest.TestCase):
         ])
         self.assertTrue(findings[0]["human_engaged"])
 
-    def test_bot_only_thread_has_no_author_reply(self):
+    def test_bot_only_thread_is_not_engagement(self):
         for replies in (None, [("github-actions[bot]", "re-posting, prior thread outdated")]):
             with self.subTest(replies=replies):
                 findings = rot.collect_prior_findings([
@@ -1828,7 +1828,7 @@ class PriorFindingsTest(unittest.TestCase):
         self.assertFalse(finding["thread_resolved"])       # as unresolved + outdated,
         self.assertTrue(finding["thread_outdated"])        # which is the re-anchor path
 
-    def test_author_reply_survives_a_later_bot_comment(self):
+    def test_reply_survives_a_later_bot_comment(self):
         # Ordering must not matter: the bot replying last does not erase the
         # fact that a human wrote in the thread.
         findings = rot.collect_prior_findings([
