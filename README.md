@@ -2,6 +2,12 @@
 
 Shared GitHub workflows and actions for ConductorOne connector repositories.
 
+## CA Trust Guard
+
+Use the [CA Trust Guard action](.github/actions/ca-trust-guard/README.md) as a
+job's first step for offline incident-chain checks, fingerprint-checked OS
+denial and a committed clean-bundle environment. No caller checkout is needed.
+
 ## PR Review Workflow
 
 Runs Claude-powered PR review for same-repository pull requests. Fork PRs are skipped

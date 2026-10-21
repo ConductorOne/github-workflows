@@ -145,3 +145,41 @@ jobs:
       connector: ${{ inputs.connector }}
     secrets:
       RELENG_GITHUB_TOKEN: ${{ secrets.RELENG_GITHUB_TOKEN }}
+
+  ca-trust-guard:
+    runs-on: ubuntu-latest
+    env:
+      GOTOOLCHAIN: local
+      GOPROXY: 'off'
+      GOSUMDB: 'off'
+    steps:
+      - name: Checkout workflow repo
+        uses: actions/checkout@v5
+        with:
+          repository: ${{ job.workflow_repository }}
+          ref: ${{ job.workflow_sha }}
+          path: _workflow
+          persist-credentials: false
+      - name: Install Go for workflow checks
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: _workflow/go.mod
+          cache: false
+      - name: Vet CA Trust Guard
+        working-directory: _workflow
+        run: go vet ./cmd/ca-trust-guard/...
+      - name: Test CA Trust Guard
+        working-directory: _workflow
+        run: go test ./cmd/ca-trust-guard/...
+      - name: Test OS denial scripts
+        working-directory: _workflow
+        run: bash scripts/test-deny-os.sh
+      - name: Test offline bootstrap and step error propagation
+        working-directory: _workflow
+        run: bash scripts/test-ca-trust-guard.sh
+      - name: Shellcheck CA Trust Guard scripts
+        working-directory: _workflow
+        run: >-
+          shellcheck --shell=bash scripts/ca-trust-guard.sh scripts/deny-os.sh
+          scripts/apply-clean-bundle.sh scripts/test-deny-os.sh
+          scripts/test-ca-trust-guard.sh

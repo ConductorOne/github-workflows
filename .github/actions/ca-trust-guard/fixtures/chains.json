@@ -1,0 +1,25 @@
+{
+  "chains": [
+    {
+      "id": "1",
+      "leaf": "leaf-1.pem",
+      "intermediates": "intermediates-1.pem",
+      "leaf_sha256": "9DCB21B1841D75313B3C888F4BB9CC01F8F51379A76FBAA241CA492B668839E7",
+      "intermediates_sha256": [
+        "42C4ACCD12C4F59597925E1A08A7A90102608543809308D50EC427E118BA1493",
+        "3094025792039A68AF6E553686410BDAB7C0D4A36B9084CBA64202E35D6EBBDD"
+      ],
+      "capture_epoch": 1792540800
+    },
+    {
+      "id": "2",
+      "leaf": "leaf-2.pem",
+      "intermediates": "intermediates-2.pem",
+      "leaf_sha256": "7E02622AB6D745C1EDB4B431BB1C551E667305C3DD3EB0C7CC6DFDB523807424",
+      "intermediates_sha256": [
+        "45A883F349AEDFD5F3A649B5498FFB121712BA8B448F3F2A91DBC5A766FCDDBE"
+      ],
+      "capture_epoch": 1792540800
+    }
+  ]
+}
