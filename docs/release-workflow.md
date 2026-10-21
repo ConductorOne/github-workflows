@@ -470,6 +470,21 @@ releases/{org}/{release_storage_name}/{tag}/
 
 ## Testing Changes
 
+### Repository CI
+
+`.github/workflows/ci.yaml` runs repository-owned Go vet/tests, `make test-scripts`,
+and ShellCheck for relevant pull requests and pushes to `main`, with read-only
+contents permission and no secrets. The reusable `verify.yaml` remains scoped
+to connector callers. Real image-pin enforcement stays in the existing
+`general-pr-review.yaml` image-locks job rather than adding a duplicate CI job.
+
+CI installs ShellCheck and script-test dependencies through Ubuntu 24.04 apt.
+The tests select apt's Python/jq `yq` ahead of the runner's different `yq`.
+`bash scripts/lint-shell.sh` checks every repository Bash source, including
+action implementations, guard scripts, tests, and compatibility wrappers.
+Local lifecycle fixtures also verify connector failure propagation without
+calling a live connector.
+
 ### Test Repositories
 
 Use test connectors for validation:

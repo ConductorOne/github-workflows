@@ -141,6 +141,8 @@ fi
 # check if account exists -> create if not exists -> check -> delete -> delete again -> check
 
 # Get the search value based on the search method
+# SEARCH_METHOD is supplied by this action's input environment.
+# shellcheck disable=SC2153
 SEARCH_VALUE=$(get_search_value "$SEARCH_METHOD")
 
 # Check if account with this search criteria already exists before creating

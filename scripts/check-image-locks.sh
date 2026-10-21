@@ -21,7 +21,7 @@ while IFS= read -r -d '' file; do
     *[Dd]ockerfile*) from_pattern='[Ff][Rr][Oo][Mm]' ;;
   esac
   status=0
-  matches=$(grep -nIE "^[[:space:]]*$from_pattern[[:space:]]|image=|^[[:space:]]*image:" "$file") || status=$? # image-locks: ignore - checker pattern, not an image
+  matches=$(grep -nIE "^[[:space:]]*${from_pattern}[[:space:]]|image=|^[[:space:]]*image:" "$file") || status=$? # image-locks: ignore - checker pattern, not an image
   if (( status > 1 )); then
     exit "$status"
   fi

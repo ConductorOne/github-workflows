@@ -60,7 +60,9 @@ if [ "$os" = windows ]; then
   lock="$(cygpath -u "$lock")"
   dest="$(cygpath -u "$dest")"
 fi
-[ -n "$lock" ] && [ -f "$lock" ] && [ -r "$lock" ] || fail "Lock file missing or not readable: $lock"
+if [ -z "$lock" ] || [ ! -f "$lock" ] || [ ! -r "$lock" ]; then
+  fail "Lock file missing or not readable: $lock"
+fi
 lock="$(cd "$(dirname "$lock")" && pwd)/$(basename "$lock")"
 export TOOL_LOCK_FILE="$lock"
 lock_row() {
@@ -119,7 +121,10 @@ case "$phase" in
       if [ "$tool" = go ]; then
         export GOTOOLCHAIN=local
         export GOROOT="$dest/go"
-        if [ "$os" = windows ]; then export GOROOT="$(cygpath -w "$GOROOT")"; fi
+        if [ "$os" = windows ]; then
+          GOROOT="$(cygpath -w "$GOROOT")"
+          export GOROOT
+        fi
         export PATH="$dest/go/bin:$PATH"
         bash "$script_dir/verify-locked-go.sh" version
         printf 'GOTOOLCHAIN=local\n' >> "${GITHUB_ENV:?GITHUB_ENV must be set}"

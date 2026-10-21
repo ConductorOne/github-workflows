@@ -72,7 +72,7 @@ if [ "${1:-}" = probe ] && [ "${2:-}" = before ]; then
     "$CA_GUARD_STATE/apply-clean-bundle.jsonl" "$CA_GUARD_STATE/summary.jsonl" "$CA_GUARD_BIN"
   go_compiler=$(find_runner_go)
   printf 'CA trust guard bootstrap compiler: %s\n' "$go_compiler" >&2
-  (cd "$root" && GOTOOLCHAIN=local GOPROXY=off GOSUMDB=off GOWORK=off GOFLAGS= GO111MODULE=off \
+  (cd "$root" && GOTOOLCHAIN=local GOPROXY=off GOSUMDB=off GOWORK=off GOFLAGS='' GO111MODULE=off \
     "$go_compiler" build -o "$CA_GUARD_BIN" ./cmd/ca-trust-guard)
 fi
 case "${1:-}" in

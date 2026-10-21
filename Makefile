@@ -27,6 +27,8 @@ test-scripts:
 	python3 scripts/test-safe-relative-path.py
 	bash scripts/test-release-workflow-tag-pin.sh
 	python3 scripts/test-tool-integrity.py
+	python3 scripts/test-ci-workflow.py
+	python3 scripts/test-account-status-lifecycle.py
 	bash scripts/test-s3-release-uploads.sh
 	bash scripts/test-validate-release-artifacts.sh
 	bash scripts/test-cosign-retry.sh

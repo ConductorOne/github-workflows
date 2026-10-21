@@ -22,6 +22,8 @@ ln -s "$bash_real" "$work/bin/bash"
 make_go() {
   local destination=$1
   mkdir -p "$(dirname "$destination")"
+  # The generated stub must evaluate $1 when invoked, not while writing it.
+  # shellcheck disable=SC2016
   printf '#!/bin/bash\nif [ "$1" = version ]; then exit %s; fi\n' "${2:-0}" > "$destination"
   cat >> "$destination" <<'GO'
 set -euo pipefail
