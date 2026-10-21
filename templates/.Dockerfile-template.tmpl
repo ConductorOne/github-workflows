@@ -1,4 +1,4 @@
-FROM gcr.io/distroless/static-debian13:nonroot
+FROM gcr.io/distroless/static-debian13:nonroot@sha256:d62067879de890a1def9da0e7766b7d20810a5e5555cef8506b752437d7a3e88
 ARG TARGETPLATFORM
 ENTRYPOINT ["/${REPO_NAME}"]
 COPY ${TARGETPLATFORM}/${REPO_NAME} /${REPO_NAME}

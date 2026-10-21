@@ -1,0 +1,88 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "extends": ["config:recommended"],
+  "automerge": false,
+  "pinDigests": true,
+  "enabledManagers": ["dockerfile", "custom.regex"],
+  "dockerfile": {
+    "managerFilePatterns": ["/templates/\\.Dockerfile[^/]*\\.tmpl$/"]
+  },
+  "customManagers": [
+    {
+      "customType": "regex",
+      "managerFilePatterns": ["/^\\.github/workflows/release\\.yaml$/"],
+      "matchStrings": ["image[=:]\\s*['\"]?(?<depName>[^ \\n:@'\"]+):(?<currentValue>[^ \\n:@'\"]+)@(?<currentDigest>sha256:[a-f0-9]{64})"],
+      "datasourceTemplate": "docker"
+    },
+    {
+      "customType": "regex",
+      "managerFilePatterns": ["/^tools/image-locks\\.txt$/"],
+      "matchStrings": ["(?:^|\\n)(?<depName>[^ \\n]+):(?<currentValue>[^ :\\n]+) (?<currentDigest>sha256:[a-f0-9]{64}) [^\\n]+"],
+      "datasourceTemplate": "docker"
+    },
+    {
+      "customType": "regex",
+      "managerFilePatterns": ["/^README\\.md$/"],
+      "matchStrings": ["FROM (?<depName>[^ \\n]+):(?<currentValue>[^ :@\\n]+)@(?<currentDigest>sha256:[a-f0-9]{64})"],
+      "datasourceTemplate": "docker"
+    },
+    {
+      "customType": "regex",
+      "managerFilePatterns": ["/^tools/tool-locks\\.txt$/"],
+      "matchStrings": ["(?:^|\\n)goreleaser (?<currentValue>v[^ \\n]+) "],
+      "depNameTemplate": "goreleaser/goreleaser",
+      "datasourceTemplate": "github-releases"
+    },
+    {
+      "customType": "regex",
+      "managerFilePatterns": ["/^tools/tool-locks\\.txt$/"],
+      "matchStrings": ["(?:^|\\n)goreleaser-pro (?<currentValue>v[^ \\n]+) "],
+      "depNameTemplate": "goreleaser/goreleaser-pro",
+      "datasourceTemplate": "github-releases"
+    },
+    {
+      "customType": "regex",
+      "managerFilePatterns": ["/^tools/tool-locks\\.txt$/"],
+      "matchStrings": ["(?:^|\\n)# gon-release (?<currentValue>v[^ \\n]+)\\ngon (?<currentDigest>[a-f0-9]{40}) darwin/\\* source"],
+      "depNameTemplate": "ConductorOne/gon",
+      "datasourceTemplate": "github-tags"
+    },
+    {
+      "customType": "regex",
+      "managerFilePatterns": ["/^tools/tool-locks\\.txt$/"],
+      "matchStrings": ["(?:^|\\n)syft (?<currentValue>v[^ \\n]+) "],
+      "depNameTemplate": "anchore/syft",
+      "datasourceTemplate": "github-releases"
+    },
+    {
+      "customType": "regex",
+      "managerFilePatterns": ["/^tools/tool-locks\\.txt$/"],
+      "matchStrings": ["(?:^|\\n)go go(?<currentValue>[^ \\n]+) "],
+      "depNameTemplate": "go",
+      "datasourceTemplate": "golang-version",
+      "versioningTemplate": "semver"
+    }
+  ],
+  "packageRules": [
+    {
+      "description": "Do not change runtime/helper image tag channels in digest refresh PRs",
+      "matchDatasources": ["docker"],
+      "matchUpdateTypes": ["major", "minor", "patch"],
+      "enabled": false
+    },
+    {
+      "description": "Keep template/helper pins and their lock entries in the same reviewed PR",
+      "matchDatasources": ["docker"],
+      "groupName": "container image digests",
+      "matchUpdateTypes": ["digest", "pinDigest"],
+      "prBodyNotes": ["Refresh tools/image-locks.txt resolved dates and docs/release-workflow.md evidence. Resolve the multi-arch index and record every platform digest. For distroless, verify registry publication after 2026-10-20 06:04Z and the patched CA bundle before merging."]
+    },
+    {
+      "description": "Version proposals require a human-reviewed checksum and URL refresh",
+      "matchManagers": ["custom.regex"],
+      "matchDatasources": ["github-releases", "github-tags", "golang-version"],
+      "draftPR": true,
+      "prBodyNotes": ["This is a version proposal, NOT a completed lock refresh. For binary tools, update every affected platform URL and committed SHA-256 in tools/tool-locks.txt from reviewed upstream release assets. For source-built gon, review the release tag and locked commit and rerun the source build. Refresh the download table and run installer negative controls and the release canary before marking ready. Never merge a version-only lock change."]
+    }
+  ]
+}
