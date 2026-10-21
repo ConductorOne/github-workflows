@@ -77,15 +77,15 @@ class ImageLockCheckTest(unittest.TestCase):
         for reference in ("scratch", "base"):
             self.check_files({"Dockerfile": f"FROM {reference}\n"}, 1)
 
-    def test_inline_ignore_marker_allows_explicit_exceptions(self):
+    def test_ignore_markers_allow_explicit_exceptions(self):
         self.check_files({
-            "Dockerfile": "FROM scratch AS base # image-locks: ignore\nFROM base # image-locks: ignore\n",
+            "Dockerfile": "# image-locks: ignore\nFROM scratch AS base\n# image-locks: ignore\nFROM base\n",
             "script.sh": "docker buildx create --driver-opt image=fixture # image-locks: ignore\n",
         }, 0)
 
     def test_ignore_marker_applies_only_to_annotated_line(self):
-        diagnostic = self.check_files({"Dockerfile": "FROM scratch # image-locks: ignore\nFROM unlocked\n"}, 1)
-        self.assertIn("Dockerfile:2:", diagnostic)
+        diagnostic = self.check_files({"Dockerfile": "# image-locks: ignore\nFROM scratch\nFROM unlocked\n"}, 1)
+        self.assertIn("Dockerfile:3:", diagnostic)
 
     def test_empty_repository(self):
         self.check_files({}, 0)

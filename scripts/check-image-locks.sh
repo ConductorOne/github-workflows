@@ -30,6 +30,9 @@ while IFS= read -r -d '' file; do
   while IFS= read -r match; do
     line_number=${match%%:*}
     line=${match#*:}
+    if (( line_number > 1 )) && [[ "$(sed -n "$((line_number - 1))p" "$file")" =~ ^[[:space:]]*#[[:space:]]*image-locks:[[:space:]]*ignore([[:space:]]|$) ]]; then
+      continue
+    fi
     if [[ "$line" =~ $ignore_pattern ]]; then
       continue
     fi

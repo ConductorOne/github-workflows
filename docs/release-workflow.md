@@ -154,6 +154,7 @@ continues to select Linux arm64. `tools/image-locks.txt` records each image
 reference, index digest, and UTC resolution date. The helper-image locks are
 consumed by the companion release-workflow change that pins QEMU and the
 docker-container BuildKit driver.
+Until that change merges, the `tonistiigi/binfmt` and `moby/buildkit` lock lines, the release-workflow/setup-script Renovate managers, and the `tools/tool-locks.txt` version-proposal managers match nothing and are inert.
 
 Resolved on **2026-10-21** with `crane digest <ref>`:
 
@@ -191,7 +192,7 @@ the cutoff, which applies to the distroless runtime base, not these helpers.
 inputs for complete SHA-256 pins. The repository's pull-request workflow runs the
 check and its isolated positive/negative fixture tests without release secrets.
 Custom Dockerfiles in caller repositories are still the caller's responsibility.
-Test sources under `scripts/test-*` are excluded; `FROM scratch` and `FROM <stage>` multi-stage forms fail closed unless explicitly annotated with `# image-locks: ignore`.
+Test sources under `scripts/test-*` are excluded; `FROM scratch` and `FROM <stage>` multi-stage forms fail closed unless explicitly annotated with `# image-locks: ignore` on the immediately preceding line for Dockerfiles (trailing comments are not allowed); shell/YAML annotations may be inline.
 
 #### Updating Locks
 
