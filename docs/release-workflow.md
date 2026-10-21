@@ -288,6 +288,11 @@ duplicate tool names fail closed. Requesting `gon` automatically adds Go,
 installs/verifies it first, then builds the SHA-checked-out gon source with the
 existing readonly-module/proxy/checksum-database constraints.
 
+An empty `locks` input is resolved inside the action's prepare step, where the
+action directory is available, rather than in the caller-context input default.
+`dest` keeps its `runner.temp` metadata default: that context is available in
+the caller on Linux, macOS, and Windows.
+
 Outputs include each installed tool's version (`gon` reports its source commit),
 a `versions` JSON object, and `lock_sha256` for provenance. The action verifies
 that the lock bytes have not changed between preparation, installation, and

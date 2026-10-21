@@ -5,8 +5,8 @@ inputs:
     description: Comma-separated tools (go,node,syft,goreleaser,goreleaser-pro,gon,minisign). Gon automatically adds Go.
     required: true
   locks:
-    description: Path to the reviewed tool lock file.
-    default: ${{ github.action_path }}/tool-locks.txt
+    description: Path to the reviewed tool lock file; empty selects the action-local canonical lock.
+    default: ""
   dest:
     description: Destination root for verified tools.
     default: ${{ runner.temp }}/locked-tools
@@ -46,7 +46,8 @@ runs:
       shell: bash
       env:
         LOCKED_TOOLS: ${{ inputs.tools }}
-        TOOL_LOCK_FILE: ${{ inputs.locks }}
+        ACTION_DIR: ${{ github.action_path }}
+        LOCKS_INPUT: ${{ inputs.locks }}
         LOCKED_TOOLS_DEST: ${{ inputs.dest }}
       run: bash "$GITHUB_ACTION_PATH/locked-tools.sh" prepare
 

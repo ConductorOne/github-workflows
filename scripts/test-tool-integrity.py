@@ -317,7 +317,7 @@ class IntegrityTests(unittest.TestCase):
         self.fixture_download("node", "linux/amd64")
         custom = self.root / "custom locks.txt"
         shutil.copyfile(self.lock, custom)
-        self.env.update(LOCKED_TOOLS=" node ", TOOL_LOCK_FILE=str(custom))
+        self.env.update(LOCKED_TOOLS=" node ", LOCKS_INPUT=str(custom), ACTION_DIR=str(self.action_dir))
         self.run_script("locked-tools.sh", "prepare")
         plan = self.phase_outputs()
         expected_hash = hashlib.sha256(custom.read_bytes()).hexdigest()
@@ -339,6 +339,27 @@ class IntegrityTests(unittest.TestCase):
         self.assertFalse(self.calls.exists())
         self.run_script("locked-tools.sh", "outputs", ok=False)
 
+    def test_action_empty_lock_input_resolves_in_action_context(self) -> None:
+        self.fixture_download("node", "linux/amd64")
+        self.env.update(LOCKED_TOOLS="node", LOCKS_INPUT="", ACTION_DIR=str(self.action_dir),
+                        TOOL_LOCK_FILE="/caller-context/tool-locks.txt")
+        self.run_script("locked-tools.sh", "prepare")
+        plan = self.phase_outputs()
+        self.assertEqual(plan["lock_file"], str(self.lock))
+        self.env.update(TOOL_LOCK_FILE=plan["lock_file"], EXPECTED_LOCK_SHA256=plan["lock_sha256"])
+        self.run_script("locked-tools.sh", "install")
+        self.run_script("locked-tools.sh", "outputs")
+        self.assertEqual(self.phase_outputs()["lock_sha256"], hashlib.sha256(self.lock.read_bytes()).hexdigest())
+
+    def test_action_explicit_missing_lock_fails_without_fallback(self) -> None:
+        self.fixture_download("node", "linux/amd64")
+        self.env.update(LOCKED_TOOLS="node", LOCKS_INPUT=str(self.root / "missing-lock.txt"),
+                        ACTION_DIR=str(self.action_dir))
+        result = self.run_script("locked-tools.sh", "prepare", ok=False)
+        self.assertIn("::error title=GF13::Lock file missing or not readable:", result.stderr)
+        self.assertFalse(self.calls.exists())
+        self.assertFalse(self.path_file.exists())
+
     def test_action_gon_automatically_adds_go_and_rejects_bad_requests(self) -> None:
         self.fixture_download("node", "darwin/arm64")
         self.env.update(TEST_OS="Darwin", TEST_ARCH="arm64", LOCKED_TOOLS="gon,node")
@@ -355,7 +376,10 @@ class IntegrityTests(unittest.TestCase):
     def test_composite_metadata_and_single_canonical_lock(self) -> None:
         action = json.loads(subprocess.check_output(["yq", ".", str(ACTION / "action.yml")], text=True))
         self.assertEqual(action["runs"]["using"], "composite")
-        self.assertEqual(action["inputs"]["locks"]["default"], "${{ github.action_path }}/tool-locks.txt")
+        self.assertEqual(action["inputs"]["locks"]["default"], "")
+        prepare = action["runs"]["steps"][0]
+        self.assertEqual(prepare["env"]["ACTION_DIR"], "${{ github.action_path }}")
+        self.assertEqual(prepare["env"]["LOCKS_INPUT"], "${{ inputs.locks }}")
         self.assertEqual(action["inputs"]["dest"]["default"], "${{ runner.temp }}/locked-tools")
         self.assertFalse((ROOT / "tools/tool-locks.txt").exists())
         for step in action["runs"]["steps"]:

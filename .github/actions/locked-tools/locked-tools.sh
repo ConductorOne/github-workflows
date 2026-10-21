@@ -47,7 +47,11 @@ case "$(uname -m)" in
   arm64|aarch64) arch=arm64 ;;
   *) fail 'Unsupported architecture' ;;
 esac
-lock="${TOOL_LOCK_FILE:-$script_dir/tool-locks.txt}"
+if [ "$phase" = prepare ]; then
+  lock="${LOCKS_INPUT:-${ACTION_DIR:-$script_dir}/tool-locks.txt}"
+else
+  lock="${TOOL_LOCK_FILE:-$script_dir/tool-locks.txt}"
+fi
 dest="${LOCKED_TOOLS_DEST:?LOCKED_TOOLS_DEST must be set}"
 if [[ "$lock" == *$'\n'* || "$lock" == *$'\r'* || "$dest" == *$'\n'* || "$dest" == *$'\r'* ]]; then
   fail 'Lock and destination paths must not contain line breaks'
@@ -56,7 +60,7 @@ if [ "$os" = windows ]; then
   lock="$(cygpath -u "$lock")"
   dest="$(cygpath -u "$dest")"
 fi
-[ -f "$lock" ] || fail "Lock file not found: $lock"
+[ -n "$lock" ] && [ -f "$lock" ] && [ -r "$lock" ] || fail "Lock file missing or not readable: $lock"
 lock="$(cd "$(dirname "$lock")" && pwd)/$(basename "$lock")"
 export TOOL_LOCK_FILE="$lock"
 lock_row() {
