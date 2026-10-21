@@ -9,6 +9,22 @@ concurrency:
   group: general-pr-review-${{ github.workflow_ref }}-${{ github.event.pull_request.number || github.run_id }}
   cancel-in-progress: true
 jobs:
+  image-locks:
+    if: github.event_name == 'pull_request' && github.repository == 'ConductorOne/github-workflows'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout PR head
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          persist-credentials: false
+      - name: Test image lock check
+        run: python3 scripts/test-check-image-locks.py
+      - name: Check image locks
+        run: bash scripts/check-image-locks.sh
+    timeout-minutes: 5
   pr-review:
     runs-on: ubuntu-latest
     permissions:
