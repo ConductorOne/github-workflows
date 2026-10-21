@@ -1,0 +1,5 @@
+# <ref> <index-digest> <resolved-date>
+gcr.io/distroless/static-debian13:nonroot sha256:d62067879de890a1def9da0e7766b7d20810a5e5555cef8506b752437d7a3e88 2026-10-21
+public.ecr.aws/lambda/provided:al2023 sha256:49c8b85e353ea6052759c3dcf6761b35c055c29c8016a9cd734ac4d24a060729 2026-10-21
+tonistiigi/binfmt:latest sha256:400a4873b838d1b89194d982c45e5fb3cda4593fbfd7e08a02e76b03b21166f0 2026-10-21
+moby/buildkit:buildx-stable-1 sha256:cec9f139f45e93c5c69c60f8b07cfad9f43f4ef6b6a6cd917527fea5ff2e3dea 2026-10-21

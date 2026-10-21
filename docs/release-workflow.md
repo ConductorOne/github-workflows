@@ -146,6 +146,86 @@ Post-release validation (non-blocking):
 
 ## Security Properties
 
+### Pinned Container Images
+
+The default Dockerfile templates select immutable multi-architecture base-image
+indexes. Buildx selects the target platform from each index; the Lambda build
+continues to select Linux arm64. `tools/image-locks.txt` records each image
+reference, index digest, and UTC resolution date. The helper-image locks are
+consumed by the companion release-workflow change that pins QEMU and the
+docker-container BuildKit driver.
+Until that change merges, the `tonistiigi/binfmt` and `moby/buildkit` lock lines, the release-workflow/setup-script Renovate managers, and the `tools/tool-locks.txt` version-proposal managers match nothing and are inert.
+
+Resolved on **2026-10-21** with `crane digest <ref>`:
+
+| Image reference / lock line or distroless platform | Index / platform manifest digest |
+| --- | --- |
+| `gcr.io/distroless/static-debian13:nonroot` | `sha256:d62067879de890a1def9da0e7766b7d20810a5e5555cef8506b752437d7a3e88` |
+| ↳ `linux/amd64` | `sha256:d4df213e27178b79e05ee2bdf8a23d8c54baab3b5a0dc083b039ad9929fa4219` |
+| ↳ `linux/arm64/v8` | `sha256:8a198f3cf5e9b249577c18010ec18382a3e9f94a6e5676d57b1ff8438ae113e9` |
+| ↳ `linux/arm/v7` | `sha256:38489751a0d2feecbe3b7a840d979e6c4db380558f15c61ee025f378b84b2cf3` |
+| ↳ `linux/s390x` | `sha256:c63ef2a68c5ffa9bd31feaa573d606208c10d54b1bee2caf3c168dc5ddec78d9` |
+| ↳ `linux/ppc64le` | `sha256:be4a6d22e53c1118d0c026dc08be71ec3f1954ae75f6e5ff4a10ce97b837ff80` |
+| ↳ `linux/riscv64` | `sha256:0b160fd367891825201f06378982d59900bf35992cfcc453daf7449892d91226` |
+| `public.ecr.aws/lambda/provided:al2023` | `sha256:49c8b85e353ea6052759c3dcf6761b35c055c29c8016a9cd734ac4d24a060729` |
+| `tonistiigi/binfmt:latest` | `sha256:400a4873b838d1b89194d982c45e5fb3cda4593fbfd7e08a02e76b03b21166f0` |
+| `moby/buildkit:buildx-stable-1` | `sha256:cec9f139f45e93c5c69c60f8b07cfad9f43f4ef6b6a6cd917527fea5ff2e3dea` |
+
+Distroless intentionally sets image-config creation times to the Unix epoch.
+Its registry's [manifest metadata](https://gcr.io/v2/distroless/static-debian13/tags/list)
+records this index's `timeUploadedMs` as `1792595040699`
+(**2026-10-21 15:04:00.699 UTC**), after the required
+**2026-10-20 06:04 UTC** cutoff for the patched CA bundle
+([distroless #2215](https://github.com/GoogleContainerTools/distroless/pull/2215)).
+Do not use the reproducible config timestamp to infer publication time.
+
+The Lambda arm64 config was created on 2026-10-19 at 23:50:49 UTC, before that
+cutoff. AL2023's unpatched `ca-certificates` bundle
+([Amazon Linux 2023 #1147](https://github.com/amazonlinux/amazon-linux-2023/issues/1147))
+does not block Go **1.27.3 or newer** binaries; it is not a claim that the base
+image's bundle is patched. Binfmt's index creation annotation is
+2026-06-08 09:32:02 UTC, and BuildKit's is 2026-09-30 15:17:55 UTC; both predate
+the cutoff, which applies to the distroless runtime base, not these helpers.
+
+`scripts/check-image-locks.sh` checks repository Dockerfile `FROM` declarations
+(including documented examples), helper driver image assignments, and YAML image
+inputs for complete SHA-256 pins. The repository's pull-request workflow runs the
+check and its isolated positive/negative fixture tests without release secrets.
+Custom Dockerfiles in caller repositories are still the caller's responsibility.
+Test sources under `scripts/test-*` are excluded; `FROM scratch` and `FROM <stage>` multi-stage forms fail closed unless explicitly annotated with `# image-locks: ignore` on the immediately preceding line for Dockerfiles (trailing comments are not allowed); shell/YAML annotations may be inline.
+
+#### Updating Locks
+
+`renovate.json` adds Dockerfile-template discovery and regex managers for image
+locks, helper workflow inputs and setup script, the README's Java example, and tool locks.
+Enable the Renovate app for this repository to activate these rules; configuration
+alone does not grant the app access. Digest refreshes are grouped into reviewable
+PRs, with no automerge. Image tags are retained as readable update channels, not
+trusted build identities.
+Tagless QEMU and BuildKit execution references are tracked against explicit
+`latest` and `buildx-stable-1` update channels, respectively; refreshes replace
+their digests without adding mutable tags to the execution references.
+
+Neither Dependabot nor Renovate natively refreshes this repository's arbitrary
+artifact SHA-256 lock format. Regex managers instead open **draft version-proposal
+PRs** for GoReleaser OSS/Pro, Syft, and Go. Gon is built from a locked source
+commit: the `# gon-release <tag>` marker and its following commit lock are tracked
+against `ConductorOne/gon` tags. These proposals are not ready-to-merge locks.
+
+Before merging an update:
+
+1. For tools, refresh every affected platform's artifact URL and SHA-256 from the
+   reviewed upstream release assets. Keep the version, URL, and checksum together;
+   installers reject a version/URL mismatch. For gon, review the source commit
+   against its release tag and exercise the source build.
+2. For images, resolve the multi-arch index, inspect every architecture with
+   `crane manifest`, and record the resolution date and build/publication evidence.
+   Keep templates, helper inputs, lock entries, and this table in sync. Distroless
+   must remain newer than the CA-bundle cutoff above.
+3. Run the image-lock check and relevant installer negative controls, then a
+   canary release and artifact/base-layer verification. A bot PR or green fixture
+   test is not evidence of a successful release.
+
 ### Immutable S3 Release Objects
 
 Versioned release objects are uploaded through S3 `PutObject` with

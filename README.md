@@ -232,12 +232,13 @@ jobs:
 Your custom Dockerfile must:
 
 1. Use `ARG TARGETPLATFORM` for multi-arch build support
+   and pin every base image to a reviewed multi-arch index digest
 2. Copy the binary from `${TARGETPLATFORM}/<connector-name>`
 
 Example for a Java-based connector:
 
 ```dockerfile
-FROM gcr.io/distroless/java17-debian13:nonroot
+FROM gcr.io/distroless/java17-debian13:nonroot@sha256:3b74f9967f1674f49c3b7bd0fc3355e4d8591f8f98b9eed020ff9ca8f5bdb38d
 ARG TARGETPLATFORM
 ENTRYPOINT ["/baton-example"]
 
