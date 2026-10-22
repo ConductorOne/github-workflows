@@ -45,7 +45,7 @@ jobs:
         with:
           tools: go
 
-      - name: Restore last completed monitor state
+      - name: Restore newest valid monitor state
         id: restore
         env:
           GH_TOKEN: ${{ github.token }}
@@ -53,8 +53,19 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p monitor-state
-          run_id="$(gh run list --repo "$GITHUB_REPOSITORY" --workflow rekor-monitor.yaml \
-            --branch main --status completed --limit 1 --json databaseId --jq '.[0].databaseId // empty')"
+          workflow_id="$(gh api "repos/$GITHUB_REPOSITORY/actions/workflows/rekor-monitor.yaml" --jq '.id')"
+          candidates="$(gh api --paginate --slurp \
+            "repos/$GITHUB_REPOSITORY/actions/artifacts?name=rekor-monitor-state&per_page=100" |
+            jq -r '[.[].artifacts[] | select(.name == "rekor-monitor-state" and .expired == false and .workflow_run.head_branch == "main")] | sort_by(.created_at) | reverse | .[].workflow_run.id')"
+          run_id=""
+          while IFS= read -r candidate; do
+            [ -n "$candidate" ] || continue
+            candidate_workflow="$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$candidate" --jq '.workflow_id')"
+            if [ "$candidate_workflow" = "$workflow_id" ]; then
+              run_id="$candidate"
+              break
+            fi
+          done <<< "$candidates"
           if [ -n "$run_id" ]; then
             gh run download "$run_id" --repo "$GITHUB_REPOSITORY" \
               --name rekor-monitor-state --dir monitor-state

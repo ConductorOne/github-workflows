@@ -68,10 +68,12 @@ and must be revisited if the signed-image set or manifest schema changes.
 
 After review/merge, dispatch the workflow once on `main` with `bootstrap: true`.
 The first checkpoint establishes a baseline, **not** historical coverage.
-Subsequent runs restore the last completed workflow run's `rekor-monitor-state`
-artifact (30-day retention), preserving the checkpoint, pending entries, digest
-budget and reports. Missing or expired state fails closed rather than silently
-restarting; an operator must recover the last valid artifact before resuming.
+Subsequent runs restore the newest non-expired `rekor-monitor-state` artifact
+from a main-branch run of this workflow (30-day retention), preserving the
+checkpoint, pending entries, digest budget and reports. Artifact-less cancelled
+or early-failed runs cannot wedge restoration. Missing or expired state fails
+closed rather than silently restarting; an operator must recover the last valid
+artifact before resuming.
 Artifacts and job logs remain the evidence; no state is committed by the bot.
 
 Signed checkpoints contain no timestamp. The adapter persists the first
