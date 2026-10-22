@@ -41,6 +41,13 @@ def workflow_errors(workflow):
         errors.append("unprotected tool installation")
     if env["MONITOR_VERSION"] != "v0.0.0-20261019132539-47017b2379cb":
         errors.append("mutable monitor")
+    restore = next(step for step in job["steps"] if step.get("id") == "restore")
+    required_selection = ("actions/artifacts?name=rekor-monitor-state&per_page=100",
+                          ".expired == false", '.workflow_run.head_branch == "main"',
+                          "sort_by(.created_at)", ".workflow_run.id", "--paginate", "--slurp",
+                          "actions/workflows/rekor-monitor.yaml", ".workflow_id")
+    if "gh run list" in restore["run"] or any(part not in restore["run"] for part in required_selection):
+        errors.append("state must come from the newest valid artifact of this main-branch workflow")
     return errors
 
 
@@ -244,6 +251,100 @@ class MonitorTest(unittest.TestCase):
             for bootstrap, expected in (("false", 1), ("true", 0)):
                 result = subprocess.run(["bash", "-c", restore["run"]], cwd=directory, env=dict(env, BOOTSTRAP=bootstrap), capture_output=True)
                 self.assertEqual(result.returncode, expected)
+
+    def test_restore_survives_artifactless_runs_and_selects_only_valid_state(self):
+        workflow = json.loads(subprocess.check_output(["yq", ".", str(ROOT / ".github/workflows/rekor-monitor.yaml")], text=True))
+        index = next(index for index, step in enumerate(workflow["jobs"]["monitor"]["steps"])
+                     if step.get("id") == "restore")
+        restore = workflow["jobs"]["monitor"]["steps"][index]["run"]
+        def artifact(run, hour, branch="main", expired=False):
+            return {"name": "rekor-monitor-state", "expired": expired,
+                    "created_at": f"2026-10-22T{hour}:00:00Z",
+                    "workflow_run": {"id": run, "head_branch": branch}}
+        fixture = {"pages": [{"artifacts": [artifact(101, "10"), artifact(102, "12", expired=True),
+                                             artifact(103, "13", branch="feature"), artifact(104, "14")]},
+                             {"artifacts": [artifact(105, "11")]}],
+                   "runs": {str(run): {"workflow_id": 999 if run == 104 else 100,
+                                       "has_artifact": run not in (102, 900, 901)}
+                            for run in (101, 102, 103, 104, 105, 900, 901)},
+                   "latest_completed": 900}
+        with tempfile.TemporaryDirectory() as directory:
+            directory = Path(directory)
+            fake = directory / "gh"
+            fake.write_text("""#!/usr/bin/env python3
+import json, os, pathlib, subprocess, sys
+fixture = json.loads(os.environ["RESTORE_FIXTURE"])
+args = sys.argv[1:]
+if args[0] == "api":
+    if "--slurp" in args and "--jq" in args:
+        sys.exit("gh does not support combining slurp and jq")
+    endpoint = next(arg for arg in args if arg.startswith("repos/"))
+    if "/actions/artifacts?" in endpoint:
+        payload = fixture["pages"] if "--slurp" in args else fixture["pages"][0]
+    elif endpoint.endswith("/actions/workflows/rekor-monitor.yaml"):
+        payload = {"id": 100}
+    elif "/actions/runs/" in endpoint:
+        payload = fixture["runs"][endpoint.rsplit("/", 1)[1]]
+    else:
+        sys.exit("unexpected API boundary")
+    if "--jq" in args:
+        subprocess.run(["jq", "-r", args[args.index("--jq") + 1]],
+                       input=json.dumps(payload), text=True, check=True)
+    else:
+        print(json.dumps(payload))
+elif args[:2] == ["run", "list"]:
+    print(fixture["latest_completed"])
+elif args[:2] == ["run", "download"]:
+    run = args[2]
+    with open("downloads", "a") as output:
+        output.write(run + "\\n")
+    if not fixture["runs"][run]["has_artifact"]:
+        sys.exit("run has no usable state artifact")
+    destination = pathlib.Path(args[args.index("--dir") + 1])
+    destination.mkdir(exist_ok=True)
+    (destination / "checkpoint.txt").write_text("verified-checkpoint")
+    (destination / "reconciliation.json").write_text("{}")
+else:
+    sys.exit("unexpected CLI boundary")
+""")
+            fake.chmod(0o755)
+            def execute(script, data, label, bootstrap=False):
+                case = directory / label
+                case.mkdir()
+                environment = dict(os.environ, PATH=f"{directory}:{os.environ['PATH']}",
+                                   GITHUB_REPOSITORY="ConductorOne/github-workflows",
+                                   GITHUB_OUTPUT=str(case / "output"), RESTORE_FIXTURE=json.dumps(data),
+                                   BOOTSTRAP=str(bootstrap).lower())
+                result = subprocess.run(["bash", "-c", script], cwd=case, env=environment,
+                                        capture_output=True, text=True)
+                downloads = (case / "downloads").read_text().splitlines() if (case / "downloads").exists() else []
+                return result, downloads
+            for latest in (900, 901): # Cancelled and early-failed runs have no state artifact.
+                fixture["latest_completed"] = latest
+                result, downloads = execute(restore, fixture, f"latest-{latest}")
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertEqual(downloads, ["105"])
+            old_selection = '''set -euo pipefail
+mkdir -p monitor-state
+run_id="$(gh run list --repo "$GITHUB_REPOSITORY" --workflow rekor-monitor.yaml --branch main --status completed --limit 1 --json databaseId --jq '.[0].databaseId // empty')"
+gh run download "$run_id" --repo "$GITHUB_REPOSITORY" --name rekor-monitor-state --dir monitor-state
+'''
+            result, downloads = execute(old_selection, fixture, "old-selection")
+            self.assertNotEqual(result.returncode, 0)
+            self.assertEqual(downloads, ["901"])
+            empty = copy.deepcopy(fixture)
+            empty["pages"] = [{"artifacts": []}]
+            for bootstrap in (False, True):
+                result, downloads = execute(restore, empty, f"empty-{bootstrap}", bootstrap)
+                self.assertEqual(result.returncode, 0 if bootstrap else 1)
+                self.assertEqual(downloads, [])
+            for predicate in (".expired == false", '.workflow_run.head_branch == "main"'):
+                changed = copy.deepcopy(workflow)
+                changed["jobs"]["monitor"]["steps"][index]["run"] = restore.replace(predicate, "true")
+                self.assertTrue(workflow_errors(changed))
+            changed = copy.deepcopy(workflow)
+            changed["jobs"]["monitor"]["steps"][index]["run"] = old_selection
+            self.assertTrue(workflow_errors(changed))
 
 
 if __name__ == "__main__":
