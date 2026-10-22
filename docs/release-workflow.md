@@ -156,7 +156,7 @@ The job timeout remains five minutes.
 
 | Action / immutable ref | Credential custody | Re-pin review |
 | --- | --- | --- |
-| `masci/datadog@93a16378298f4e1980f13f6b412c0b8e66b96185` | `DATADOG_API_KEY`, a Datadog org write key; only this step's `with: api-key` receives it. Non-signing, notification only; never job-level environment. | Reviewer diffs the action's tag-to-SHA source. Renovate PRs are not auto-merged (`renovate.json` keeps `automerge: false`). |
+| `masci/datadog@93a16378298f4e1980f13f6b412c0b8e66b96185` | `DATADOG_API_KEY`, a Datadog org write key; only this step's `with: api-key` receives it. Non-signing, notification only; never job-level environment. | Diff the action's tag-to-SHA source; re-pinning is manual (no Renovate tracking exists for workflow SHAs). |
 
 ## Security Properties
 
