@@ -1850,7 +1850,7 @@ jobs:
           } >> "$GITHUB_OUTPUT"
 
       - name: Send Datadog event on failure
-        continue-on-error: true # reporting must not obscure the release failure
+        continue-on-error: true # best-effort reporting: a Datadog failure does not fail this job (the workflow is already failed)
         env:
           DATADOG_API_KEY: ${{ secrets.DATADOG_API_KEY }}
           REPOSITORY: ${{ github.repository }}
