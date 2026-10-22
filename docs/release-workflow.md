@@ -532,6 +532,9 @@ Use test connectors for validation:
    ```yaml
    uses: ConductorOne/github-workflows/.github/workflows/release.yaml@your-branch
    ```
+   After the exact-ref cutover, a branch-ref run fails `verify-release` and is
+   not recorded; branch canaries need a reviewed test-only path (not provided
+   by this change).
 3. Create a test release on test connector repo via UI
 4. Wait for workflow to complete
 5. Validate outputs:
