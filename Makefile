@@ -16,12 +16,14 @@ test: test-go test-scripts
 test-go:
 	go test ./cmd/extract-images ./cmd/record-release ./cmd/generate-manifest ./cmd/merge-manifests ./cmd/publish-public-ecr-release-tags
 	GOTOOLCHAIN=local GOPROXY=off go test ./cmd/ca-trust-guard/...
+	GOTOOLCHAIN=local go -C tools/rekor-entry test ./...
 
 .PHONY: test-scripts
 test-scripts:
 	bash scripts/test-derive-iam-role-name.sh
 	bash scripts/test-normalize-release-options.sh
 	python3 scripts/test-release-config-templates.py
+	python3 scripts/test-rekor-monitor.py
 	python3 scripts/test-check-image-locks.py
 	python3 scripts/test-windows-pre-build-script.py
 	python3 scripts/test-safe-relative-path.py

@@ -1,0 +1,107 @@
+name: Rekor identity monitor
+
+on:
+  schedule:
+    - cron: "23 * * * *"
+  workflow_dispatch:
+    inputs:
+      bootstrap:
+        description: "Initialize the first checkpoint (first run only; no historical coverage)."
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: rekor-identity-monitor
+  cancel-in-progress: false
+
+jobs:
+  monitor:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 50
+    env:
+      GOTOOLCHAIN: local
+      GOFLAGS: -mod=readonly
+      GOPROXY: https://proxy.golang.org
+      GOSUMDB: sum.golang.org
+      MONITOR_VERSION: v0.0.0-20261019132539-47017b2379cb
+      # Test-channel placeholder only; no webhook or production routing is configured.
+      ALERT_CHANNEL: "#ops-testing-new-alerts"
+    steps:
+      - name: Checkout monitor adapter
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          persist-credentials: false
+
+      - name: Enforce runner CA trust
+        uses: ./.github/actions/ca-trust-guard
+
+      - name: Install locked Go toolchain
+        uses: ./.github/actions/locked-tools
+        with:
+          tools: go
+
+      - name: Restore last completed monitor state
+        id: restore
+        env:
+          GH_TOKEN: ${{ github.token }}
+          BOOTSTRAP: ${{ inputs.bootstrap || false }}
+        run: |
+          set -euo pipefail
+          mkdir -p monitor-state
+          run_id="$(gh run list --repo "$GITHUB_REPOSITORY" --workflow rekor-monitor.yaml \
+            --branch main --status completed --limit 1 --json databaseId --jq '.[0].databaseId // empty')"
+          if [ -n "$run_id" ]; then
+            gh run download "$run_id" --repo "$GITHUB_REPOSITORY" \
+              --name rekor-monitor-state --dir monitor-state
+            test -s monitor-state/checkpoint.txt
+            test -s monitor-state/reconciliation.json
+          elif [ "$BOOTSTRAP" != true ]; then
+            echo "::error::No monitor state exists; initialize once with the bootstrap dispatch input."
+            exit 1
+          else
+            echo "bootstrap=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Install pinned upstream monitor
+        run: go install "github.com/sigstore/rekor-monitor/cmd/rekor_monitor@$MONITOR_VERSION"
+
+      - name: Build single-purpose entry proof verifier
+        working-directory: tools/rekor-entry
+        run: |
+          set -euo pipefail
+          go build -o "$RUNNER_TEMP/rekor-entry" .
+
+      - name: Verify checkpoint and scan identities
+        run: |
+          set -euo pipefail
+          "$(go env GOPATH)/bin/rekor_monitor" --once=true --monitor-port=0 \
+            --url https://rekor.sigstore.dev \
+            --file monitor-state/checkpoint.txt --config-file tools/rekor-monitor.yaml \
+            2>&1 | tee monitor-state/diagnostics.log
+          touch monitor-state/identities.jsonl
+
+      - name: Check signed digests and checkpoint progress
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REKOR_ENTRY_HELPER: ${{ runner.temp }}/rekor-entry
+          MONITOR_BOOTSTRAP: ${{ steps.restore.outputs.bootstrap || false }}
+        run: bash scripts/rekor_digest_check.sh
+
+      - name: Persist verified checkpoint and reconciliation state
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: rekor-monitor-state
+          path: monitor-state/
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Alert delivery placeholder
+        if: failure()
+        run: |
+          echo '::warning::Rekor monitor needs attention. Alert delivery is not wired; intended test channel: #ops-testing-new-alerts.'

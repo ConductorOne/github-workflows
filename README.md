@@ -8,6 +8,100 @@ Use the [CA Trust Guard action](.github/actions/ca-trust-guard/README.md) as a
 job's first step for offline incident-chain checks, fingerprint-checked OS
 denial and a committed clean-bundle environment. No caller checkout is needed.
 
+## Rekor Identity Monitor
+
+`.github/workflows/rekor-monitor.yaml` runs hourly on `main`, watching the three
+public release-workflow SANs and the GitHub Actions issuer configured in
+`tools/rekor-monitor.yaml`. It installs the upstream monitor at
+`v0.0.0-20261019132539-47017b2379cb` through the Go module proxy and checksum
+database, with `GOTOOLCHAIN=local` and `GOFLAGS=-mod=readonly`.
+The module sum is `h1:+ICdEtSt8tWgvUR8YdwoMOavuNf2yWEqH5FXSpxVdhI=`.
+The existing locked-tools action supplies the Go toolchain.
+
+The upstream binary verifies signed checkpoints and consistency with the prior
+checkpoint; it does **not** verify matched entries' inclusion. The small isolated
+`tools/rekor-entry` Go helper verifies the fetched entry's RFC 6962 inclusion,
+body/UUID binding, signed timestamp, checkpoint signature and consistency with
+the monitor's verified view. A proof's signed checkpoint may be newer than the
+saved view, which is why simply comparing roots in Python would be insufficient.
+The helper emits authenticated certificate metadata for hashedrekord entries;
+the stdlib-only Python adapter performs the public-data joins.
+
+Fulcio chain checks use committed public roots and intermediates extracted from
+the public-good TUF `trusted_root.json` after a Sigstore Go TUF refresh:
+
+| Material | SHA256 |
+| --- | --- |
+| `tools/rekor-fulcio-roots.pem` (2 roots) | `d543eb6e067c069c6b2fd2c22258452db2f923b221597303a6bce4c664209ee6` |
+| `tools/rekor-fulcio-intermediates.pem` (1 intermediate) | `ac5a60ca80f473f8b7742111f9eb49bf7dbd8f03f41a5b39d58b62b6f0de4d0f` |
+| Verified `trusted_root.json` source | `6494e21ea73fa7ee769f85f57d5a3e6a08725eae1e38c755fc3517c9e6bc0b66` |
+
+Extraction used TUF snapshot version 166, targets version 14 and root version 16.
+Root changes require a reviewed refresh; this does not install a new OS trust
+anchor. Non-chaining certificates are skipped by upstream before identity
+matching and retained as informational chain-failure diagnostics. The entry
+helper likewise reports `UNAUTHENTICATED-SAN`, never a run-identity match.
+
+Each supported entry has separate **run-identity-match** and
+**artifact-authorized** verdicts. A real concluded GitHub run, pinned reusable
+workflow reference, matching caller commit and plausible signature time prove
+the former, not the latter. Certificate repository/tag extensions locate the
+public catalog index, connector index and exact release manifest at
+`https://dist.conductorone.com`. Known archive/checksum hashes and the hash of
+the published manifest bytes are joinable signed-byte digests. Missing runs,
+unexpected workflow refs and unrecorded digests on artifact-only releases are
+anomalies. In-flight runs and not-yet-published digests stay `PENDING` for at most
+six hours; the pending observations persist across cron runs.
+
+`UNKNOWN` is not success or an anomaly: hidden catalogs (including HTTP 403),
+unknown storage aliases, missing certificate extensions, DSSE/intoto payloads
+and non-joinable signatures are never given invented joins. A hashedrekord OCI
+signature records the hash of simple-signing payload bytes, **not** the image
+digest. The current manifest has no `signed` flag: the ambiguity budget is the
+number of public-ECR `images` entries with `isIndex: true`; private Lambda
+images do not count. At most that many distinct unrecorded hashes per release
+remain `UNKNOWN` after reconciliation; the next is an anomaly. The budget
+persists across runs, counts distinct hashes rather than duplicate log entries,
+and must be revisited if the signed-image set or manifest schema changes.
+
+### Initialization, state and alert handoff
+
+After review/merge, dispatch the workflow once on `main` with `bootstrap: true`.
+The first checkpoint establishes a baseline, **not** historical coverage.
+Subsequent runs restore the last completed workflow run's `rekor-monitor-state`
+artifact (30-day retention), preserving the checkpoint, pending entries, digest
+budget and reports. Missing or expired state fails closed rather than silently
+restarting; an operator must recover the last valid artifact before resuming.
+Artifacts and job logs remain the evidence; no state is committed by the bot.
+
+Signed checkpoints contain no timestamp. The adapter persists the first
+wall-clock observation of each origin/size/root and fails if the same view is
+unchanged for more than two hours. Changing only its note signature does not
+reset the clock. Initial-view currency is unproven, and a quiet log cannot be
+distinguished from a stalled feed at first observation.
+
+Alerts are **not wired**: reports and failure annotations name the test-channel
+placeholder `#ops-testing-new-alerts`; no webhook or production routing is
+configured. Configure and exercise delivery to that test channel before any
+production alerting. No attacker tokens, live signing or self-signed canary
+entries are requested by this workflow.
+
+Recorded low-priority follow-ups: add a scheduled dedicated-identity canary to
+close the initial-view/liveness gap; compare DSSE payload hashes to payloads in
+published provenance/SBOM bundles; schedule reviewed TUF root refreshes; and
+index published OCI simple-signing payload hashes. Until the last item, replay
+inside an image release's ambiguity budget is undetected. A replay over an
+already-recorded digest is inherently indistinguishable. This is a detection
+aid over published data, not a replacement for registry signature verification
+or proof that a run intended particular bytes.
+
+Offline checks: `python3 scripts/test-rekor-monitor.py`,
+`go -C tools/rekor-entry test ./...`, and `make test-scripts`. They use synthetic
+fixtures, including replay, missing run, frozen checkpoint, pending/resolved
+publication, image-budget exhaustion, altered proofs and untrusted certificates.
+Live fleet/axiomatic release observation and alert delivery remain rollout
+rehearsals, not claims established by fixture tests.
+
 ## PR Review Workflow
 
 Runs Claude-powered PR review for same-repository pull requests. Fork PRs are skipped
