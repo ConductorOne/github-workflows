@@ -46,6 +46,10 @@ class ReleaseActionsTest(unittest.TestCase):
             self.assertTrue(policy.check_workflow({"jobs": {"new-job": job}}))
         self.assertTrue(policy.check_workflow({"permissions": {"id-token": "write"},
                                               "jobs": {"new-job": {"steps": job["steps"]}}}))
+        self.assertTrue(policy.check_workflow({"env": {"TOKEN": "${{ secrets.RELEASE_TOKEN }}"},
+                                              "jobs": {"new-job": {"steps": job["steps"]}}}))
+        self.assertTrue(policy.check_workflow({"jobs": {"new-job": {"secrets": "inherit",
+                                                                  "uses": "unreviewed/workflow@v1"}}}))
 
     def test_local_actions_require_immutable_checkout(self):
         steps = policy.load_yaml(ROOT / ".github/workflows/release.yaml")["jobs"]["validate-inputs"]["steps"][:2]
@@ -58,7 +62,7 @@ class ReleaseActionsTest(unittest.TestCase):
 
     def test_first_party_actions_require_sha(self):
         for name in ("checkout", "github-script", "upload-artifact", "download-artifact",
-                     "setup-go", "cache", "create-github-app-token"):
+                     "setup-go", "cache", "cache/restore", "cache/save", "create-github-app-token"):
             self.assertEqual(policy.check_steps([{"uses": f"actions/{name}@" + "a" * 40}], "first-party"), [])
             self.assertTrue(policy.check_steps([{"uses": f"actions/{name}@v2"}], "first-party"))
         self.assertTrue(policy.check_steps([{"uses": "actions-impostor/checkout@" + "a" * 40}], "third-party"))
