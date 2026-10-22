@@ -7,5 +7,5 @@ apple-actions/import-codesign-certs
 docker/setup-qemu-action
 docker/setup-buildx-action
 # Notification only; custody: DATADOG_API_KEY (Datadog org write key, non-signing).
-# Re-pin review: diff the action's tag-to-SHA source; Renovate PRs are not auto-merged.
+# Re-pin review: diff the action's tag-to-SHA source; re-pinning is manual (no Renovate tracking exists for workflow SHAs).
 masci/datadog@93a16378298f4e1980f13f6b412c0b8e66b96185
