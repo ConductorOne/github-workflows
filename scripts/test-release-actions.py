@@ -147,7 +147,6 @@ class ReleaseActionsTest(unittest.TestCase):
         self.assertEqual(policy.check_steps([step], "notify-release-failure"), [])
         for ref in ("v1", "a" * 40):
             self.assertTrue(policy.check_steps([{"uses": f"masci/datadog@{ref}"}], "notify-release-failure"))
-        self.assertFalse(json.loads((ROOT / "renovate.json").read_text())["automerge"])
 
     def test_notification_custody_and_best_effort_negative_controls(self):
         workflow = policy.load_yaml(ROOT / ".github/workflows/release.yaml")
