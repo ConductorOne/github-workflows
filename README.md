@@ -480,3 +480,7 @@ To test changes, point a connector at your branch:
 ```yaml
 uses: ConductorOne/github-workflows/.github/workflows/release.yaml@my-branch
 ```
+
+After the exact-ref cutover, a branch-ref run fails `verify-release` and is not
+recorded; branch canaries need a reviewed test-only path (not provided by this
+change).

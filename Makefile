@@ -31,6 +31,7 @@ test-scripts:
 	python3 scripts/test-account-status-lifecycle.py
 	bash scripts/test-s3-release-uploads.sh
 	bash scripts/test-validate-release-artifacts.sh
+	python3 scripts/test-certificate-identities.py
 	bash scripts/test-cosign-retry.sh
 	bash scripts/test-publish-homebrew-formula.sh
 	bash scripts/test-deny-os.sh
