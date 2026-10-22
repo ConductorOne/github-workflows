@@ -2,7 +2,7 @@
 # Composite-action glue. Artifact verification remains in the gated installers.
 set -euo pipefail
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-fail() { echo "::error title=GF13::$*" >&2; exit 1; }
+fail() { echo "::error title=locked-tools::$*" >&2; exit 1; }
 phase="${1:-}"
 case "$phase" in prepare|install|gon|outputs) ;; *) fail 'Unknown locked-tools phase' ;; esac
 request="${LOCKED_TOOLS:-}"
@@ -50,7 +50,7 @@ esac
 if [ "$phase" = prepare ]; then
   lock="${LOCKS_INPUT:-${ACTION_DIR:-$script_dir}/tool-locks.txt}"
 else
-  lock="${TOOL_LOCK_FILE:-$script_dir/tool-locks.txt}"
+  lock="${LOCK_PATH:-${TOOL_LOCK_FILE:-$script_dir/tool-locks.txt}}"
 fi
 dest="${LOCKED_TOOLS_DEST:?LOCKED_TOOLS_DEST must be set}"
 if [[ "$lock" == *$'\n'* || "$lock" == *$'\r'* || "$dest" == *$'\n'* || "$dest" == *$'\r'* ]]; then
@@ -85,6 +85,19 @@ for tool in "${tools[@]}"; do
     [[ "$checksum" =~ ^[0-9a-f]{64}$ && -n "$url" && -z "$extra" ]] || fail "Invalid artifact lock for $tool"
   fi
 done
+if [ "$phase" = prepare ] && [ "$needs_go" = true ]; then
+  expected_go_version="$(awk '$1 == "go" { print $2 }' "$lock" | sort -u)"
+  [[ "$expected_go_version" =~ ^go[0-9]+\.[0-9]+\.[0-9]+$ ]] || fail 'Expected one consistent, stable Go version in the lock'
+else
+  expected_go_version="${EXPECTED_GO_VERSION:-}"
+fi
+if [ "$phase" != prepare ] && [ "$needs_go" = true ]; then
+  [[ "$expected_go_version" =~ ^go[0-9]+\.[0-9]+\.[0-9]+$ ]] || fail 'EXPECTED_GO_VERSION must come from preparation'
+  row="$(lock_row go)"
+  read -r _ locked_go_version _ <<< "$row"
+  [ "$locked_go_version" = "$expected_go_version" ] || fail 'Prepared Go version does not match the verified lock'
+fi
+export EXPECTED_GO_VERSION="$expected_go_version"
 if command -v sha256sum >/dev/null 2>&1; then
   lock_sha256="$(sha256sum "$lock" | awk '{print $1}')"
 else
@@ -93,6 +106,9 @@ fi
 if [ "$phase" != prepare ] && [ "$lock_sha256" != "${EXPECTED_LOCK_SHA256:-}" ]; then
   fail 'Lock file changed after preparation'
 fi
+lock_path="$lock"
+if [ "$os" = windows ]; then lock_path="$(cygpath -w "$lock" | tr -d '\r')"; fi
+export LOCK_PATH="$lock_path"
 mkdir -p "$dest"
 dest="$(cd "$dest" && pwd)"
 case "$phase" in
@@ -105,6 +121,7 @@ case "$phase" in
     fi
     {
       printf 'tools=%s\nlock_file=%s\ndest=%s\nlock_sha256=%s\n' "$normalized" "$lock" "$dest" "$lock_sha256"
+      printf 'lock_path=%s\ngo_version=%s\n' "$lock_path" "$expected_go_version"
       printf 'gon_ref=%s\ngon_path=%s\n' "$gon_ref" "$gon_path"
     } >> "${GITHUB_OUTPUT:?GITHUB_OUTPUT must be set}"
     ;;
@@ -151,6 +168,6 @@ case "$phase" in
       separator=,
     done
     versions+='}'
-    printf 'versions=%s\nlock_sha256=%s\n' "$versions" "$lock_sha256" >> "$GITHUB_OUTPUT"
+    printf 'versions=%s\nlock_sha256=%s\nlock_path=%s\n' "$versions" "$lock_sha256" "$lock_path" >> "$GITHUB_OUTPUT"
     ;;
 esac

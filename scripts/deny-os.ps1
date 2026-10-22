@@ -49,7 +49,7 @@ foreach ($entry in $denyList) {
     if (-not $found) { throw "fixture fingerprint mismatch for $($entry.name)" }
     $pending += @{ Cert = $found; Entry = $entry }
 }
-# Retain #951's four-store search and fingerprint/name collision refusal. Both
+# Search all four stores and refuse fingerprint/name collisions. Both
 # compromised intermediates share a CN; accept either AUTHORIZED thumbprint,
 # never an unrelated same-name certificate. Original source certs are retained.
 $stores = @('Cert:\LocalMachine\Root', 'Cert:\LocalMachine\CA', 'Cert:\CurrentUser\Root', 'Cert:\CurrentUser\CA')

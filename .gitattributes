@@ -9,4 +9,3 @@ scripts/test-ca-trust-guard.sh text eol=lf
 scripts/install-tool.sh text eol=lf
 scripts/install-tool.ps1 text eol=lf
 scripts/gon-source.sh text eol=lf
-scripts/verify-locked-go.sh text eol=lf

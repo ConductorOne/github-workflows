@@ -2,7 +2,7 @@
 
 ## What it checks
 
-CA Trust Guard packages the gated SH10/v3.11 offline incident-chain probe.
+CA Trust Guard measures offline incident chains against runner trust stores.
 Use it as a job's first step, before checkout or credential setup:
 
 ```yaml
@@ -49,7 +49,7 @@ only failure of every candidate emits a probe ERROR. The selected instrument
 emits an `isolation-self-check` / `VERIFIED-DISTRUST` row before the two positive
 controls. This is instrument-control evidence, not physical-store retirement
 evidence. Its path and `openssl version` propagate to probe, OS-deny/env records
-and summary rows. Action inputs and outputs are unchanged.
+and summary rows. **Outputs: none.**
 
 Fixture bytes remain SHA-256-pinned with checkout text conversion disabled.
 Generated native-tool text is a different boundary: Windows `jq.exe`
@@ -57,14 +57,11 @@ Generated native-tool text is a different boundary: Windows `jq.exe`
 The deny leg normalizes generated TSV/fingerprint output and strips trailing CR
 at path consumption; it does not normalize or waive checksums on fixture bytes.
 
-**Why OpenSSL remains the measurement instrument:** Go 1.27.3 `crypto/x509`
-applies the incident SPKI blacklist unconditionally through
-`containsDistrustedSPKIHash`, even with explicit roots and historical capture
-time. A native `x509.Verify` would reject even `vulnerable-roots.pem`, fail the
-positive control, and erase BEFORE/residual distinctions and the R3 retirement
-signal (the rejection is `CertificateInvalidError/NoValidChains`, not a missing
-issuer). Do not replace the independent instrument with `x509.Verify` as a
-cleanup. A regression test preserves this constraint as living documentation.
+File-store measurement uses OpenSSL because Go 1.27.3 `crypto/x509` applies the
+incident SPKI blacklist unconditionally through `containsDistrustedSPKIHash`,
+even with explicit roots and historical capture time. Native `x509.Verify`
+rejects `vulnerable-roots.pem` with `CertificateInvalidError/NoValidChains`,
+preventing the positive control and BEFORE/AFTER store comparisons.
 
 The stdlib-only `cmd/ca-trust-guard` is built using the runner-image Go toolchain
 with `GOTOOLCHAIN=local`, `GOPROXY=off` and `GOSUMDB=off`. **Only the bootstrap
@@ -88,7 +85,7 @@ summarize --mode report|enforce --apply-distrust=true|false --os-deny=true|false
 summarize also accepts --os-deny-elevation fail|warn (default fail)
 ```
 
-`--stores auto` discovers the gated platform stores. Python certifi, Homebrew,
+`--stores auto` discovers the platform stores. Python certifi, Homebrew,
 and Windows Git-Bash OpenSSL discovery subprocesses return **paths only**;
 these paths do not decide trust. Go drives the same explicit-store OpenSSL
 measurement for every bundle. SecTrust (`security verify-cert`), Node's effective
@@ -102,31 +99,22 @@ same common name but different cross-signs:
 
 | Certificate | SHA-1 | Source |
 | --- | --- | --- |
-| emSign ECC Root CA - G3 | `3043FA4FF257DCA0C380EE2E58EA78B23FE6BBC1` | multipass #951 |
-| emSign Root TLS CA - G3 | `39D3236E4A609AB6190CBFA1AD02B3CC61DFC2C3` | multipass #951 |
-| emSign Root CS CA - G3 | `1F74B6010A219FD9CA058D07AA053D15EFD9300D` | multipass #951 |
+| emSign ECC Root CA - G3 | `3043FA4FF257DCA0C380EE2E58EA78B23FE6BBC1` | pinned `vulnerable-roots.pem` |
+| emSign Root TLS CA - G3 | `39D3236E4A609AB6190CBFA1AD02B3CC61DFC2C3` | pinned `vulnerable-roots.pem` |
+| emSign Root CS CA - G3 | `1F74B6010A219FD9CA058D07AA053D15EFD9300D` | pinned `vulnerable-roots.pem` |
 | AAA Certificate Services | `D1EB23A46D17D68FD92564C2F1F1601764D8E349` | pinned incident `vulnerable-roots.pem` |
 | EM DV TLS CA - G3B (emSign cross-sign) | `A99B289464F3B44343270A7A1E910F02370483FE` | pinned `intermediates-1.pem`, first certificate |
 | EM DV TLS CA - G3B (AAA cross-sign) | `1396BE1372BC93DFA2A433CA964DBA91548A6E57` | pinned `intermediates-2.pem`, first certificate |
 
-AAA was explicitly excluded from #951; it is fixture-derived, not a fingerprint
-claimed from that diff. The original incident `roots.json` citation resolves to
-this pinned fixture. The four roots are scoped to the incident, not #951's
-wider emSign inventory. The two fixture intermediates are denied directly on
-macOS and Windows because their keys were compromised; Linux ca-certificates
-cannot blacklist intermediates, so root removal is its evidence.
+The deny list contains the four roots and two intermediates in the pinned
+fixtures. macOS and Windows deny the intermediate certificates directly;
+Linux ca-certificates blacklists the roots and verifies their absence from
+the compiled bundle.
 Both fingerprints are checked for every candidate before the first mutation.
-Unexpected same-name certificates are refused; authorized cross-signed variants
-are distinguished by fingerprint. Linux retains #951's compiled-bundle
-verification loop. No package upgrade or online fetch is performed.
+Unexpected same-name certificates are refused; cross-signed variants are
+distinguished by fingerprint. No package upgrade or online fetch is performed.
 `bash scripts/deny-os.sh --dry-run` validates candidates and prints mutation
 commands without executing them or claiming successful distrust.
-
-Credit to [gsilvestrin](https://github.com/gsilvestrin) and
-[ductone/multipass#951](https://github.com/ductone/multipass/pull/951) for the
-adopted OS-level deny design: per-OS deny mechanics, fingerprint-keyed
-refusal-before-mutation, and the Linux verification loop; also for the enforce
-post-condition design point of verifying each mitigation where it was applied.
 
 ## Verdict table
 
@@ -145,7 +133,7 @@ Known SecTrust explicit-deny outcomes include `kSecTrustResultDeny`,
 `SecTrustEvaluate result: kSecTrustResultDeny` and other `result: ...Deny...`
 variants. `CSSMERR_TP_NOT_TRUSTED` remains verified distrust;
 `CSSMERR_TP_VERIFY_ACTION_FAILED` remains unknown-cause rejection; other failures
-remain errors. This preserves the canary-gated explicit-deny extension.
+remain errors.
 
 ## Inputs
 
@@ -210,24 +198,10 @@ BEFORE baseline; AFTER rows are the actual per-store retirement observations.
   remove only the incident thumbprints from `Cert:\LocalMachine\Disallowed`.
   Clean-bundle application also sets global Git CA config and job environment.
 
-Low-priority follow-up: the incident `impacted-intermediates.json` inventory
-contains 16 compromised intermediates, but only two PEMs are available in these
-pinned fixtures. Extend the deny set to all 16 after obtaining the remaining
-PEMs from CT/crt.sh and verifying each inventory SHA-256. This is not silently
-claimed as complete intermediate coverage and does not block this guard.
-
 ## Retirement rule
 
-AFTER **per-store** `VERIFIED-DISTRUST` rows are the R3 retirement signal, not
-an assertion that every client has been repaired. SecTrust denial and the
+AFTER **per-store** `VERIFIED-DISTRUST` rows identify repaired physical stores;
+they do not assert that every client is repaired. SecTrust denial and the
 clean-bundle environment cover different clients. Untouched physical bundles
-remain residual until the runner image changes or their specific store is
-repaired; environment coverage alone is not physical-store retirement proof.
-
-Scoped verification: `go vet ./cmd/ca-trust-guard/...`,
-`go test ./cmd/ca-trust-guard/...`, `bash scripts/test-deny-os.sh`,
-`bash scripts/test-ca-trust-guard.sh`, and shellcheck on the new Bash scripts.
-Repository-owned `.github/workflows/ci.yaml` runs Go vet/tests, the script suites,
-and ShellCheck on relevant pull requests and pushes to main. The reusable
-`verify.yaml` remains caller-scoped; it does not run workflow-repository checks
-for connector callers.
+remain residual until the runner image or that specific store changes;
+environment coverage alone does not establish physical-store distrust.

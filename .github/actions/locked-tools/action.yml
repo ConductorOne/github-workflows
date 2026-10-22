@@ -38,6 +38,9 @@ outputs:
   lock_sha256:
     description: SHA256 of the exact lock file used by every phase, for provenance.
     value: ${{ steps.result.outputs.lock_sha256 }}
+  lock_path:
+    description: Absolute path of the verified lock used by this action (action-local by default).
+    value: ${{ steps.result.outputs.lock_path }}
 runs:
   using: composite
   steps:
@@ -65,6 +68,8 @@ runs:
       env:
         LOCKED_TOOLS: ${{ steps.prepare.outputs.tools }}
         TOOL_LOCK_FILE: ${{ steps.prepare.outputs.lock_file }}
+        LOCK_PATH: ${{ steps.prepare.outputs.lock_path }}
+        EXPECTED_GO_VERSION: ${{ steps.prepare.outputs.go_version }}
         LOCKED_TOOLS_DEST: ${{ steps.prepare.outputs.dest }}
         EXPECTED_LOCK_SHA256: ${{ steps.prepare.outputs.lock_sha256 }}
       run: bash "$GITHUB_ACTION_PATH/locked-tools.sh" install
@@ -75,6 +80,8 @@ runs:
       env:
         LOCKED_TOOLS: ${{ steps.prepare.outputs.tools }}
         TOOL_LOCK_FILE: ${{ steps.prepare.outputs.lock_file }}
+        LOCK_PATH: ${{ steps.prepare.outputs.lock_path }}
+        EXPECTED_GO_VERSION: ${{ steps.prepare.outputs.go_version }}
         LOCKED_TOOLS_DEST: ${{ steps.prepare.outputs.dest }}
         EXPECTED_LOCK_SHA256: ${{ steps.prepare.outputs.lock_sha256 }}
         LOCKED_GON_PATH: ${{ steps.prepare.outputs.gon_path }}
@@ -90,6 +97,8 @@ runs:
       env:
         LOCKED_TOOLS: ${{ steps.prepare.outputs.tools }}
         TOOL_LOCK_FILE: ${{ steps.prepare.outputs.lock_file }}
+        LOCK_PATH: ${{ steps.prepare.outputs.lock_path }}
+        EXPECTED_GO_VERSION: ${{ steps.prepare.outputs.go_version }}
         LOCKED_TOOLS_DEST: ${{ steps.prepare.outputs.dest }}
         EXPECTED_LOCK_SHA256: ${{ steps.prepare.outputs.lock_sha256 }}
       run: bash "$GITHUB_ACTION_PATH/locked-tools.sh" outputs

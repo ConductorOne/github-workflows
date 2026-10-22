@@ -30,9 +30,10 @@ class IntegrityTests(unittest.TestCase):
         self.action_dir.mkdir(parents=True)
         for name in ("install-tool.sh", "verify-locked-go.sh", "gon-source.sh"):
             shutil.copyfile(ACTION / name, self.action_dir / name)
-            shutil.copyfile(ROOT / "scripts" / name, self.scripts / name)
         shutil.copyfile(ACTION / "locked-tools.sh", self.action_dir / "locked-tools.sh")
         shutil.copyfile(ACTION / "install-tool.ps1", self.action_dir / "install-tool.ps1")
+        for name in ("install-tool.sh", "gon-source.sh"):
+            shutil.copyfile(ROOT / "scripts" / name, self.scripts / name)
         for name in ("verify-release-checkout.sh", "setup-release-buildx.sh"):
             shutil.copyfile(ROOT / "scripts" / name, self.scripts / name)
         self.lock = self.action_dir / "tool-locks.txt"
@@ -51,6 +52,8 @@ class IntegrityTests(unittest.TestCase):
                         TEST_OS="Linux", TEST_ARCH="x86_64", CALLS=str(self.calls),
                         GITHUB_WORKSPACE=str(self.workspace), LOCKED_TOOLS_DEST=str(self.root / "dest"))
         self.env.pop("TOOL_LOCK_FILE", None)
+        for name in ("EXPECTED_GO_VERSION", "EXPECTED_LOCK_SHA256", "LOCK_PATH"):
+            self.env.pop(name, None)
 
     def executable(self, name: str, content: str) -> None:
         path = self.bin / name
@@ -82,11 +85,13 @@ class IntegrityTests(unittest.TestCase):
             return f"node-{version}-{os_name}-{node_arch}/bin/node"
         return tool
 
-    def fixture_download(self, tool: str, platform: str, member: str | None = None, mode: int = 0o755) -> Path:
+    def fixture_download(self, tool: str, platform: str, member: str | None = None,
+                         mode: int = 0o755, data: bytes | None = None) -> Path:
         is_zip = tool == "minisign" or (tool == "node" and platform == "windows/amd64")
         archive = self.root / ("fixture.zip" if is_zip else "fixture.tar.gz")
         member = member or self.archive_member(tool, platform)
-        data = b"#!/bin/sh\necho 'binary must not be invoked' >&2\nexit 77\n"
+        if data is None:
+            data = b"#!/bin/sh\necho 'binary must not be invoked' >&2\nexit 77\n"
         if is_zip:
             with zipfile.ZipFile(archive, "w") as zipped:
                 zipped.writestr(member, data)
@@ -149,7 +154,7 @@ class IntegrityTests(unittest.TestCase):
         self.env.update(TEST_OS="Linux", TEST_ARCH="aarch64")
         dest = self.root / "bad-go-arm64"
         result = self.run_script("install-tool.sh", "go", dest, ok=False)
-        self.assertIn("::error title=GF13::go sha256 mismatch", result.stderr)
+        self.assertIn("::error title=locked-tools::go sha256 mismatch", result.stderr)
         self.assertNotIn("tar\n", self.calls.read_text())
         self.assertFalse(dest.exists())
         self.assertFalse(self.path_file.exists())
@@ -162,7 +167,7 @@ class IntegrityTests(unittest.TestCase):
                 archive.write_bytes(archive.read_bytes() + b"tampered")
                 self.calls.unlink(missing_ok=True)
                 result = self.run_script("install-tool.sh", tool, self.root / "dest", ok=False)
-                self.assertIn(f"::error title=GF13::{tool} sha256 mismatch", result.stderr)
+                self.assertIn(f"::error title=locked-tools::{tool} sha256 mismatch", result.stderr)
                 self.assertNotIn("tar\n", self.calls.read_text())
                 self.assertFalse((self.root / "dest").exists())
                 self.assertFalse(self.path_file.exists())
@@ -174,7 +179,7 @@ class IntegrityTests(unittest.TestCase):
                 self.env.update(TEST_OS=os_name, TEST_ARCH="arm64" if os_name == "Darwin" else "x86_64")
                 dest = self.root / f"wrong-layout-{os_name}"
                 result = self.run_script("install-tool.sh", "node", dest, ok=False)
-                self.assertIn("::error title=GF13::node package layout mismatch", result.stderr)
+                self.assertIn("::error title=locked-tools::node package layout mismatch", result.stderr)
                 self.assertTrue((dest / "unexpected-node/bin/node").is_file(), "fixture must reach extraction")
                 self.assertFalse(self.path_file.exists())
 
@@ -183,7 +188,7 @@ class IntegrityTests(unittest.TestCase):
             with self.subTest(tool=tool):
                 self.fixture_download(tool, "linux/amd64", mode=0o644)
                 result = self.run_script("install-tool.sh", tool, self.root / tool, ok=False)
-                self.assertIn(f"::error title=GF13::{tool} package layout mismatch", result.stderr)
+                self.assertIn(f"::error title=locked-tools::{tool} package layout mismatch", result.stderr)
                 self.assertFalse(self.path_file.exists())
                 self.assertFalse(self.env_file.exists())
 
@@ -215,11 +220,37 @@ class IntegrityTests(unittest.TestCase):
         self.run_script("install-tool.sh", "node", self.root / "dest", ok=False)
         self.assertFalse(self.calls.exists())
 
+    def go_contract(self, version: str = "go1.27.3", lock: Path | None = None) -> None:
+        lock = lock or self.lock
+        self.env.update(EXPECTED_GO_VERSION=version, LOCK_PATH=str(lock.resolve()),
+                        EXPECTED_LOCK_SHA256=hashlib.sha256(lock.read_bytes()).hexdigest())
+
+    def mock_go_gate(self) -> None:
+        self.executable("go", r'''
+printf 'go %s\n' "$*" >> "$CALLS"
+case "$1" in
+  version) echo "go version ${TEST_GO_VERSION:-go1.27.3} linux/arm64" ;;
+  list)
+    [ "$2" = -m ] && [ "$GOTOOLCHAIN" = local ] && [ "$GOWORK" = off ]
+    [ "$GOPROXY" = off ] && [ "$GOSUMDB" = off ]
+    [ "${TEST_GO_LIST_FAIL:-false}" != true ] || exit 43
+    module=
+    for argument in "$@"; do
+      case "$argument" in -modfile=*) module="${argument#*=}";; esac
+    done
+    if [ -n "${TEST_GO_LIST_VERSION:-}" ]; then echo "$TEST_GO_LIST_VERSION"
+    else awk '{ sub(/\r$/, "") } $1 == "go" { print $2 }' "$module"; fi ;;
+  *) exit 99 ;;
+esac
+''')
+
     def test_go_version_and_module_gates(self) -> None:
-        self.executable("go", 'echo "go $*" >> "$CALLS"\necho "go version ${TEST_GO_VERSION:-go1.27.3} linux/arm64"\n')
+        self.go_contract()
+        self.mock_go_gate()
         self.run_script("verify-locked-go.sh", "version")
         self.env["TEST_GO_VERSION"] = "go1.27.4"
         self.run_script("verify-locked-go.sh", "version", ok=False)
+        self.env.pop("TEST_GO_VERSION")
         self.calls.unlink()
         module = self.root / "go.mod"
         for version in ("1.13", "1.27", "1.27.3"):
@@ -227,16 +258,77 @@ class IntegrityTests(unittest.TestCase):
             self.run_script("verify-locked-go.sh", "module", module)
         module.write_bytes(b"module example.com/fixture\r\n\r\ngo 1.27.3\r\n")
         self.run_script("verify-locked-go.sh", "module", module)
+        self.assertEqual(self.calls.read_text().count("go list -m"), 4)
+        self.calls.unlink()
         module.write_bytes(b"module example.com/fixture\r\n\r\ngo 1.27.4\r\n")
         result = self.run_script("verify-locked-go.sh", "module", module, ok=False)
-        self.assertIn(f"::error title=GF13::{module} requires Go 1.27.4, newer than locked go1.27.3", result.stderr)
+        self.assertIn(f"::error title=locked-tools::{module} requires Go 1.27.4, newer than locked go1.27.3", result.stderr)
         for directive in ("go 1.27.4", "go 1.28", "go 2.0", "go 1.28rc1", "", "go 1.27\ngo 1.26"):
             module.write_text(f"module example.com/fixture\n\n{directive}\n")
             self.run_script("verify-locked-go.sh", "module", module, ok=False)
-        self.assertFalse(self.calls.exists(), "module gating must not invoke Go or download a toolchain")
+        self.assertFalse(self.calls.exists(), "invalid directives must fail before invoking Go")
+        module.write_text("module fixture\ngo 1.27.3\n")
+        self.env["TEST_GO_VERSION"] = "go1.27.4"
+        self.run_script("verify-locked-go.sh", "module", module, ok=False)
+        self.assertNotIn("go list", self.calls.read_text())
+        self.env.pop("TEST_GO_VERSION")
+        self.calls.unlink()
         self.env["GOTOOLCHAIN"] = "auto"
         self.run_script("verify-locked-go.sh", "version", ok=False)
         self.assertFalse(self.calls.exists())
+
+    def test_go_gate_requires_complete_env_and_matching_lock_identity(self) -> None:
+        self.go_contract()
+        self.mock_go_gate()
+        complete = dict(self.env)
+        module = self.root / "go.mod"
+        module.write_text("module fixture\ngo 1.27.3\n")
+        for name in ("EXPECTED_GO_VERSION", "EXPECTED_LOCK_SHA256", "LOCK_PATH"):
+            with self.subTest(missing=name):
+                self.env = dict(complete)
+                self.env.pop(name)
+                self.run_script("verify-locked-go.sh", "version", ok=False)
+                self.run_script("verify-locked-go.sh", "module", module, ok=False)
+                self.assertFalse(self.calls.exists())
+        self.env = dict(complete)
+        for name in ("EXPECTED_GO_VERSION", "EXPECTED_LOCK_SHA256", "LOCK_PATH"):
+            self.env.pop(name)
+        self.run_script("verify-locked-go.sh", "version", ok=False)
+        self.run_script("verify-locked-go.sh", "module", module, ok=False)
+        self.run_script("verify-locked-go.sh", "version", self.lock, ok=False)
+        self.run_script("verify-locked-go.sh", "module", self.lock, module, ok=False)
+        self.assertFalse(self.calls.exists())
+        for name, value in (("EXPECTED_GO_VERSION", "1.27.3"),
+                            ("EXPECTED_LOCK_SHA256", "0" * 64),
+                            ("LOCK_PATH", "relative/tool-locks.txt"),
+                            ("LOCK_PATH", str(self.root / "missing-lock"))):
+            with self.subTest(name=name, value=value):
+                self.env = dict(complete)
+                self.env[name] = value
+                self.run_script("verify-locked-go.sh", "version", ok=False)
+                self.assertFalse(self.calls.exists())
+        self.env = dict(complete)
+        self.lock.write_text(self.lock.read_text() + "# drift\n")
+        self.run_script("verify-locked-go.sh", "version", ok=False)
+        self.assertFalse(self.calls.exists())
+
+    def test_go_gate_env_does_not_parse_versions_from_lock(self) -> None:
+        self.lock.write_text("opaque identity bytes: not a version manifest\n")
+        self.go_contract()
+        self.mock_go_gate()
+        self.run_script("verify-locked-go.sh", "version")
+        self.assertIn("go version", self.calls.read_text())
+
+    def test_go_list_failure_or_disagreement_fails_closed(self) -> None:
+        self.go_contract()
+        self.mock_go_gate()
+        module = self.root / "go.mod"
+        module.write_text("module fixture\ngo 1.27.3\n")
+        self.env["TEST_GO_LIST_FAIL"] = "true"
+        self.run_script("verify-locked-go.sh", "module", module, ok=False)
+        self.env.pop("TEST_GO_LIST_FAIL")
+        self.env["TEST_GO_LIST_VERSION"] = "1.27.2"
+        self.run_script("verify-locked-go.sh", "module", module, ok=False)
 
     def git(self, *args: str) -> str:
         return subprocess.check_output(["git", "-C", str(self.repo), *args], text=True, stderr=subprocess.DEVNULL).strip()
@@ -273,10 +365,11 @@ class IntegrityTests(unittest.TestCase):
         text = self.lock.read_text()
         old_commit = next(line.split()[1] for line in text.splitlines() if line.startswith("gon "))
         self.lock.write_text(text.replace(old_commit, commit))
+        self.go_contract()
         self.run_script("gon-source.sh", "ref")
         self.assertEqual(self.output_file.read_text(), f"ref={commit}\n")
         self.env.update(GOFLAGS="-mod=readonly", GOPROXY="https://proxy.golang.org", GOSUMDB="sum.golang.org")
-        self.executable("go", 'echo "go $*" >> "$CALLS"\nif [ "$1" = version ]; then echo "go version go1.27.3 linux/arm64"; else [[ "$PWD" == */cmd/gon ]]; [ "$1 $2 $3" = "build -trimpath -o" ]; printf fixture > "$4"; fi\n')
+        self.executable("go", 'echo "go $*" >> "$CALLS"\ncase "$1" in version) echo "go version go1.27.3 linux/arm64";; list) awk \'$1 == "go" { print $2 }\' go.mod;; build) [[ "$PWD" == */cmd/gon ]]; [ "$1 $2 $3" = "build -trimpath -o" ]; printf fixture > "$4";; *) exit 99;; esac\n')
         module = self.repo / "go.mod"
         module.write_text("module fixture\ngo 1.13\n")
         (self.repo / "cmd/gon").mkdir(parents=True)
@@ -315,7 +408,7 @@ class IntegrityTests(unittest.TestCase):
         self.path_file.unlink()
         archive.write_bytes(archive.read_bytes() + b"tampered")
         result = self.run_script("install-tool.sh", "minisign", self.root / "bad-minisign", ok=False)
-        self.assertIn("::error title=GF13::minisign sha256 mismatch", result.stderr)
+        self.assertIn("::error title=locked-tools::minisign sha256 mismatch", result.stderr)
         self.assertFalse(self.path_file.exists())
         self.assertFalse((self.root / "bad-minisign").exists())
 
@@ -332,11 +425,6 @@ class IntegrityTests(unittest.TestCase):
         self.assertTrue((self.root / "legacy" / expected_member).is_file())
         self.run_script("gon-source.sh", "ref")
         self.assertIn("ref=", self.output_file.read_text())
-        module = self.root / "go.mod"
-        module.write_bytes(b"module fixture\r\ngo 1.27.3\r\n")
-        result = subprocess.run(["bash", str(self.scripts / "verify-locked-go.sh"), "module", str(module)],
-                                env=self.env, text=True, capture_output=True)
-        self.assertEqual(result.returncode, 0, result.stderr)
         self.output_file.unlink()
         result = subprocess.run(["bash", str(self.scripts / "gon-source.sh"), "ref"],
                                 env=self.env, text=True, capture_output=True)
@@ -345,6 +433,38 @@ class IntegrityTests(unittest.TestCase):
 
     def phase_outputs(self) -> dict[str, str]:
         return dict(line.split("=", 1) for line in self.output_file.read_text().splitlines())
+
+    def test_action_go_outputs_feed_environment_gate(self) -> None:
+        version = next(line.split()[1] for line in self.lock.read_text().splitlines()
+                       if line.startswith("go "))
+        binary = f'#!/bin/sh\n[ "$1" = version ] || exit 77\nprintf "go version {version} linux/amd64\\n"\n'.encode()
+        self.fixture_download("go", "linux/amd64", data=binary)
+        self.env.update(LOCKED_TOOLS="go", LOCKS_INPUT="", ACTION_DIR=str(self.action_dir))
+        self.run_script("locked-tools.sh", "prepare")
+        plan = self.phase_outputs()
+        self.assertEqual(plan["go_version"], version)
+        self.assertTrue(Path(plan["lock_path"]).is_absolute())
+        self.assertTrue(Path(plan["lock_path"]).is_file())
+        self.env.update(LOCKED_TOOLS=plan["tools"], LOCK_PATH=plan["lock_path"],
+                        EXPECTED_GO_VERSION=plan["go_version"], EXPECTED_LOCK_SHA256=plan["lock_sha256"])
+        self.run_script("locked-tools.sh", "install")
+        self.run_script("locked-tools.sh", "outputs")
+        outputs = self.phase_outputs()
+        self.assertEqual(json.loads(outputs["versions"]), {"go": version})
+        self.assertEqual(outputs["go"], version)
+        self.assertEqual(outputs["lock_path"], plan["lock_path"])
+        self.assertEqual(outputs["lock_sha256"], plan["lock_sha256"])
+        self.env["PATH"] = f"{self.root / 'dest/go/bin'}:{self.env['PATH']}"
+        self.env["EXPECTED_GO_VERSION"] = outputs["go"]
+        self.run_script("verify-locked-go.sh", "version")
+
+    def test_action_prepare_owns_single_go_version_sanity(self) -> None:
+        self.fixture_download("go", "linux/amd64")
+        self.env.update(LOCKED_TOOLS="go", LOCKS_INPUT="", ACTION_DIR=str(self.action_dir))
+        self.lock.write_text(self.lock.read_text().replace("go go1.27.3 darwin/arm64", "go go1.27.4 darwin/arm64"))
+        self.run_script("locked-tools.sh", "prepare", ok=False)
+        self.assertFalse(self.calls.exists())
+        self.assertFalse(self.path_file.exists())
 
     def test_action_node_phases_and_provenance_outputs(self) -> None:
         self.fixture_download("node", "linux/amd64")
@@ -355,6 +475,8 @@ class IntegrityTests(unittest.TestCase):
         plan = self.phase_outputs()
         expected_hash = hashlib.sha256(custom.read_bytes()).hexdigest()
         self.assertEqual(plan["lock_sha256"], expected_hash)
+        self.assertEqual(plan["lock_path"], str(custom.resolve()))
+        self.assertTrue(Path(plan["lock_path"]).is_file())
         self.env.update(LOCKED_TOOLS=plan["tools"], TOOL_LOCK_FILE=plan["lock_file"],
                         LOCKED_TOOLS_DEST=plan["dest"], EXPECTED_LOCK_SHA256=plan["lock_sha256"])
         self.run_script("locked-tools.sh", "install")
@@ -364,6 +486,7 @@ class IntegrityTests(unittest.TestCase):
         self.assertEqual(outputs["node"], expected_version)
         self.assertEqual(json.loads(outputs["versions"]), {"node": expected_version})
         self.assertEqual(outputs["lock_sha256"], expected_hash)
+        self.assertEqual(outputs["lock_path"], str(custom.resolve()))
         self.assertTrue(self.path_file.exists())
         custom.write_text(custom.read_text() + "# changed after preparation\n")
         self.calls.unlink()
@@ -452,6 +575,9 @@ function Invoke-WebRequest {
         self.run_script("locked-tools.sh", "prepare")
         plan = self.phase_outputs()
         self.assertEqual(plan["lock_file"], str(self.lock))
+        self.assertEqual(plan["lock_path"], str(self.lock.resolve()))
+        self.assertTrue(Path(plan["lock_path"]).is_absolute())
+        self.assertTrue(Path(plan["lock_path"]).is_file())
         self.env.update(TOOL_LOCK_FILE=plan["lock_file"], EXPECTED_LOCK_SHA256=plan["lock_sha256"])
         self.run_script("locked-tools.sh", "install")
         self.run_script("locked-tools.sh", "outputs")
@@ -462,7 +588,7 @@ function Invoke-WebRequest {
         self.env.update(LOCKED_TOOLS="node", LOCKS_INPUT=str(self.root / "missing-lock.txt"),
                         ACTION_DIR=str(self.action_dir))
         result = self.run_script("locked-tools.sh", "prepare", ok=False)
-        self.assertIn("::error title=GF13::Lock file missing or not readable:", result.stderr)
+        self.assertIn("::error title=locked-tools::Lock file missing or not readable:", result.stderr)
         self.assertFalse(self.calls.exists())
         self.assertFalse(self.path_file.exists())
 
@@ -496,8 +622,14 @@ function Invoke-WebRequest {
                 self.assertRegex(step["uses"], r"@[0-9a-f]{40}$")
                 self.assertEqual(step["with"]["ref"], "${{ steps.prepare.outputs.gon_ref }}")
                 self.assertFalse(step["with"]["persist-credentials"])
-        for tool in ("go", "node", "syft", "goreleaser", "goreleaser-pro", "gon", "minisign", "versions", "lock_sha256"):
+        for tool in ("go", "node", "syft", "goreleaser", "goreleaser-pro", "gon", "minisign", "versions", "lock_sha256", "lock_path"):
             self.assertIn(tool, action["outputs"])
+        self.assertEqual(action["outputs"]["lock_path"]["value"], "${{ steps.result.outputs.lock_path }}")
+        for step in action["runs"]["steps"]:
+            if step.get("name") in ("Install verified artifacts", "Build locked gon source",
+                                    "Report installed tool versions and lock hash"):
+                self.assertEqual(step["env"]["LOCK_PATH"], "${{ steps.prepare.outputs.lock_path }}")
+                self.assertEqual(step["env"]["EXPECTED_GO_VERSION"], "${{ steps.prepare.outputs.go_version }}")
 
     def test_workflow_security_wiring(self) -> None:
         workflow = json.loads(subprocess.check_output(["yq", ".", str(ROOT / ".github/workflows/release.yaml")], text=True))

@@ -5,7 +5,7 @@ script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 lock="${TOOL_LOCK_FILE:-$script_dir/tool-locks.txt}"
 commit="$(awk '$1 == "gon" && $3 == "darwin/*" && $4 == "source" && NF == 4 { print $2; count++ } END { if (count != 1) exit 1 }' "$lock")"
 if [[ ! "$commit" =~ ^[0-9a-f]{40}$ ]]; then
-  echo '::error title=GF13::Expected a single immutable gon source commit lock' >&2
+  echo '::error title=locked-tools::Expected a single immutable gon source commit lock' >&2
   exit 1
 fi
 case "${1:-}" in
@@ -20,12 +20,12 @@ case "${1:-}" in
     source_dir="$2"
     dest="$3"
     if [ "$(git -C "$source_dir" rev-parse HEAD)" != "$commit" ]; then
-      echo '::error title=GF13::gon checkout does not match locked source commit' >&2
+      echo '::error title=locked-tools::gon checkout does not match locked source commit' >&2
       exit 1
     fi
     # Require the verified Go binary and checksum-authenticated module downloads.
     if [ "${GOFLAGS:-}" != -mod=readonly ] || [ "${GOPROXY:-}" != https://proxy.golang.org ] || [ "${GOSUMDB:-}" != sum.golang.org ]; then
-      echo '::error title=GF13::gon requires readonly modules, proxy.golang.org, and sum.golang.org' >&2
+      echo '::error title=locked-tools::gon requires readonly modules, proxy.golang.org, and sum.golang.org' >&2
       exit 1
     fi
     bash "$script_dir/verify-locked-go.sh" version

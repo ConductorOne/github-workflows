@@ -13,20 +13,20 @@ lock="${TOOL_LOCK_FILE:-$script_dir/tool-locks.txt}"
 case "$(uname -s)" in
   Linux) os=linux ;;
   Darwin) os=darwin ;;
-  *) echo '::error title=GF13::Unsupported operating system' >&2; exit 1 ;;
+  *) echo '::error title=locked-tools::Unsupported operating system' >&2; exit 1 ;;
 esac
 case "$(uname -m)" in
   x86_64) arch=amd64 ;;
   arm64|aarch64) arch=arm64 ;;
-  *) echo '::error title=GF13::Unsupported architecture' >&2; exit 1 ;;
+  *) echo '::error title=locked-tools::Unsupported architecture' >&2; exit 1 ;;
 esac
 row="$(awk -v tool="$tool" -v platform="$os/$arch" '$1 == tool && $3 == platform { print; count++ } END { if (count != 1) exit 1 }' "$lock")" || {
-  echo "::error title=GF13::Expected exactly one $tool lock for $os/$arch" >&2
+  echo "::error title=locked-tools::Expected exactly one $tool lock for $os/$arch" >&2
   exit 1
 }
 read -r _ version _ expected url extra <<< "$row"
 if [[ ! "$expected" =~ ^[0-9a-f]{64}$ || -z "$url" || -n "$extra" ]]; then
-  echo "::error title=GF13::Invalid artifact lock for $tool" >&2
+  echo "::error title=locked-tools::Invalid artifact lock for $tool" >&2
   exit 1
 fi
 # A version-only updater must not leave an old URL silently installable.
@@ -43,20 +43,20 @@ case "$tool" in
     ;;
   minisign)
     canonical="https://github.com/jedisct1/minisign/releases/download/${version}/minisign-${version}-macos.zip"
-    [ "$os" = darwin ] || { echo "::error title=GF13::Unsupported $tool platform" >&2; exit 1; }
+    [ "$os" = darwin ] || { echo "::error title=locked-tools::Unsupported $tool platform" >&2; exit 1; }
     ;;
   goreleaser)
     case "$os/$arch" in
       linux/amd64) asset=goreleaser_Linux_x86_64.tar.gz ;;
       darwin/arm64) asset=goreleaser_Darwin_all.tar.gz ;;
-      *) echo "::error title=GF13::Unsupported $tool platform" >&2; exit 1 ;;
+      *) echo "::error title=locked-tools::Unsupported $tool platform" >&2; exit 1 ;;
     esac
     canonical="https://github.com/goreleaser/goreleaser/releases/download/${version}/${asset}"
     ;;
-  *) echo "::error title=GF13::Unsupported artifact tool: $tool" >&2; exit 1 ;;
+  *) echo "::error title=locked-tools::Unsupported artifact tool: $tool" >&2; exit 1 ;;
 esac
 if [ "$url" != "$canonical" ]; then
-  echo "::error title=GF13::$tool lock version/platform does not match its URL" >&2
+  echo "::error title=locked-tools::$tool lock version/platform does not match its URL" >&2
   exit 1
 fi
 workdir="$(mktemp -d)"
@@ -65,11 +65,11 @@ archive="$workdir/${url##*/}"
 curl -sSfL --retry 3 -o "$archive" "$url"
 if [ "$os" = darwin ]; then
   if ! printf '%s  %s\n' "$expected" "$archive" | shasum -a 256 -c -; then
-    echo "::error title=GF13::$tool sha256 mismatch" >&2
+    echo "::error title=locked-tools::$tool sha256 mismatch" >&2
     exit 1
   fi
 elif ! printf '%s  %s\n' "$expected" "$archive" | sha256sum -c -; then
-  echo "::error title=GF13::$tool sha256 mismatch" >&2
+  echo "::error title=locked-tools::$tool sha256 mismatch" >&2
   exit 1
 fi
 # No extraction, installation, or invocation is allowed before verification.
@@ -91,7 +91,7 @@ else
   bin="$dest"
 fi
 if [ ! -f "$bin/$tool" ] || [ ! -x "$bin/$tool" ]; then
-  echo "::error title=GF13::$tool package layout mismatch" >&2
+  echo "::error title=locked-tools::$tool package layout mismatch" >&2
   exit 1
 fi
 if [ "$tool" = go ]; then
