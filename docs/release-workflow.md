@@ -290,7 +290,7 @@ explicit inputs; job-scoped credentials remain available according to permission
 | aws-actions/configure-aws-credentials | `61815dcd50bd041e203e49132bacad1fd04d2708` | goreleaser-binaries, goreleaser-windows, goreleaser-docker, publish-release-manifest, verify-release | Exchanges job OIDC for scoped AWS role credentials. |
 | aws-actions/amazon-ecr-login | `03f1aad4c6c7ffd436567f42f9384779290529bd` | goreleaser-docker, verify-release | Job AWS credentials; registry authentication for publishing or pulling. |
 | docker/setup-qemu-action | `c7c53464625b32c7a7e944ae62b3e17d2b600130` | goreleaser-docker | Digest-pinned binfmt setup in an OIDC-enabled job; no explicit secret input. |
-| masci/datadog | `93a16378298f4e1980f13f6b412c0b8e66b96185` | notify-release-failure | `DATADOG_API_KEY` (Datadog org write key), only step `with: api-key`; non-signing, notification only. Best-effort (`continue-on-error: true`), five-minute job; event-only (added metric removed). Re-pin review: diff the action's tag-to-SHA source; re-pinning is manual (no Renovate tracking exists for workflow SHAs). |
+| masci/datadog | `93a16378298f4e1980f13f6b412c0b8e66b96185` | notify-release-failure | `DATADOG_API_KEY` (Datadog org write key), only step `with: api-key`; non-signing, notification only. Best-effort (`continue-on-error: true`), five-minute job; event-only. Re-pin review: diff the action's tag-to-SHA source; re-pinning is manual (no Renovate tracking exists for workflow SHAs). |
 
 ### Locked Release Tools
 
