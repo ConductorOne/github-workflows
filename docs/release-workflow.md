@@ -276,6 +276,22 @@ Tool-using jobs set `GOTOOLCHAIN=local` at job scope. The binaries job also sets
 `GOSUMDB=sum.golang.org` at job scope. Cosign and bundled-buildx/QEMU setup run
 after trust/tool bootstrap and before their signing or AWS credentials.
 
+### Pinned Release Action Custody
+
+Review and organization Actions policy own action drift. Custody below describes
+explicit inputs; job-scoped credentials remain available according to permissions.
+
+| Action | SHA | Which job | Custody |
+| --- | --- | --- | --- |
+| actions/checkout | `fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09` | All jobs except notify-release-failure; locked-tools gon checkout | Job-scoped `GITHUB_TOKEN`; `persist-credentials: false`. |
+| actions/github-script | `f28e40c7f34bde8b3046d885e986cb6290c5673b` | record-registry-api | Job OIDC credentials; masked registry-audience token output. |
+| sigstore/cosign-installer | `398d4b0eeef1380460a10c8013a76f728fb906ac` | goreleaser-binaries, goreleaser-windows, goreleaser-docker, publish-release-manifest, verify-release | Tool bootstrap in OIDC-enabled jobs; no explicit secret input. |
+| apple-actions/import-codesign-certs | `253ddeeac23f2bdad1646faac5c8c2832e800071` | goreleaser-binaries | Step inputs `APPLE_SIGNING_KEY_P12` and `APPLE_SIGNING_KEY_P12_PASSWORD`. |
+| aws-actions/configure-aws-credentials | `61815dcd50bd041e203e49132bacad1fd04d2708` | goreleaser-binaries, goreleaser-windows, goreleaser-docker, publish-release-manifest, verify-release | Exchanges job OIDC for scoped AWS role credentials. |
+| aws-actions/amazon-ecr-login | `03f1aad4c6c7ffd436567f42f9384779290529bd` | goreleaser-docker, verify-release | Job AWS credentials; registry authentication for publishing or pulling. |
+| docker/setup-qemu-action | `c7c53464625b32c7a7e944ae62b3e17d2b600130` | goreleaser-docker | Digest-pinned binfmt setup in an OIDC-enabled job; no explicit secret input. |
+| masci/datadog | `93a16378298f4e1980f13f6b412c0b8e66b96185` | notify-release-failure | `DATADOG_API_KEY` (Datadog org write key), only step `with: api-key`; non-signing, notification only. Best-effort (`continue-on-error: true`), five-minute job; event-only. Re-pin review: diff the action's tag-to-SHA source; re-pinning is manual (no Renovate tracking exists for workflow SHAs). |
+
 ### Locked Release Tools
 
 `.github/actions/locked-tools/tool-locks.txt` identifies tool versions, artifact
