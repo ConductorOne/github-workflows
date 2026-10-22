@@ -144,20 +144,6 @@ Post-release validation (non-blocking):
   subject to the anonymous rate limit
 - Triggers Datadog notification on failure
 
-### notify-release-failure
-
-Posts the existing Datadog failure event through the named, SHA-pinned
-`masci/datadog` notification-only survivor. The latest-attempt annotation
-collector feeds `steps.collect-ann.outputs.annotations` into the action's
-`events` input, unchanged from main. Notification is event-only: the added
-failure-count metric has been removed. Reporting is best-effort: a Datadog
-failure does not fail this job; the workflow is already failed.
-The job timeout remains five minutes.
-
-| Action / immutable ref | Credential custody | Re-pin review |
-| --- | --- | --- |
-| `masci/datadog@93a16378298f4e1980f13f6b412c0b8e66b96185` | `DATADOG_API_KEY`, a Datadog org write key; only this step's `with: api-key` receives it. Non-signing, notification only; never job-level environment. | Diff the action's tag-to-SHA source; re-pinning is manual (no Renovate tracking exists for workflow SHAs). |
-
 ## Security Properties
 
 ### Pinned Container Images
@@ -290,67 +276,21 @@ Tool-using jobs set `GOTOOLCHAIN=local` at job scope. The binaries job also sets
 `GOSUMDB=sum.golang.org` at job scope. Cosign and bundled-buildx/QEMU setup run
 after trust/tool bootstrap and before their signing or AWS credentials.
 
-### Privileged Action Allowlist
+### Pinned Release Action Custody
 
-`tools/privileged-actions.txt` is the reviewed third-party action repository
-allowlist; exact-reference rows bind named exceptions to one reviewed commit.
-First-party `actions/*` actions are allowed separately, including
-the App-token mint action; every remote action must use a full 40-character
-commit SHA. A version comment is informational, not the execution reference.
-`scripts/check-release-actions.py`, exercised by `make test-scripts` in repository
-CI, checks every job with `id-token: write` or a secret reference, plus the
-explicit credential-bearing job inventory. It also checks the implementations
-of the two permitted local composite actions so they cannot hide a new remote
-action. Unknown local paths and step-level `docker://` references fail closed.
-Job-level `container:` and `services:` are not covered by this checker;
-extending coverage is a low-priority follow-up.
+Review and organization Actions policy own action drift. Custody below describes
+explicit inputs; job-scoped credentials remain available according to permissions.
 
-The local guard and locked-tools actions come from the immutable `_workflows`
-checkout at `job.workflow_sha`; they are not third-party downloads. The remaining
-action inventory is below (counts include repeated conditional steps):
-
-| Job | Action | Class | Count | Why it remains |
-| --- | --- | --- | --- | --- |
-| validate-inputs | actions/checkout | First-party | 1 | Fetch the pinned workflow implementation. |
-| validate-inputs | ca-trust-guard (local) | Local | 1 | Enforce runner trust before validation. |
-| goreleaser-binaries | actions/checkout | First-party | 2 | Fetch pinned workflow and exact caller source. |
-| goreleaser-binaries | ca-trust-guard / locked-tools (local) | Local | 1 each | Enforce trust and install checksum-verified tools. |
-| goreleaser-binaries | sigstore/cosign-installer | Third-party | 1 | Bootstrap the pinned signing tool. |
-| goreleaser-binaries | apple-actions/import-codesign-certs | Third-party | 1 | Import the Apple signing identity into the temporary keychain. |
-| goreleaser-binaries | aws-actions/configure-aws-credentials | Third-party | 1 | Exchange job OIDC for the artifact publishing role. |
-| goreleaser-windows | actions/checkout | First-party | 2 | Fetch pinned workflow and exact caller source. |
-| goreleaser-windows | ca-trust-guard / locked-tools (local) | Local | 1 each | Enforce trust and install checksum-verified tools. |
-| goreleaser-windows | sigstore/cosign-installer | Third-party | 1 | Bootstrap the pinned signing tool. |
-| goreleaser-windows | aws-actions/configure-aws-credentials | Third-party | 1 | Exchange job OIDC for the artifact publishing role. |
-| goreleaser-docker | actions/checkout | First-party | 2 | Fetch pinned workflow and exact caller source. |
-| goreleaser-docker | ca-trust-guard / locked-tools (local) | Local | 1 each | Enforce trust and install checksum-verified tools. |
-| goreleaser-docker | sigstore/cosign-installer | Third-party | 1 | Bootstrap the pinned signing tool. |
-| goreleaser-docker | docker/setup-qemu-action | Third-party | 1 | Enable arm64 builds with a digest-pinned binfmt image. |
-| goreleaser-docker | aws-actions/configure-aws-credentials | Third-party | 2 | Assume the separate public and Lambda publishing roles. |
-| goreleaser-docker | aws-actions/amazon-ecr-login | Third-party | 2 | Authenticate to public and private ECR. |
-| publish-release-manifest | actions/checkout | First-party | 1 | Fetch the pinned workflow implementation. |
-| publish-release-manifest | ca-trust-guard / locked-tools (local) | Local | 1 each | Enforce trust and install checksum-verified tools. |
-| publish-release-manifest | sigstore/cosign-installer | Third-party | 1 | Bootstrap manifest signing. |
-| publish-release-manifest | aws-actions/configure-aws-credentials | Third-party | 1 | Exchange job OIDC for manifest publication. |
-| record-registry-api | actions/checkout | First-party | 2 | Fetch pinned workflow and exact caller metadata. |
-| record-registry-api | ca-trust-guard / locked-tools (local) | Local | 1 each | Enforce trust and install checksum-verified tools. |
-| record-registry-api | actions/github-script | First-party | 1 | Request the registry-audience OIDC token and mask it. |
-| verify-release | actions/checkout | First-party | 1 | Fetch the pinned verification implementation. |
-| verify-release | ca-trust-guard (local) | Local | 1 | Enforce runner trust before verification. |
-| verify-release | sigstore/cosign-installer | Third-party | 1 | Bootstrap signature verification. |
-| verify-release | aws-actions/configure-aws-credentials | Third-party | 1 | Assume the pull-only Public ECR role. |
-| verify-release | aws-actions/amazon-ecr-login | Third-party | 1 | Avoid anonymous pull throttling during verification. |
-| notify-release-failure | masci/datadog | Third-party | 1 | Named, pinned notification-only survivor; the immutable ref, key custody and re-pin review are recorded above. |
-
-The locked-tools composite additionally uses one SHA-pinned first-party
-`actions/checkout` to fetch the locked gon source. `docker/setup-buildx-action`
-is allowed but not currently used: Buildx comes from locked-tools. The mint
-action is allowed but this workflow does not currently need an App private key.
-The allowlist reduces download exposure; it does not eliminate the runner's
-pre-step action downloads. Datadog reporting preserves main's action pin,
-event configuration and annotation plumbing. Offline fixtures check the exact
-allowlist row, step-only key custody and best-effort configuration, including
-negative controls. Live failure delivery remains a separate rollout check.
+| Action | SHA | Which job | Custody |
+| --- | --- | --- | --- |
+| actions/checkout | `fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09` | All jobs except notify-release-failure; locked-tools gon checkout | Job-scoped `GITHUB_TOKEN`; `persist-credentials: false`. |
+| actions/github-script | `f28e40c7f34bde8b3046d885e986cb6290c5673b` | record-registry-api | Job OIDC credentials; masked registry-audience token output. |
+| sigstore/cosign-installer | `398d4b0eeef1380460a10c8013a76f728fb906ac` | goreleaser-binaries, goreleaser-windows, goreleaser-docker, publish-release-manifest, verify-release | Tool bootstrap in OIDC-enabled jobs; no explicit secret input. |
+| apple-actions/import-codesign-certs | `253ddeeac23f2bdad1646faac5c8c2832e800071` | goreleaser-binaries | Step inputs `APPLE_SIGNING_KEY_P12` and `APPLE_SIGNING_KEY_P12_PASSWORD`. |
+| aws-actions/configure-aws-credentials | `61815dcd50bd041e203e49132bacad1fd04d2708` | goreleaser-binaries, goreleaser-windows, goreleaser-docker, publish-release-manifest, verify-release | Exchanges job OIDC for scoped AWS role credentials. |
+| aws-actions/amazon-ecr-login | `03f1aad4c6c7ffd436567f42f9384779290529bd` | goreleaser-docker, verify-release | Job AWS credentials; registry authentication for publishing or pulling. |
+| docker/setup-qemu-action | `c7c53464625b32c7a7e944ae62b3e17d2b600130` | goreleaser-docker | Digest-pinned binfmt setup in an OIDC-enabled job; no explicit secret input. |
+| masci/datadog | `93a16378298f4e1980f13f6b412c0b8e66b96185` | notify-release-failure | `DATADOG_API_KEY` (Datadog org write key), only step `with: api-key`; non-signing, notification only. Best-effort (`continue-on-error: true`), five-minute job; event-only (added metric removed). Re-pin review: diff the action's tag-to-SHA source; re-pinning is manual (no Renovate tracking exists for workflow SHAs). |
 
 ### Locked Release Tools
 
@@ -443,7 +383,8 @@ requires `GOFLAGS=-mod=readonly`, `GOPROXY=https://proxy.golang.org` and
 Cosign v2.5.2 is installed by
 `sigstore/cosign-installer@398d4b0eeef1380460a10c8013a76f728fb906ac`.
 That action verifies its bootstrap binary against hashes embedded in the
-pinned action and verifies other requested versions by signature.
+pinned action and verifies other requested versions by signature. The
+failure-only Datadog action is also commit-pinned.
 
 Buildx is never downloaded: `scripts/setup-release-buildx.sh` prints the
 runner-bundled plugin's version, fails if it is absent, and creates a builder
