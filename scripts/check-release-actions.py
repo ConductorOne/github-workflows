@@ -65,7 +65,9 @@ def check_local_bootstrap(steps, location):
                 errors.append(f"{location}: checkout path must be a string")
                 ready = False
                 continue
-            if os.path.normpath(path) == "_workflows":
+            rel = os.path.normpath(str(path or "."))
+            if (rel in (".", "_workflows") or rel.startswith("_workflows/")
+                    or rel.startswith("..") or os.path.isabs(rel) or "${{" in str(path)):
                 ready = (re.fullmatch(r"actions/checkout@[0-9a-f]{40}", action) is not None
                          and settings.get("repository") == "ConductorOne/github-workflows"
                          and settings.get("path") == "_workflows"
