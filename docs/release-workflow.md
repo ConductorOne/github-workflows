@@ -144,6 +144,14 @@ Post-release validation (non-blocking):
   subject to the anonymous rate limit
 - Triggers Datadog notification on failure
 
+### notify-release-failure
+
+Posts the existing Datadog failure event and adds a failure-count metric via
+best-effort curl requests. The metric is an addition to the previous event-only
+notification, intended to support future staleness monitoring. The axiomatic
+workflow remains event-only; aligning its notification behavior is a low-priority
+follow-up. Notification API failures cannot fail the reporting job.
+
 ## Security Properties
 
 ### Pinned Container Images
@@ -426,8 +434,7 @@ requires `GOFLAGS=-mod=readonly`, `GOPROXY=https://proxy.golang.org` and
 Cosign v2.5.2 is installed by
 `sigstore/cosign-installer@398d4b0eeef1380460a10c8013a76f728fb906ac`.
 That action verifies its bootstrap binary against hashes embedded in the
-pinned action and verifies other requested versions by signature. The
-failure-only Datadog action is also commit-pinned.
+pinned action and verifies other requested versions by signature.
 
 Buildx is never downloaded: `scripts/setup-release-buildx.sh` prints the
 runner-bundled plugin's version, fails if it is absent, and creates a builder
