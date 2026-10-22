@@ -58,23 +58,31 @@ jobs:
             "repos/$GITHUB_REPOSITORY/actions/artifacts?name=rekor-monitor-state&per_page=100" |
             jq -r '[.[].artifacts[] | select(.name == "rekor-monitor-state" and .expired == false and .workflow_run.head_branch == "main")] | sort_by(.created_at) | reverse | .[].workflow_run.id')"
           run_id=""
+          candidate_dir=""
+          trap 'if [ -n "$candidate_dir" ]; then rm -rf "$candidate_dir"; fi' EXIT
           while IFS= read -r candidate; do
             [ -n "$candidate" ] || continue
             candidate_workflow="$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$candidate" --jq '.workflow_id')"
             if [ "$candidate_workflow" = "$workflow_id" ]; then
-              run_id="$candidate"
-              break
+              candidate_dir="$(mktemp -d "./.rekor-state.XXXXXX")"
+              if gh run download "$candidate" --repo "$GITHUB_REPOSITORY" \
+                --name rekor-monitor-state --dir "$candidate_dir" &&
+                test -s "$candidate_dir/checkpoint.txt" &&
+                test -s "$candidate_dir/reconciliation.json"; then
+                rmdir monitor-state
+                mv "$candidate_dir" monitor-state
+                candidate_dir=""
+                run_id="$candidate"
+                break
+              fi
+              rm -rf "$candidate_dir"
+              candidate_dir=""
             fi
           done <<< "$candidates"
-          if [ -n "$run_id" ]; then
-            gh run download "$run_id" --repo "$GITHUB_REPOSITORY" \
-              --name rekor-monitor-state --dir monitor-state
-            test -s monitor-state/checkpoint.txt
-            test -s monitor-state/reconciliation.json
-          elif [ "$BOOTSTRAP" != true ]; then
+          if [ -z "$run_id" ] && [ "$BOOTSTRAP" != true ]; then
             echo "::error::No monitor state exists; initialize once with the bootstrap dispatch input."
             exit 1
-          else
+          elif [ -z "$run_id" ]; then
             echo "bootstrap=true" >> "$GITHUB_OUTPUT"
           fi
 
@@ -103,8 +111,16 @@ jobs:
           MONITOR_BOOTSTRAP: ${{ steps.restore.outputs.bootstrap || false }}
         run: bash scripts/rekor_digest_check.sh
 
-      - name: Persist verified checkpoint and reconciliation state
+      - name: Check monitor state completeness
+        id: state
         if: always()
+        run: |
+          if [ -s monitor-state/checkpoint.txt ] && [ -s monitor-state/reconciliation.json ]; then
+            echo "state_complete=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Persist verified checkpoint and reconciliation state
+        if: always() && steps.state.outputs.state_complete == 'true'
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: rekor-monitor-state

@@ -48,6 +48,12 @@ def workflow_errors(workflow):
                           "actions/workflows/rekor-monitor.yaml", ".workflow_id")
     if "gh run list" in restore["run"] or any(part not in restore["run"] for part in required_selection):
         errors.append("state must come from the newest valid artifact of this main-branch workflow")
+    state_check = next((step for step in job["steps"] if step.get("id") == "state"), None)
+    upload = next(step for step in job["steps"] if (step.get("with") or {}).get("name") == "rekor-monitor-state")
+    if state_check is None or state_check.get("if") != "always()":
+        errors.append("state completeness must be checked even after failure")
+    if upload.get("if") != "always() && steps.state.outputs.state_complete == 'true'":
+        errors.append("incomplete state must not be uploaded")
     return errors
 
 
@@ -302,8 +308,12 @@ elif args[:2] == ["run", "download"]:
         sys.exit("run has no usable state artifact")
     destination = pathlib.Path(args[args.index("--dir") + 1])
     destination.mkdir(exist_ok=True)
-    (destination / "checkpoint.txt").write_text("verified-checkpoint")
-    (destination / "reconciliation.json").write_text("{}")
+    if not fixture["runs"][run].get("missing_checkpoint"):
+        (destination / "checkpoint.txt").write_text("verified-checkpoint")
+    if not fixture["runs"][run].get("missing_reconciliation"):
+        (destination / "reconciliation.json").write_text("{}")
+    if fixture["runs"][run].get("missing_checkpoint") or fixture["runs"][run].get("missing_reconciliation"):
+        (destination / "incomplete-only.txt").write_text("must not reach monitor-state")
 else:
     sys.exit("unexpected CLI boundary")
 """)
@@ -324,6 +334,15 @@ else:
                 result, downloads = execute(restore, fixture, f"latest-{latest}")
                 self.assertEqual(result.returncode, 0, result.stderr)
                 self.assertEqual(downloads, ["105"])
+            for missing in ("missing_checkpoint", "missing_reconciliation"):
+                incomplete = copy.deepcopy(fixture)
+                incomplete["pages"][0]["artifacts"].append(artifact(106, "15"))
+                incomplete["runs"]["106"] = {"workflow_id": 100, "has_artifact": True, missing: True}
+                result, downloads = execute(restore, incomplete, missing)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertEqual(downloads, ["106", "105"])
+                self.assertFalse((directory / missing / "monitor-state/incomplete-only.txt").exists())
+                self.assertEqual(list((directory / missing).glob(".rekor-state.*")), [])
             old_selection = '''set -euo pipefail
 mkdir -p monitor-state
 run_id="$(gh run list --repo "$GITHUB_REPOSITORY" --workflow rekor-monitor.yaml --branch main --status completed --limit 1 --json databaseId --jq '.[0].databaseId // empty')"
@@ -345,6 +364,32 @@ gh run download "$run_id" --repo "$GITHUB_REPOSITORY" --name rekor-monitor-state
             changed = copy.deepcopy(workflow)
             changed["jobs"]["monitor"]["steps"][index]["run"] = old_selection
             self.assertTrue(workflow_errors(changed))
+
+    def test_upload_requires_both_nonempty_state_files(self):
+        workflow = json.loads(subprocess.check_output(["yq", ".", str(ROOT / ".github/workflows/rekor-monitor.yaml")], text=True))
+        steps = workflow["jobs"]["monitor"]["steps"]
+        check = next(step for step in steps if step.get("id") == "state")
+        cases = ({}, {"checkpoint.txt": "checkpoint"}, {"reconciliation.json": "{}"},
+                 {"checkpoint.txt": "checkpoint", "reconciliation.json": ""},
+                 {"checkpoint.txt": "", "reconciliation.json": "{}"},
+                 {"checkpoint.txt": "checkpoint", "reconciliation.json": "{}"})
+        for files in cases:
+            with self.subTest(files=files), tempfile.TemporaryDirectory() as directory:
+                directory = Path(directory)
+                state = directory / "monitor-state"
+                state.mkdir()
+                for name, value in files.items():
+                    (state / name).write_text(value)
+                output = directory / "output"
+                subprocess.run(["bash", "-c", check["run"]], cwd=directory,
+                               env=dict(os.environ, GITHUB_OUTPUT=str(output)), check=True)
+                complete = "state_complete=true" in output.read_text() if output.exists() else False
+                self.assertEqual(complete, bool(files.get("checkpoint.txt") and files.get("reconciliation.json")))
+        changed = copy.deepcopy(workflow)
+        upload = next(step for step in changed["jobs"]["monitor"]["steps"]
+                      if (step.get("with") or {}).get("name") == "rekor-monitor-state")
+        upload["if"] = "always()"
+        self.assertTrue(workflow_errors(changed))
 
 
 if __name__ == "__main__":
