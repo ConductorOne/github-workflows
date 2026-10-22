@@ -27,7 +27,7 @@ class RepositoryCiTest(unittest.TestCase):
         self.assertEqual(pull_paths, set(workflow["on"]["push"]["paths"]))
         self.assertEqual(workflow["permissions"], {"contents": "read"})
         self.assertNotIn("secrets.", json.dumps(workflow))
-        self.assertEqual(set(workflow["jobs"]), {"go-tests", "shell-tests", "shellcheck"})
+        self.assertEqual(set(workflow["jobs"]), {"go-tests", "shell-tests", "shellcheck", "windows-installer-tests"})
         go_job = workflow["jobs"]["go-tests"]
         self.assertEqual(go_job["env"]["GOTOOLCHAIN"], "local")
         self.assertEqual([step["run"] for step in go_job["steps"] if "run" in step],
@@ -46,6 +46,17 @@ class RepositoryCiTest(unittest.TestCase):
         review = load_yaml(".github/workflows/general-pr-review.yaml")
         self.assertIn("image-locks", review["jobs"])
         self.assertIn("pull_request", review["on"])
+
+    def test_windows_installer_fixture_runs_natively(self):
+        job = load_yaml(".github/workflows/ci.yaml")["jobs"]["windows-installer-tests"]
+        self.assertEqual(job["runs-on"], "windows-latest")
+        self.assertEqual(job["permissions"], {"contents": "read"})
+        fixture_steps = [step for step in job["steps"]
+                         if "scripts/test-tool-integrity.py" in step.get("run", "")]
+        self.assertEqual(len(fixture_steps), 1)
+        self.assertEqual(fixture_steps[0]["shell"], "pwsh")
+        self.assertEqual(fixture_steps[0]["run"],
+                         "python scripts/test-tool-integrity.py IntegrityTests.test_windows_node_installer_fixture")
 
     def test_reusable_verify_contains_only_caller_jobs(self):
         workflow = load_yaml(".github/workflows/verify.yaml")

@@ -289,6 +289,9 @@ credentials. Supported tools are `go`, `node`, `syft`, `goreleaser`,
 duplicate tool names fail closed. Requesting `gon` automatically adds Go,
 installs/verifies it first, then builds the SHA-checked-out gon source with the
 existing readonly-module/proxy/checksum-database constraints.
+Node is supported on Linux amd64, macOS arm64, and Windows amd64. The Windows
+installer verifies the ZIP hash before extraction, checks the nested
+`node-v26.12.1-win-x64/node.exe` leaf, and publishes that package directory to PATH.
 
 An empty `locks` input is resolved inside the action's prepare step, where the
 action directory is available, rather than in the caller-context input default.
@@ -317,10 +320,12 @@ files. The old `tools/tool-locks.txt` is removed, not copied or mirrored.
 | syft v1.42.3 | darwin/arm64 | `d71ee7db2be0fe2e96f679fd9d69ef04274cc86c8604707797080a21070b3f32` | [Darwin archive](https://github.com/anchore/syft/releases/download/v1.42.3/syft_1.42.3_darwin_arm64.tar.gz) |
 | syft v1.42.3 | windows/amd64 | `e1b9f4945aa64c2b34970bec617623d7f803d0661b48a50b966768b363322e2d` | [Windows archive](https://github.com/anchore/syft/releases/download/v1.42.3/syft_1.42.3_windows_amd64.zip) |
 | go go1.27.3 | linux/amd64 | `65efbc80fdc1fa2cd2631cad5b481777a68e8725f34e89f50fc6ac714e379b40` | [Linux toolchain](https://go.dev/dl/go1.27.3.linux-amd64.tar.gz) |
+| go go1.27.3 | linux/arm64 | `a06e99309dbcbdca1a8ccd2282c3ee146e55930886e26b4f1193269587165f49` | [Linux arm64 toolchain](https://go.dev/dl/go1.27.3.linux-arm64.tar.gz) |
 | go go1.27.3 | darwin/arm64 | `dd3908cf20959d798c1e06ebe5b72213f0505ce01373b40ce3110975a6cd99c2` | [Darwin toolchain](https://go.dev/dl/go1.27.3.darwin-arm64.tar.gz) |
 | go go1.27.3 | windows/amd64 | `f26081f438319757f8a1b46d7d0b2c5ec7583d4038e485e0aa725cfde7885fff` | [Windows toolchain](https://go.dev/dl/go1.27.3.windows-amd64.zip) |
 | node v26.12.1 | linux/amd64 | `0fd1eb7770598f52a21995edf6ed35fc690400fa437c2386af329519e9143132` | [Linux package](https://nodejs.org/dist/v26.12.1/node-v26.12.1-linux-x64.tar.gz) |
 | node v26.12.1 | darwin/arm64 | `1901d539912c02afa10d1cc126943a8855a7eedebe830119463470db5e6c59e8` | [Darwin package](https://nodejs.org/dist/v26.12.1/node-v26.12.1-darwin-arm64.tar.gz) |
+| node v26.12.1 | windows/amd64 | `b3efd5c70cba3308ed46e7e699a9b8aac075bbc6b027fcb39c84c31acc25e2b4` | [Windows package](https://nodejs.org/dist/v26.12.1/node-v26.12.1-win-x64.zip) |
 | minisign 0.12 | darwin/arm64 | `89000b19535765f9cffc65a65d64a820f433ef6db8020667f7570e06bf6aac63` | [macOS ZIP](https://github.com/jedisct1/minisign/releases/download/0.12/minisign-0.12-macos.zip), ported from [multipass #953](https://github.com/ductone/multipass/pull/953) |
 
 The gon fork publishes only an amd64 asset for v0.2.10. Rather than using
@@ -514,6 +519,10 @@ duplicate locks, newer or malformed Go requirements, the source-locked gon
 build gates, bundled-buildx failure, and event-SHA checks with both lightweight
 and annotated tags. It also checks workflow credential ordering. These are
 deterministic local fixtures, not deployed macOS or Windows proof.
+Repository CI additionally runs the single Windows Node installer fixture on
+`windows-latest`, using real ZIP/hash/extraction/leaf checks and a shadowed
+download command, without release secrets. This is native fixture proof, not a
+deployed Windows release or signing test.
 
 Before release adoption, run canaries on `ConductorOne/baton-github-test`:
 mutate one artifact hash at a time for GoReleaser and Syft and require the
