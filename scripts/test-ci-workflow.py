@@ -22,6 +22,7 @@ class RepositoryCiTest(unittest.TestCase):
         expected_paths = {"cmd/**", ".github/actions/**", "actions/**", "scripts/**", "tools/**",
                           "go.*", "renovate.json", "templates/**", ".github/workflows/ci.yaml",
                           ".github/workflows/verify.yaml", ".github/workflows/release.yaml", "Makefile", ".gitattributes"}
+        expected_paths.add(".github/workflows/rekor-monitor.yaml")
         pull_paths = set(workflow["on"]["pull_request"]["paths"])
         self.assertTrue(expected_paths <= pull_paths)
         self.assertEqual(pull_paths, set(workflow["on"]["push"]["paths"]))
@@ -31,7 +32,8 @@ class RepositoryCiTest(unittest.TestCase):
         go_job = workflow["jobs"]["go-tests"]
         self.assertEqual(go_job["env"]["GOTOOLCHAIN"], "local")
         self.assertEqual([step["run"] for step in go_job["steps"] if "run" in step],
-                         ["go vet ./...", "go test ./..."])
+                         ["go vet ./...", "go test ./...", "go -C tools/rekor-entry vet ./...",
+                          "go -C tools/rekor-entry test ./..."])
         for job in workflow["jobs"].values():
             for step in job["steps"]:
                 if "uses" in step:
