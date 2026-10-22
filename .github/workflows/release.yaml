@@ -118,10 +118,20 @@ concurrency:
 jobs:
   validate-inputs:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
 
     steps:
+      - name: Checkout connector workflows
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # actions/checkout@v5
+        with:
+          path: _workflows
+          repository: ConductorOne/github-workflows
+          ref: ${{ job.workflow_sha }}
+          persist-credentials: false
+
       - name: Enforce runner CA trust
-        uses: ConductorOne/github-workflows/.github/actions/ca-trust-guard@4d06ff31da09d2012770879c2c43c54dec24fe76
+        uses: ./_workflows/.github/actions/ca-trust-guard
 
       - name: Validate tag format
         env:
@@ -179,16 +189,16 @@ jobs:
       go_main_package: ${{ steps.release-options.outputs.go_main_package }}
       brew_tap: ${{ steps.release-options.outputs.brew_tap }}
     steps:
-      - name: Enforce runner CA trust
-        uses: ConductorOne/github-workflows/.github/actions/ca-trust-guard@4d06ff31da09d2012770879c2c43c54dec24fe76
-
       - name: Checkout pinned connector workflows
-        uses: actions/checkout@v5
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # actions/checkout@v5
         with:
           path: _workflows
           repository: ConductorOne/github-workflows
           ref: ${{ job.workflow_sha }}
           persist-credentials: false
+
+      - name: Enforce runner CA trust
+        uses: ./_workflows/.github/actions/ca-trust-guard
 
       - name: Validate dockerfile_template has safe path
         if: inputs.dockerfile_template != ''
@@ -263,12 +273,21 @@ jobs:
     outputs:
       github_prerelease: ${{ steps.github-release.outputs.prerelease }}
     steps:
+      - name: Checkout connector workflows
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # actions/checkout@v5
+        with:
+          path: _workflows
+          repository: ConductorOne/github-workflows
+          ref: ${{ job.workflow_sha }}
+          persist-credentials: false
+
       - name: Enforce runner CA trust
-        uses: ConductorOne/github-workflows/.github/actions/ca-trust-guard@4d06ff31da09d2012770879c2c43c54dec24fe76
+        uses: ./_workflows/.github/actions/ca-trust-guard
 
       - name: Install locked release tools
+        id: tools
         if: inputs.go_source_hygiene == true || inputs.go_vulnerability_scan == true
-        uses: ConductorOne/github-workflows/.github/actions/locked-tools@562a1ea6fa6abd0460950dfc95c7f845aa5f1448
+        uses: ./_workflows/.github/actions/locked-tools
         with:
           tools: go
 
@@ -282,15 +301,6 @@ jobs:
           fetch-depth: 0
           persist-credentials: false
 
-      - name: Checkout connector workflows
-        if: inputs.go_source_hygiene == true || inputs.go_vulnerability_scan == true
-        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # actions/checkout@v5
-        with:
-          path: _workflows
-          repository: ConductorOne/github-workflows
-          ref: ${{ needs.determine-workflows-ref.outputs.ref }}
-          persist-credentials: false
-
       - name: Verify caller checkout matches release tag
         if: inputs.go_source_hygiene == true || inputs.go_vulnerability_scan == true
         shell: bash
@@ -301,6 +311,10 @@ jobs:
 
       - name: Check caller Go requirement
         if: inputs.go_source_hygiene == true || inputs.go_vulnerability_scan == true
+        env:
+          EXPECTED_GO_VERSION: ${{ fromJSON(steps.tools.outputs.versions || '{}').go }}
+          EXPECTED_LOCK_SHA256: ${{ steps.tools.outputs.lock_sha256 }}
+          LOCK_PATH: ${{ steps.tools.outputs.lock_path }}
         run: bash _workflows/.github/actions/locked-tools/verify-locked-go.sh module _caller/go.mod _workflows/go.mod
 
       - name: Capture GitHub Release pre-release setting
@@ -390,11 +404,20 @@ jobs:
       binaries_checksums: ${{ steps.output-checksums.outputs.checksums }}
       released_at: ${{ steps.release-meta.outputs.released_at }}
     steps:
+      - name: Checkout connector workflows
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # actions/checkout@v5
+        with:
+          path: _workflows
+          repository: ConductorOne/github-workflows
+          ref: ${{ job.workflow_sha }}
+          persist-credentials: false
+
       - name: Enforce runner CA trust
-        uses: ConductorOne/github-workflows/.github/actions/ca-trust-guard@4d06ff31da09d2012770879c2c43c54dec24fe76
+        uses: ./_workflows/.github/actions/ca-trust-guard
 
       - name: Install locked release tools
-        uses: ConductorOne/github-workflows/.github/actions/locked-tools@562a1ea6fa6abd0460950dfc95c7f845aa5f1448
+        id: tools
+        uses: ./_workflows/.github/actions/locked-tools
         with:
           tools: go,gon,syft,goreleaser
 
@@ -405,14 +428,6 @@ jobs:
           repository: ${{ github.event.repository.full_name }}
           ref: ${{ github.sha }}
           fetch-depth: 0
-          persist-credentials: false
-
-      - name: Checkout connector workflows
-        uses: actions/checkout@v5
-        with:
-          path: _workflows
-          repository: ConductorOne/github-workflows
-          ref: ${{ needs.determine-workflows-ref.outputs.ref }}
           persist-credentials: false
 
       - name: Verify caller checkout matches release tag
@@ -436,6 +451,10 @@ jobs:
             --output-name gha_artifacts_role_name >> "$GITHUB_OUTPUT"
 
       - name: Check caller Go requirement
+        env:
+          EXPECTED_GO_VERSION: ${{ fromJSON(steps.tools.outputs.versions || '{}').go }}
+          EXPECTED_LOCK_SHA256: ${{ steps.tools.outputs.lock_sha256 }}
+          LOCK_PATH: ${{ steps.tools.outputs.lock_path }}
         run: bash _workflows/.github/actions/locked-tools/verify-locked-go.sh module _caller/go.mod _workflows/go.mod
 
       - name: Install cosign
@@ -704,11 +723,20 @@ jobs:
     outputs:
       windows_manifest: ${{ steps.generate-windows-manifest.outputs.windows_manifest }}
     steps:
+      - name: Checkout connector workflows
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # actions/checkout@v5
+        with:
+          path: _workflows
+          repository: ConductorOne/github-workflows
+          ref: ${{ job.workflow_sha }}
+          persist-credentials: false
+
       - name: Enforce runner CA trust
-        uses: ConductorOne/github-workflows/.github/actions/ca-trust-guard@4d06ff31da09d2012770879c2c43c54dec24fe76
+        uses: ./_workflows/.github/actions/ca-trust-guard
 
       - name: Install locked release tools
-        uses: ConductorOne/github-workflows/.github/actions/locked-tools@562a1ea6fa6abd0460950dfc95c7f845aa5f1448
+        id: tools
+        uses: ./_workflows/.github/actions/locked-tools
         with:
           tools: go,syft,goreleaser-pro
 
@@ -723,14 +751,6 @@ jobs:
           repository: ${{ github.event.repository.full_name }}
           ref: ${{ github.sha }}
           fetch-depth: 0
-          persist-credentials: false
-
-      - name: Checkout connector workflows
-        uses: actions/checkout@v5
-        with:
-          path: _workflows
-          repository: ConductorOne/github-workflows
-          ref: ${{ needs.determine-workflows-ref.outputs.ref }}
           persist-credentials: false
 
       - name: Verify caller checkout matches release tag
@@ -755,6 +775,10 @@ jobs:
 
       - name: Check caller Go requirement
         shell: bash
+        env:
+          EXPECTED_GO_VERSION: ${{ fromJSON(steps.tools.outputs.versions || '{}').go }}
+          EXPECTED_LOCK_SHA256: ${{ steps.tools.outputs.lock_sha256 }}
+          LOCK_PATH: ${{ steps.tools.outputs.lock_path }}
         run: bash _workflows/.github/actions/locked-tools/verify-locked-go.sh module _caller/go.mod _workflows/go.mod
 
       - name: Generate or locate WXS file
@@ -982,11 +1006,20 @@ jobs:
     env:
       GOTOOLCHAIN: local
     steps:
+      - name: Checkout connector workflows
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # actions/checkout@v5
+        with:
+          path: _workflows
+          repository: ConductorOne/github-workflows
+          ref: ${{ job.workflow_sha }}
+          persist-credentials: false
+
       - name: Enforce runner CA trust
-        uses: ConductorOne/github-workflows/.github/actions/ca-trust-guard@4d06ff31da09d2012770879c2c43c54dec24fe76
+        uses: ./_workflows/.github/actions/ca-trust-guard
 
       - name: Install locked release tools
-        uses: ConductorOne/github-workflows/.github/actions/locked-tools@562a1ea6fa6abd0460950dfc95c7f845aa5f1448
+        id: tools
+        uses: ./_workflows/.github/actions/locked-tools
         with:
           tools: go,goreleaser
 
@@ -997,15 +1030,6 @@ jobs:
           repository: ${{ github.event.repository.full_name }}
           ref: ${{ github.sha }}
           fetch-depth: 0
-          persist-credentials: false
-
-      - name: Checkout connector workflows
-        if: inputs.docker == true || inputs.lambda == true
-        uses: actions/checkout@v5
-        with:
-          path: _workflows
-          repository: ConductorOne/github-workflows
-          ref: ${{ needs.determine-workflows-ref.outputs.ref }}
           persist-credentials: false
 
       - name: Verify caller checkout matches release tag
@@ -1034,6 +1058,10 @@ jobs:
             --output-name ecr_push_role_name >> "$GITHUB_OUTPUT"
 
       - name: Check caller Go requirement
+        env:
+          EXPECTED_GO_VERSION: ${{ fromJSON(steps.tools.outputs.versions || '{}').go }}
+          EXPECTED_LOCK_SHA256: ${{ steps.tools.outputs.lock_sha256 }}
+          LOCK_PATH: ${{ steps.tools.outputs.lock_path }}
         run: bash _workflows/.github/actions/locked-tools/verify-locked-go.sh module _caller/go.mod _workflows/go.mod
 
       - name: Install cosign
@@ -1274,21 +1302,22 @@ jobs:
     env:
       GOTOOLCHAIN: local
     steps:
-      - name: Enforce runner CA trust
-        uses: ConductorOne/github-workflows/.github/actions/ca-trust-guard@4d06ff31da09d2012770879c2c43c54dec24fe76
-
-      - name: Install locked release tools
-        uses: ConductorOne/github-workflows/.github/actions/locked-tools@562a1ea6fa6abd0460950dfc95c7f845aa5f1448
-        with:
-          tools: go
-
       - name: Checkout connector workflows
-        uses: actions/checkout@v5
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # actions/checkout@v5
         with:
           path: _workflows
           repository: ConductorOne/github-workflows
-          ref: ${{ needs.determine-workflows-ref.outputs.ref }}
+          ref: ${{ job.workflow_sha }}
           persist-credentials: false
+
+      - name: Enforce runner CA trust
+        uses: ./_workflows/.github/actions/ca-trust-guard
+
+      - name: Install locked release tools
+        id: tools
+        uses: ./_workflows/.github/actions/locked-tools
+        with:
+          tools: go
 
       - name: Derive AWS role names
         id: role-names
@@ -1304,6 +1333,10 @@ jobs:
             --output-name gha_artifacts_role_name >> "$GITHUB_OUTPUT"
 
       - name: Check workflows Go requirement
+        env:
+          EXPECTED_GO_VERSION: ${{ fromJSON(steps.tools.outputs.versions || '{}').go }}
+          EXPECTED_LOCK_SHA256: ${{ steps.tools.outputs.lock_sha256 }}
+          LOCK_PATH: ${{ steps.tools.outputs.lock_path }}
         run: bash _workflows/.github/actions/locked-tools/verify-locked-go.sh module _workflows/go.mod
 
       - name: Merge binaries, Windows, and images manifests
@@ -1531,21 +1564,22 @@ jobs:
     env:
       GOTOOLCHAIN: local
     steps:
-      - name: Enforce runner CA trust
-        uses: ConductorOne/github-workflows/.github/actions/ca-trust-guard@4d06ff31da09d2012770879c2c43c54dec24fe76
-
-      - name: Install locked release tools
-        uses: ConductorOne/github-workflows/.github/actions/locked-tools@562a1ea6fa6abd0460950dfc95c7f845aa5f1448
-        with:
-          tools: go
-
       - name: Checkout connector workflows
-        uses: actions/checkout@v5
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # actions/checkout@v5
         with:
           path: _workflows
           repository: ConductorOne/github-workflows
-          ref: ${{ needs.determine-workflows-ref.outputs.ref }}
+          ref: ${{ job.workflow_sha }}
           persist-credentials: false
+
+      - name: Enforce runner CA trust
+        uses: ./_workflows/.github/actions/ca-trust-guard
+
+      - name: Install locked release tools
+        id: tools
+        uses: ./_workflows/.github/actions/locked-tools
+        with:
+          tools: go
 
       - name: Checkout connector repo
         uses: actions/checkout@v5
@@ -1565,6 +1599,10 @@ jobs:
         run: bash _workflows/scripts/verify-release-checkout.sh _connector
 
       - name: Check workflows Go requirement
+        env:
+          EXPECTED_GO_VERSION: ${{ fromJSON(steps.tools.outputs.versions || '{}').go }}
+          EXPECTED_LOCK_SHA256: ${{ steps.tools.outputs.lock_sha256 }}
+          LOCK_PATH: ${{ steps.tools.outputs.lock_path }}
         run: bash _workflows/.github/actions/locked-tools/verify-locked-go.sh module _workflows/go.mod
 
       - name: Read connector documentation
@@ -1694,16 +1732,16 @@ jobs:
       contents: read
     runs-on: ubuntu-latest
     steps:
-      - name: Enforce runner CA trust
-        uses: ConductorOne/github-workflows/.github/actions/ca-trust-guard@4d06ff31da09d2012770879c2c43c54dec24fe76
-
       - name: Checkout shared workflows
-        uses: actions/checkout@v5
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # actions/checkout@v5
         with:
           repository: ConductorOne/github-workflows
-          ref: ${{ needs.determine-workflows-ref.outputs.ref }}
+          ref: ${{ job.workflow_sha }}
           path: _workflows
           persist-credentials: false
+
+      - name: Enforce runner CA trust
+        uses: ./_workflows/.github/actions/ca-trust-guard
 
       - name: Install cosign
         uses: sigstore/cosign-installer@398d4b0eeef1380460a10c8013a76f728fb906ac # v3
