@@ -236,9 +236,14 @@ Every GoReleaser invocation receives `GORELEASER_CURRENT_TAG` from the workflow 
 ### Release Job Bootstrap
 
 Nine release jobs first check out `_workflows` at `${{ job.workflow_sha }}`
-with a SHA-pinned checkout action, `persist-credentials: false`, and no token
-input. This read-only infrastructure checkout provides the workflow's own
-action implementations and canonical lock; it does not execute caller code.
+with a SHA-pinned checkout action and `persist-credentials: false`. This fetch
+necessarily precedes the guard and, like the runner's own action downloads,
+authenticates to github.com with the job's read-scoped `GITHUB_TOKEN`
+(actions/checkout requires a token); the token is not persisted, the host is not
+behind the incident intermediates, and content integrity is bound to
+`job.workflow_sha`. This read-only infrastructure checkout provides the
+workflow's own action implementations and canonical lock; it does not execute
+caller code.
 The job then runs `./_workflows/.github/actions/ca-trust-guard` with its default
 `enforce`/`true`/`true`/`fail` inputs. Six tool-using jobs next run
 `./_workflows/.github/actions/locked-tools` with `id: tools`, before caller
