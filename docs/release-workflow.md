@@ -150,7 +150,8 @@ Posts the existing Datadog failure event and adds a failure-count metric via
 best-effort curl requests. The metric is an addition to the previous event-only
 notification, intended to support future staleness monitoring. The axiomatic
 workflow remains event-only; aligning its notification behavior is a low-priority
-follow-up. Notification API failures cannot fail the reporting job.
+follow-up. Reporting is best-effort: a Datadog failure does not fail this job;
+the workflow is already failed.
 
 ## Security Properties
 
