@@ -86,7 +86,7 @@ if not re.fullmatch(pattern, os.environ["FIXTURE_IDENTITY"]) or issuer != os.env
         invalid = [
             IDENTITY.replace("refs/tags/v4", ref) for ref in
             ("refs/heads/main", "refs/heads/topic", "refs/tags/v3", "refs/tags/v40",
-             "refs/tags/v4.0.0", "v4", "a" * 40)]
+             "refs/tags/v4.0.0", "refs/tags/v4-foo", "refs/tags/v4/x", "v4", "a" * 40)]
         invalid += ["prefix/" + IDENTITY, IDENTITY + "/suffix", IDENTITY + "\n",
                     IDENTITY.replace("github.com", "githubXcom"),
                     IDENTITY.replace("/.github/", "/Xgithub/"),

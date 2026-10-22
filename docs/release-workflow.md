@@ -435,14 +435,14 @@ cosign verify-blob-attestation \
   --bundle artifact.provenance.sigstore.json \
   --type https://slsa.dev/provenance/v1 \
   --certificate-oidc-issuer https://token.actions.githubusercontent.com \
-  --certificate-identity-regexp 'https://github.com/ConductorOne/github-workflows/.github/workflows/release.yaml@.*' \
+  --certificate-identity-regexp '^https://github\.com/ConductorOne/github-workflows/\.github/workflows/release\.yaml@refs/tags/v4$' \
   artifact.zip
 
 # Verify image provenance
 cosign verify-attestation \
   --type https://slsa.dev/provenance/v1 \
   --certificate-oidc-issuer https://token.actions.githubusercontent.com \
-  --certificate-identity-regexp 'https://github.com/ConductorOne/github-workflows/.github/workflows/release.yaml@.*' \
+  --certificate-identity-regexp '^https://github\.com/ConductorOne/github-workflows/\.github/workflows/release\.yaml@refs/tags/v4$' \
   public.ecr.aws/conductorone/baton-foo@sha256:abc123
 ```
 
@@ -629,7 +629,7 @@ cosign verify-blob-attestation \
   --bundle baton-github-test-v0.1.102-darwin-arm64.zip.provenance.sigstore.json \
   --type https://slsa.dev/provenance/v1 \
   --certificate-oidc-issuer https://token.actions.githubusercontent.com \
-  --certificate-identity-regexp 'https://github.com/ConductorOne/github-workflows/.github/workflows/release.yaml@.*' \
+  --certificate-identity-regexp '^https://github\.com/ConductorOne/github-workflows/\.github/workflows/release\.yaml@refs/tags/v4$' \
   baton-github-test-v0.1.102-darwin-arm64.zip
 ```
 
