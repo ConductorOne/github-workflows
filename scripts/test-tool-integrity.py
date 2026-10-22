@@ -126,6 +126,35 @@ class IntegrityTests(unittest.TestCase):
                     if tool == "go":
                         self.assertIn(f"GOROOT={dest}/go", self.env_file.read_text())
 
+    def test_go_linux_arm64_verified_install(self) -> None:
+        for machine in ("aarch64", "arm64"):
+            with self.subTest(machine=machine):
+                self.fixture_download("go", "linux/arm64")
+                self.env.update(TEST_OS="Linux", TEST_ARCH=machine)
+                dest = self.root / f"go-linux-{machine}"
+                self.run_script("install-tool.sh", "go", dest)
+                binary = dest / "go/bin/go"
+                self.assertTrue(binary.is_file())
+                self.assertTrue(os.access(binary, os.X_OK))
+                self.assertIn(str(binary.parent), self.path_file.read_text().splitlines())
+                self.assertIn(f"GOROOT={dest}/go", self.env_file.read_text())
+                row = next(line.split() for line in self.lock.read_text().splitlines()
+                           if line.startswith("go ") and line.split()[2] == "linux/arm64")
+                self.assertEqual(row[4], f"https://go.dev/dl/{row[1]}.linux-arm64.tar.gz")
+                self.assertIn(row[4], self.calls.read_text())
+
+    def test_go_linux_arm64_hash_mismatch_precedes_extraction(self) -> None:
+        archive = self.fixture_download("go", "linux/arm64")
+        archive.write_bytes(archive.read_bytes() + b"tampered")
+        self.env.update(TEST_OS="Linux", TEST_ARCH="aarch64")
+        dest = self.root / "bad-go-arm64"
+        result = self.run_script("install-tool.sh", "go", dest, ok=False)
+        self.assertIn("::error title=GF13::go sha256 mismatch", result.stderr)
+        self.assertNotIn("tar\n", self.calls.read_text())
+        self.assertFalse(dest.exists())
+        self.assertFalse(self.path_file.exists())
+        self.assertFalse(self.env_file.exists())
+
     def test_mismatch_fails_before_extraction_or_path_update(self) -> None:
         for tool in ("syft", "goreleaser", "go", "node"):
             with self.subTest(tool=tool):

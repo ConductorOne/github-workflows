@@ -19,3 +19,4 @@ node v26.12.1 darwin/arm64 1901d539912c02afa10d1cc126943a8855a7eedebe83011946347
 # Minisign lock ported verbatim from ductone/multipass PR #953 (release-sign-split); producer/reviewer verified it independently.
 minisign 0.12 darwin/arm64 89000b19535765f9cffc65a65d64a820f433ef6db8020667f7570e06bf6aac63 https://github.com/jedisct1/minisign/releases/download/0.12/minisign-0.12-macos.zip
 node v26.12.1 windows/amd64 b3efd5c70cba3308ed46e7e699a9b8aac075bbc6b027fcb39c84c31acc25e2b4 https://nodejs.org/dist/v26.12.1/node-v26.12.1-win-x64.zip
+go go1.27.3 linux/arm64 a06e99309dbcbdca1a8ccd2282c3ee146e55930886e26b4f1193269587165f49 https://go.dev/dl/go1.27.3.linux-arm64.tar.gz

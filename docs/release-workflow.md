@@ -320,6 +320,7 @@ files. The old `tools/tool-locks.txt` is removed, not copied or mirrored.
 | syft v1.42.3 | darwin/arm64 | `d71ee7db2be0fe2e96f679fd9d69ef04274cc86c8604707797080a21070b3f32` | [Darwin archive](https://github.com/anchore/syft/releases/download/v1.42.3/syft_1.42.3_darwin_arm64.tar.gz) |
 | syft v1.42.3 | windows/amd64 | `e1b9f4945aa64c2b34970bec617623d7f803d0661b48a50b966768b363322e2d` | [Windows archive](https://github.com/anchore/syft/releases/download/v1.42.3/syft_1.42.3_windows_amd64.zip) |
 | go go1.27.3 | linux/amd64 | `65efbc80fdc1fa2cd2631cad5b481777a68e8725f34e89f50fc6ac714e379b40` | [Linux toolchain](https://go.dev/dl/go1.27.3.linux-amd64.tar.gz) |
+| go go1.27.3 | linux/arm64 | `a06e99309dbcbdca1a8ccd2282c3ee146e55930886e26b4f1193269587165f49` | [Linux arm64 toolchain](https://go.dev/dl/go1.27.3.linux-arm64.tar.gz) |
 | go go1.27.3 | darwin/arm64 | `dd3908cf20959d798c1e06ebe5b72213f0505ce01373b40ce3110975a6cd99c2` | [Darwin toolchain](https://go.dev/dl/go1.27.3.darwin-arm64.tar.gz) |
 | go go1.27.3 | windows/amd64 | `f26081f438319757f8a1b46d7d0b2c5ec7583d4038e485e0aa725cfde7885fff` | [Windows toolchain](https://go.dev/dl/go1.27.3.windows-amd64.zip) |
 | node v26.12.1 | linux/amd64 | `0fd1eb7770598f52a21995edf6ed35fc690400fa437c2386af329519e9143132` | [Linux package](https://nodejs.org/dist/v26.12.1/node-v26.12.1-linux-x64.tar.gz) |
