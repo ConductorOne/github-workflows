@@ -64,14 +64,25 @@ def check_local_bootstrap(steps, location):
     return errors
 
 
+def references_secrets(value):
+    if isinstance(value, str):
+        # Match the context itself too (for example, toJSON(secrets)).
+        return re.search(r"\bsecrets\b", value) is not None
+    if isinstance(value, dict):
+        return any(references_secrets(item) for item in value.values())
+    if isinstance(value, list):
+        return any(references_secrets(item) for item in value)
+    return False
+
+
 def check_workflow(workflow):
     errors = []
     for name, job in workflow["jobs"].items():
         permissions = job.get("permissions", workflow.get("permissions", {}))
         oidc = permissions == "write-all" or (
             isinstance(permissions, dict) and permissions.get("id-token") == "write")
-        inherited_secret = "secrets." in json.dumps(workflow.get("env", {}))
-        if name in PRIVILEGED_JOBS or oidc or job.get("secrets") or inherited_secret or "secrets." in json.dumps(job):
+        inherited_secret = references_secrets(workflow.get("env", {}))
+        if name in PRIVILEGED_JOBS or oidc or job.get("secrets") or inherited_secret or references_secrets(job):
             errors.extend(check_steps([job] if "uses" in job else job.get("steps", []), name))
             errors.extend(check_local_bootstrap(job.get("steps", []), name))
     return errors
