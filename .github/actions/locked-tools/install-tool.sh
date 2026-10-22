@@ -62,7 +62,7 @@ fi
 workdir="$(mktemp -d)"
 trap 'rm -rf "$workdir"' EXIT
 archive="$workdir/${url##*/}"
-curl -sSfL --retry 3 -o "$archive" "$url"
+curl -sSfL --retry 5 --retry-delay 2 --retry-all-errors -o "$archive" "$url"
 if [ "$os" = darwin ]; then
   if ! printf '%s  %s\n' "$expected" "$archive" | shasum -a 256 -c -; then
     echo "::error title=locked-tools::$tool sha256 mismatch" >&2

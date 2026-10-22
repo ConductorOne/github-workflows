@@ -271,10 +271,12 @@ The preflight `_workflows` checkout and local guard always run. Its
 `go_source_hygiene || go_vulnerability_scan` condition applies to locked-tools,
 caller checkout, source verification, and the module gate, so disabling both
 optional checks does not download a Go toolchain.
-Tool-using jobs set `GOTOOLCHAIN=local` at job scope. The binaries job also sets
-`GOFLAGS=-mod=readonly`, `GOPROXY=https://proxy.golang.org`, and
-`GOSUMDB=sum.golang.org` at job scope. Cosign and bundled-buildx/QEMU setup run
-after trust/tool bootstrap and before their signing or AWS credentials.
+Tool-using jobs set `GOTOOLCHAIN=local` at job scope. Caller builds do not override
+`GOFLAGS`, `GOPROXY`, or `GOSUMDB` at workflow/job scope, preserving Go's default
+vendor/readonly mode selection and caller proxy configuration. The trusted gon
+build retains its separate step-local module and checksum requirements.
+Cosign and bundled-buildx/QEMU setup run after trust/tool bootstrap and before
+their signing or AWS credentials.
 
 ### Locked Release Tools
 
@@ -285,6 +287,10 @@ expected executable leaf before publishing PATH. They do not execute downloaded
 binaries during extraction. The action's Go assertion and native gon build run
 after verified installation. Release credentials are configured only after
 tool installation and checks. Helper code checkouts use `job.workflow_sha`.
+
+Artifact downloads use five retries with a two-second delay; curl retries all
+errors, including stream failures. PowerShell uses its native retry count and
+interval parameters. The committed SHA256 is still checked before extraction.
 
 Go is installed once per tool-using job, with `GOTOOLCHAIN=local`. Each of the
 six module gates invokes the checked-out action-local `verify-locked-go.sh`

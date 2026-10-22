@@ -392,9 +392,6 @@ jobs:
     runs-on: macos-latest-xlarge
     env:
       GOTOOLCHAIN: local
-      GOFLAGS: -mod=readonly
-      GOPROXY: https://proxy.golang.org
-      GOSUMDB: sum.golang.org
     permissions:
       contents: read
       id-token: write # <-- needed for cosign keyless (OIDC)
