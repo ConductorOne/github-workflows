@@ -304,6 +304,8 @@ elif args[:2] == ["run", "download"]:
     run = args[2]
     with open("downloads", "a") as output:
         output.write(run + "\\n")
+    if fixture["runs"][run].get("download_error"):
+        sys.exit("simulated transient download failure")
     if not fixture["runs"][run]["has_artifact"]:
         sys.exit("run has no usable state artifact")
     destination = pathlib.Path(args[args.index("--dir") + 1])
@@ -341,8 +343,25 @@ else:
                 result, downloads = execute(restore, incomplete, missing)
                 self.assertEqual(result.returncode, 0, result.stderr)
                 self.assertEqual(downloads, ["106", "105"])
+                self.assertIn("::warning::skipping incomplete state artifact from run 106", result.stderr)
                 self.assertFalse((directory / missing / "monitor-state/incomplete-only.txt").exists())
                 self.assertEqual(list((directory / missing).glob(".rekor-state.*")), [])
+            failed_download = copy.deepcopy(fixture)
+            failed_download["pages"][0]["artifacts"].append(artifact(106, "15"))
+            failed_download["runs"]["106"] = {"workflow_id": 100, "has_artifact": True, "download_error": True}
+            for bootstrap in (False, True):
+                label = f"download-error-{bootstrap}"
+                result, downloads = execute(restore, failed_download, label, bootstrap)
+                self.assertNotEqual(result.returncode, 0)
+                self.assertEqual(downloads, ["106"])
+                self.assertIn("::error::download failed for run 106", result.stderr)
+                case = directory / label
+                self.assertEqual(list(case.glob(".rekor-state.*")), [])
+                check = next(step for step in workflow["jobs"]["monitor"]["steps"] if step.get("id") == "state")
+                output = case / "state-output"
+                subprocess.run(["bash", "-c", check["run"]], cwd=case,
+                               env=dict(os.environ, GITHUB_OUTPUT=str(output)), check=True)
+                self.assertFalse(output.exists(), "failed downloads must not produce upload-ready state")
             old_selection = '''set -euo pipefail
 mkdir -p monitor-state
 run_id="$(gh run list --repo "$GITHUB_REPOSITORY" --workflow rekor-monitor.yaml --branch main --status completed --limit 1 --json databaseId --jq '.[0].databaseId // empty')"

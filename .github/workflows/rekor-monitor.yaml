@@ -65,9 +65,12 @@ jobs:
             candidate_workflow="$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$candidate" --jq '.workflow_id')"
             if [ "$candidate_workflow" = "$workflow_id" ]; then
               candidate_dir="$(mktemp -d "./.rekor-state.XXXXXX")"
-              if gh run download "$candidate" --repo "$GITHUB_REPOSITORY" \
-                --name rekor-monitor-state --dir "$candidate_dir" &&
-                test -s "$candidate_dir/checkpoint.txt" &&
+              if ! gh run download "$candidate" --repo "$GITHUB_REPOSITORY" \
+                --name rekor-monitor-state --dir "$candidate_dir"; then
+                echo "::error::download failed for run $candidate" >&2
+                exit 1
+              fi
+              if test -s "$candidate_dir/checkpoint.txt" &&
                 test -s "$candidate_dir/reconciliation.json"; then
                 rmdir monitor-state
                 mv "$candidate_dir" monitor-state
@@ -75,6 +78,7 @@ jobs:
                 run_id="$candidate"
                 break
               fi
+              echo "::warning::skipping incomplete state artifact from run $candidate" >&2
               rm -rf "$candidate_dir"
               candidate_dir=""
             fi

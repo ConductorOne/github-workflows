@@ -74,7 +74,9 @@ checkpoint, pending entries, digest budget and reports. Artifact-less cancelled
 or early-failed runs cannot wedge restoration. Each candidate is downloaded to
 an isolated temporary directory and accepted only when `checkpoint.txt` and
 `reconciliation.json` are both non-empty; incomplete candidates fall through to
-older artifacts. An always-run completeness check applies the same requirement
+older artifacts with a warning. Download failures instead fail closed without
+falling back, so an older budget or observation clock cannot be re-published as
+the newest state. An always-run completeness check applies the same requirement
 before uploading state, so partial first attempts do not perpetuate incomplete
 artifacts. Missing or expired usable state fails closed rather than silently
 restarting; an operator must recover the last valid artifact before resuming.
