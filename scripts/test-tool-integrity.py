@@ -30,9 +30,10 @@ class IntegrityTests(unittest.TestCase):
         self.action_dir.mkdir(parents=True)
         for name in ("install-tool.sh", "verify-locked-go.sh", "gon-source.sh"):
             shutil.copyfile(ACTION / name, self.action_dir / name)
-            shutil.copyfile(ROOT / "scripts" / name, self.scripts / name)
         shutil.copyfile(ACTION / "locked-tools.sh", self.action_dir / "locked-tools.sh")
         shutil.copyfile(ACTION / "install-tool.ps1", self.action_dir / "install-tool.ps1")
+        for name in ("install-tool.sh", "gon-source.sh"):
+            shutil.copyfile(ROOT / "scripts" / name, self.scripts / name)
         for name in ("verify-release-checkout.sh", "setup-release-buildx.sh"):
             shutil.copyfile(ROOT / "scripts" / name, self.scripts / name)
         self.lock = self.action_dir / "tool-locks.txt"
@@ -294,6 +295,8 @@ esac
             self.env.pop(name)
         self.run_script("verify-locked-go.sh", "version", ok=False)
         self.run_script("verify-locked-go.sh", "module", module, ok=False)
+        self.run_script("verify-locked-go.sh", "version", self.lock, ok=False)
+        self.run_script("verify-locked-go.sh", "module", self.lock, module, ok=False)
         self.assertFalse(self.calls.exists())
         for name, value in (("EXPECTED_GO_VERSION", "1.27.3"),
                             ("EXPECTED_LOCK_SHA256", "0" * 64),
@@ -326,18 +329,6 @@ esac
         self.env.pop("TEST_GO_LIST_FAIL")
         self.env["TEST_GO_LIST_VERSION"] = "1.27.2"
         self.run_script("verify-locked-go.sh", "module", module, ok=False)
-
-    def test_deprecated_positional_go_lock_uses_prepare_reader(self) -> None:
-        self.mock_go_gate()
-        result = self.run_script("verify-locked-go.sh", "version", self.lock)
-        self.assertIn("DEPRECATED", result.stderr)
-        module = self.root / "go.mod"
-        module.write_text("module fixture\ngo 1.27.3\n")
-        self.run_script("verify-locked-go.sh", "module", self.lock, module)
-        self.lock.write_text(self.lock.read_text().replace("go go1.27.3 darwin/arm64", "go go1.27.4 darwin/arm64"))
-        self.calls.unlink()
-        self.run_script("verify-locked-go.sh", "version", self.lock, ok=False)
-        self.assertFalse(self.calls.exists(), "prepare must reject inconsistent versions before Go runs")
 
     def git(self, *args: str) -> str:
         return subprocess.check_output(["git", "-C", str(self.repo), *args], text=True, stderr=subprocess.DEVNULL).strip()
@@ -374,6 +365,7 @@ esac
         text = self.lock.read_text()
         old_commit = next(line.split()[1] for line in text.splitlines() if line.startswith("gon "))
         self.lock.write_text(text.replace(old_commit, commit))
+        self.go_contract()
         self.run_script("gon-source.sh", "ref")
         self.assertEqual(self.output_file.read_text(), f"ref={commit}\n")
         self.env.update(GOFLAGS="-mod=readonly", GOPROXY="https://proxy.golang.org", GOSUMDB="sum.golang.org")
@@ -433,12 +425,6 @@ esac
         self.assertTrue((self.root / "legacy" / expected_member).is_file())
         self.run_script("gon-source.sh", "ref")
         self.assertIn("ref=", self.output_file.read_text())
-        module = self.root / "go.mod"
-        module.write_bytes(b"module fixture\r\ngo 1.27.3\r\n")
-        self.mock_go_gate()
-        result = subprocess.run(["bash", str(self.scripts / "verify-locked-go.sh"), "module", str(module)],
-                                env=self.env, text=True, capture_output=True)
-        self.assertEqual(result.returncode, 0, result.stderr)
         self.output_file.unlink()
         result = subprocess.run(["bash", str(self.scripts / "gon-source.sh"), "ref"],
                                 env=self.env, text=True, capture_output=True)

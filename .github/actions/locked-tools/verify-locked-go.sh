@@ -1,33 +1,12 @@
 #!/usr/bin/env bash
-# Environment contract: expectations come from locked-tools outputs, never by
-# parsing a checkout's lock. DEPRECATED positional lockfile mode delegates to
-# the action's prepare reader; remove after all legacy workflow callers migrate.
+# Expectations come only from locked-tools outputs through the environment.
+# Never parse a checkout's lock or fall back to positional lock arguments.
 set -euo pipefail
-script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 fail() { echo "::error title=GF13::$*" >&2; exit 1; }
 mode="${1:-}"
 case "$mode" in version|module) shift;; *) fail 'Usage: verify-locked-go.sh version | module <go.mod> [...]';; esac
 [ "${GOTOOLCHAIN:-}" = local ] || fail 'GOTOOLCHAIN must be local; automatic toolchain downloads are forbidden'
 
-if [ -z "${EXPECTED_GO_VERSION:-}${EXPECTED_LOCK_SHA256:-}${LOCK_PATH:-}" ]; then
-  [ "$#" -gt 0 ] || fail 'EXPECTED_GO_VERSION, EXPECTED_LOCK_SHA256 and LOCK_PATH must be supplied'
-  legacy_lock="$1"; shift
-  echo '::warning title=GF13::Positional Go lockfile mode is DEPRECATED; wire locked-tools outputs through the environment' >&2
-  legacy_work="$(mktemp -d)"
-  trap 'rm -rf "$legacy_work"' EXIT
-  # Preparation is the only owner of Go-version parsing/single-version sanity.
-  # This compatibility path downloads/installs nothing and publishes no caller outputs.
-  LOCKED_TOOLS=go LOCKS_INPUT="$legacy_lock" ACTION_DIR="$script_dir" \
-    LOCKED_TOOLS_DEST="$legacy_work/unused-install-dir" GITHUB_OUTPUT="$legacy_work/plan" \
-    bash "$script_dir/locked-tools.sh" prepare
-  while IFS='=' read -r name value; do
-    case "$name" in
-      go_version) EXPECTED_GO_VERSION="$value" ;;
-      lock_sha256) EXPECTED_LOCK_SHA256="$value" ;;
-      lock_path) LOCK_PATH="$value" ;;
-    esac
-  done < "$legacy_work/plan"
-fi
 expected="${EXPECTED_GO_VERSION:-}"
 lock_hash="${EXPECTED_LOCK_SHA256:-}"
 lock_path="${LOCK_PATH:-}"
@@ -64,10 +43,10 @@ version_le() {
 }
 case "$mode" in
   version)
-    [ "$#" -eq 0 ] || fail 'Usage: verify-locked-go.sh version [deprecated-lockfile]'
+    [ "$#" -eq 0 ] || fail 'Usage: verify-locked-go.sh version'
     check_version ;;
   module)
-    [ "$#" -gt 0 ] || fail 'Usage: verify-locked-go.sh module [deprecated-lockfile] <go.mod> [...]'
+    [ "$#" -gt 0 ] || fail 'Usage: verify-locked-go.sh module <go.mod> [...]'
     requirements=()
     for module in "$@"; do
       required="$(awk '{ sub(/\r$/, "") } $1 == "go" { print $2; count++ } END { if (count != 1) exit 1 }' "$module")" || \

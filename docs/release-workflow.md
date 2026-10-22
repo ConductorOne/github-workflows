@@ -309,17 +309,11 @@ between preparation, installation, and output publication; internal Go gates
 receive the same expected version/path/hash. Each phase is a one-line script
 call in the composite. See the [action contract](../.github/actions/locked-tools/README.md).
 
-During the consumer transition, `scripts/install-tool.sh`, `install-tool.ps1`,
-`gon-source.sh`, and `verify-locked-go.sh` are thin forwarding wrappers to the
-canonical action-local implementations. This keeps this branch's release
-workflow unchanged and executable without duplicating implementation or lock
-files. The old `tools/tool-locks.txt` is removed, not copied or mirrored.
-The Go gate's positional lockfile mode and the no-environment wrapper are
-**DEPRECATED** compatibility adapters: they delegate metadata lookup to action
-prepare, keeping current main's workflow calls intact. Remove them in a
-follow-up after all six release jobs and other consumers migrate to the
-environment contract; missing both environment and an explicit lock argument
-fails closed in the action-local gate.
+The Go gate is action-local and environment-only; there is no repository-level
+wrapper or positional lockfile fallback. Callers must wire the installed action's
+version and lock-identity outputs. The main-tip workflow's old wrapper calls are
+not executable until the coordinated caller amendment lands; moving-tag
+promotion remains blocked until that migration is complete.
 
 | Tool / version | Lock platform | SHA256 or source commit | Committed artifact/source |
 | --- | --- | --- | --- |

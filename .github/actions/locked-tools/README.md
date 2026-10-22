@@ -68,29 +68,3 @@ directives. It then checks runtime version equality and runs
 `GOTOOLCHAIN=local go list -m` with an explicit module file, readonly/offline
 module settings and workspace discovery disabled. The reported GoVersion must
 agree with the directive. Neither gate mode can download a Go toolchain.
-
-## Deprecated compatibility
-
-**DEPRECATED:** the action-local gate also accepts an explicit positional lock
-for existing callers:
-
-```text
-verify-locked-go.sh version <lockfile>
-verify-locked-go.sh module <lockfile> <go.mod> [...]
-```
-
-It delegates version/identity lookup to the action's prepare reader and emits a
-deprecation warning; it does not add a second lock parser. Without either a
-complete environment contract or that explicit argument, it fails closed.
-Partial environment contracts never fall back to positional lookup.
-
-The transitional `scripts/verify-locked-go.sh` wrapper injects the canonical
-lock argument for main's existing no-environment workflow calls (or the reviewed
-`TOOL_LOCK_FILE` override). Legacy gon source-build calls use the same adapter.
-These adapters intentionally preserve current main until the caller migration
-lands; the new action's internal phases already use the environment contract.
-
-Removal follow-up: once the six release jobs' version/module gates and other
-consumers have migrated to action outputs, remove the deprecated wrapper and
-positional adapter in a separate PR. No workflow should retain a second
-checkout-based Go-version reader.
