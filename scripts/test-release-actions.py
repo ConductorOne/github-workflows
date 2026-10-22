@@ -41,6 +41,9 @@ class ReleaseActionsTest(unittest.TestCase):
     def test_new_credential_jobs_cannot_escape_inventory(self):
         for job in ({"permissions": {"id-token": "write"}},
                     {"env": {"TOKEN": "${{ secrets.NEW_TOKEN }}"}},
+                    {"env": {"TOKEN": "${{ secrets['NEW_TOKEN'] }}"}},
+                    {"env": {"TOKEN": "${{ secrets\n ['NEW_TOKEN'] }}"}},
+                    {"env": {"TOKEN": "${{ toJSON(secrets) }}"}},
                     {"permissions": "write-all"}):
             job["steps"] = [{"uses": "unreviewed/action@" + "a" * 40}]
             self.assertTrue(policy.check_workflow({"jobs": {"new-job": job}}))
