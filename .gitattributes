@@ -6,6 +6,3 @@ scripts/test-deny-os.sh text eol=lf
 scripts/test-ca-trust-guard.sh text eol=lf
 # The canonical lock hash and action scripts must survive Windows checkout unchanged.
 .github/actions/locked-tools/** text eol=lf
-scripts/install-tool.sh text eol=lf
-scripts/install-tool.ps1 text eol=lf
-scripts/gon-source.sh text eol=lf

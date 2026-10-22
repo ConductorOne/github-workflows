@@ -233,6 +233,49 @@ The same event commit remains in the provenance's resolved Git dependency.
 
 Every GoReleaser invocation receives `GORELEASER_CURRENT_TAG` from the workflow input. This pins archive names, release metadata, and image digest files to the requested tag when multiple tags identify the same commit.
 
+### Release Job Bootstrap
+
+Nine release jobs first check out `_workflows` at `${{ job.workflow_sha }}`
+with a SHA-pinned checkout action and `persist-credentials: false`. This fetch
+necessarily precedes the guard and, like the runner's own action downloads,
+authenticates to github.com with the job's read-scoped `GITHUB_TOKEN`
+(actions/checkout requires a token); the token is not persisted, the host is not
+behind the incident intermediates, and content integrity is bound to
+`job.workflow_sha`. This read-only infrastructure checkout provides the
+workflow's own action implementations and canonical lock; it does not execute
+caller code.
+The job then runs `./_workflows/.github/actions/ca-trust-guard` with its default
+`enforce`/`true`/`true`/`fail` inputs. Six tool-using jobs next run
+`./_workflows/.github/actions/locked-tools` with `id: tools`, before caller
+checkout, release-commit verification, module requirements, and credentials.
+The workflow uses no remote self-action SHA references: its workflow, local
+actions, and lock come from the same checkout commit. The guard's measurements
+and residual-client limits are documented in
+[CA Trust Guard](../.github/actions/ca-trust-guard/README.md).
+
+`notify-release-failure` is deliberately exempt: guard errors must not prevent
+failure reporting. The job remains failure-only and does not install build
+tools. `validate-inputs`, `determine-workflows-ref`, and `verify-release` need
+the guard but no locked-tools installation.
+
+| Tool-using job | `locked-tools` input |
+| --- | --- |
+| release-preflight | `go` |
+| goreleaser-binaries | `go,gon,syft,goreleaser` |
+| goreleaser-windows | `go,syft,goreleaser-pro` |
+| goreleaser-docker | `go,goreleaser` |
+| publish-release-manifest | `go` |
+| record-registry-api | `go` |
+
+The preflight `_workflows` checkout and local guard always run. Its
+`go_source_hygiene || go_vulnerability_scan` condition applies to locked-tools,
+caller checkout, source verification, and the module gate, so disabling both
+optional checks does not download a Go toolchain.
+Tool-using jobs set `GOTOOLCHAIN=local` at job scope. The binaries job also sets
+`GOFLAGS=-mod=readonly`, `GOPROXY=https://proxy.golang.org`, and
+`GOSUMDB=sum.golang.org` at job scope. Cosign and bundled-buildx/QEMU setup run
+after trust/tool bootstrap and before their signing or AWS credentials.
+
 ### Locked Release Tools
 
 `.github/actions/locked-tools/tool-locks.txt` identifies tool versions, artifact
@@ -243,13 +286,22 @@ binaries during extraction. The action's Go assertion and native gon build run
 after verified installation. Release credentials are configured only after
 tool installation and checks. Helper code checkouts use `job.workflow_sha`.
 
-Go is installed once per job, with `GOTOOLCHAIN=local`. Go gates take
-`EXPECTED_GO_VERSION`, `EXPECTED_LOCK_SHA256` and `LOCK_PATH` from the
-locked-tools action's `go`, `lock_sha256` and `lock_path` outputs. The gate
-hashes the referenced lock to check identity but never parses its versions;
-prepare owns the single-version sanity. Version equality and readonly/offline
-`GOTOOLCHAIN=local go list -m` checks reject incompatible module requirements.
-The release workflow does not cache Go modules.
+Go is installed once per tool-using job, with `GOTOOLCHAIN=local`. Each of the
+six module gates invokes the checked-out action-local `verify-locked-go.sh`
+after source verification and receives the installed action's identity:
+
+- `EXPECTED_GO_VERSION`: `${{ fromJSON(steps.tools.outputs.versions || '{}').go }}`
+- `EXPECTED_LOCK_SHA256`: `${{ steps.tools.outputs.lock_sha256 }}`
+- `LOCK_PATH`: `${{ steps.tools.outputs.lock_path }}`
+
+The empty-JSON expression is safe when optional tools are skipped: step
+environments are evaluated before step conditions. It supplies no version
+fallback; an executing gate with incomplete outputs fails closed.
+The gate hashes the referenced lock to check identity but never parses its
+versions; prepare owns the single-version sanity. Version equality and
+readonly/offline `GOTOOLCHAIN=local go list -m` checks reject incompatible module
+requirements. The action asserts the installed Go version itself; the workflow
+does not duplicate standalone version gates or cache Go modules.
 
 Artifact hashes identify the archives at the upstream release URLs.
 [Go release metadata](https://go.dev/dl/?mode=json) provides the toolchain
@@ -258,7 +310,7 @@ integrity uses the committed lock rather than a checksum fetched during the job.
 
 Node.js 26.12.1 uses platform-specific archive locks with checksums from [SHASUMS256.txt](https://nodejs.org/dist/v26.12.1/SHASUMS256.txt).
 
-The `ConductorOne/github-workflows/.github/actions/locked-tools@<commit-sha>`
+The local `./_workflows/.github/actions/locked-tools`
 composite action accepts a comma-separated `tools` list, an optional reviewed
 `locks` file (default: the action's canonical lock), and `dest` (default:
 `${{ runner.temp }}/locked-tools`). Invoke it before configuring release
@@ -283,8 +335,11 @@ between preparation, installation, and output publication; internal Go gates
 receive the same expected version/path/hash. Each phase is a one-line script
 call in the composite. See the [action contract](../.github/actions/locked-tools/README.md).
 
-The action-local Go gate is environment-only. Callers supply the installed
-action's version and lock-identity outputs; positional lockfile lookup is not supported.
+The action-local Go gate is environment-only. It consumes the installed
+action's version and lock-identity outputs, not a version re-read from a
+checkout lock or positional lockfile arguments. Canonical implementations
+and the single lock reside under `.github/actions/locked-tools/`; forwarding
+wrappers under `scripts/` are not supported.
 
 | Tool / version | Lock platform | SHA256 or source commit | Committed artifact/source |
 | --- | --- | --- | --- |

@@ -17,6 +17,13 @@ import zipfile
 
 ROOT = Path(__file__).resolve().parent.parent
 ACTION = ROOT / ".github/actions/locked-tools"
+GUARD_ACTION = "./_workflows/.github/actions/ca-trust-guard"
+TOOLS_ACTION = "./_workflows/.github/actions/locked-tools"
+GO_GATE_ENV = {
+    "EXPECTED_GO_VERSION": "${{ fromJSON(steps.tools.outputs.versions || '{}').go }}",
+    "EXPECTED_LOCK_SHA256": "${{ steps.tools.outputs.lock_sha256 }}",
+    "LOCK_PATH": "${{ steps.tools.outputs.lock_path }}",
+}
 
 
 class IntegrityTests(unittest.TestCase):
@@ -32,8 +39,6 @@ class IntegrityTests(unittest.TestCase):
             shutil.copyfile(ACTION / name, self.action_dir / name)
         shutil.copyfile(ACTION / "locked-tools.sh", self.action_dir / "locked-tools.sh")
         shutil.copyfile(ACTION / "install-tool.ps1", self.action_dir / "install-tool.ps1")
-        for name in ("install-tool.sh", "gon-source.sh"):
-            shutil.copyfile(ROOT / "scripts" / name, self.scripts / name)
         for name in ("verify-release-checkout.sh", "setup-release-buildx.sh"):
             shutil.copyfile(ROOT / "scripts" / name, self.scripts / name)
         self.lock = self.action_dir / "tool-locks.txt"
@@ -412,24 +417,22 @@ esac
         self.assertFalse(self.path_file.exists())
         self.assertFalse((self.root / "bad-minisign").exists())
 
-    def test_custom_lock_and_legacy_forwarders(self) -> None:
+    def test_custom_lock_overrides_action_defaults(self) -> None:
         self.fixture_download("node", "linux/amd64")
         expected_member = self.archive_member("node", "linux/amd64")
         custom = self.root / "custom locks.txt"
         shutil.copyfile(self.lock, custom)
         self.lock.write_text("# The canonical fixture lock is deliberately unusable.\n")
         self.env["TOOL_LOCK_FILE"] = str(custom)
-        result = subprocess.run(["bash", str(self.scripts / "install-tool.sh"), "node", str(self.root / "legacy")],
-                                env=self.env, text=True, capture_output=True)
-        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
-        self.assertTrue((self.root / "legacy" / expected_member).is_file())
+        self.run_script("install-tool.sh", "node", self.root / "custom-install")
+        self.assertTrue((self.root / "custom-install" / expected_member).is_file())
         self.run_script("gon-source.sh", "ref")
         self.assertIn("ref=", self.output_file.read_text())
-        self.output_file.unlink()
-        result = subprocess.run(["bash", str(self.scripts / "gon-source.sh"), "ref"],
-                                env=self.env, text=True, capture_output=True)
-        self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertIn("ref=", self.output_file.read_text())
+        module = self.root / "go.mod"
+        module.write_bytes(b"module fixture\r\ngo 1.27.3\r\n")
+        self.go_contract(lock=custom)
+        self.mock_go_gate()
+        self.run_script("verify-locked-go.sh", "module", module)
 
     def phase_outputs(self) -> dict[str, str]:
         return dict(line.split("=", 1) for line in self.output_file.read_text().splitlines())
@@ -455,7 +458,7 @@ esac
         self.assertEqual(outputs["lock_path"], plan["lock_path"])
         self.assertEqual(outputs["lock_sha256"], plan["lock_sha256"])
         self.env["PATH"] = f"{self.root / 'dest/go/bin'}:{self.env['PATH']}"
-        self.env["EXPECTED_GO_VERSION"] = outputs["go"]
+        self.env["EXPECTED_GO_VERSION"] = json.loads(outputs["versions"])["go"]
         self.run_script("verify-locked-go.sh", "version")
 
     def test_action_prepare_owns_single_go_version_sanity(self) -> None:
@@ -631,27 +634,131 @@ function Invoke-WebRequest {
                 self.assertEqual(step["env"]["LOCK_PATH"], "${{ steps.prepare.outputs.lock_path }}")
                 self.assertEqual(step["env"]["EXPECTED_GO_VERSION"], "${{ steps.prepare.outputs.go_version }}")
 
+    def test_release_workflow_has_no_remote_self_actions_or_duplicate_bootstrap(self) -> None:
+        text = (ROOT / ".github/workflows/release.yaml").read_text()
+        self.assertNotIn("ConductorOne/github-workflows/.github/actions/", text)
+        self.assertNotIn("verify-locked-go.sh version", text)
+        self.assertNotIn("gon-source.sh", text)
+        for legacy in ("_workflows/scripts/install-tool", "_workflows/scripts/gon-source", "_workflows/scripts/verify-locked-go"):
+            self.assertNotIn(legacy, text)
+
     def test_workflow_security_wiring(self) -> None:
         workflow = json.loads(subprocess.check_output(["yq", ".", str(ROOT / ".github/workflows/release.yaml")], text=True))
         jobs = workflow["jobs"]
         self.assertEqual(jobs["determine-workflows-ref"]["outputs"]["ref"], "${{ job.workflow_sha }}")
+        self.assertEqual(jobs["validate-inputs"]["permissions"], {"contents": "read"})
+        expected_tools = {
+            "validate-inputs": "",
+            "determine-workflows-ref": "",
+            "release-preflight": "go",
+            "goreleaser-binaries": "go,gon,syft,goreleaser",
+            "goreleaser-windows": "go,syft,goreleaser-pro",
+            "goreleaser-docker": "go,goreleaser",
+            "publish-release-manifest": "go",
+            "record-registry-api": "go",
+            "verify-release": "",
+            "notify-release-failure": "",
+        }
+        self.assertEqual(set(jobs), set(expected_tools))
+        checkout_count = guard_count = tool_count = gate_count = 0
         for job_name, job in jobs.items():
-            steps = job["steps"]
-            installs = [i for i, step in enumerate(steps) if any(token in step.get("run", "") for token in ("install-tool.", "gon-source.sh build", "setup-release-buildx.sh")) or "cosign-installer@" in step.get("uses", "") or "setup-qemu-action@" in step.get("uses", "")]
-            credentials = [i for i, step in enumerate(steps) if "secrets." in str(step) or "configure-aws-credentials@" in step.get("uses", "")]
-            if installs and credentials:
-                self.assertLess(max(installs), min(credentials), job_name)
-            for step in steps:
-                if "install-tool." in step.get("run", ""):
-                    self.assertNotIn("\n", step["run"], job_name)
+            with self.subTest(job=job_name):
+                steps = job["steps"]
+                guards = [index for index, step in enumerate(steps) if step.get("uses") == GUARD_ACTION]
+                tools = [index for index, step in enumerate(steps) if step.get("uses") == TOOLS_ACTION]
+                workflow_checkouts = [index for index, step in enumerate(steps)
+                                      if step.get("with", {}).get("path") == "_workflows"]
+                if job_name == "notify-release-failure":
+                    self.assertEqual(workflow_checkouts, [])
+                    self.assertEqual(guards, [], "guard failures must not suppress failure reporting")
+                    self.assertEqual(tools, [])
+                    self.assertEqual(job["if"], "failure()")
+                    continue
+                self.assertEqual(workflow_checkouts, [0])
+                bootstrap = steps[0]
+                self.assertRegex(bootstrap["uses"], r"^actions/checkout@[0-9a-f]{40}$")
+                self.assertEqual(bootstrap["with"], {
+                    "path": "_workflows",
+                    "repository": "ConductorOne/github-workflows",
+                    "ref": "${{ job.workflow_sha }}",
+                    "persist-credentials": False,
+                })
+                self.assertNotIn("if", bootstrap)
+                self.assertNotIn("continue-on-error", bootstrap)
+                self.assertEqual(job["permissions"]["contents"], "read")
+                checkout_count += 1
+                self.assertEqual(guards, [1])
+                self.assertEqual(steps[1].get("with", {}), {}, "use enforce/true/true/fail defaults")
+                self.assertNotIn("if", steps[1])
+                self.assertNotIn("continue-on-error", steps[1])
+                guard_count += 1
+                prefix_length = 2
+                if expected_tools[job_name]:
+                    self.assertEqual(tools, [2])
+                    self.assertEqual(steps[2]["id"], "tools")
+                    self.assertEqual(steps[2]["with"], {"tools": expected_tools[job_name]})
+                    self.assertNotIn("continue-on-error", steps[2])
                     self.assertEqual(job["env"]["GOTOOLCHAIN"], "local")
-                if step.get("with", {}).get("path") in ("_caller", "_connector"):
-                    self.assertEqual(step["with"]["ref"], "${{ github.sha }}")
-                if "verify-release-checkout.sh" in step.get("run", ""):
-                    self.assertEqual(step["env"]["EXPECTED_COMMIT"], "${{ github.sha }}")
-                if "cosign-installer@" in step.get("uses", ""):
-                    self.assertEqual(step["with"]["cosign-release"], "v2.5.2")
-                    self.assertRegex(step["uses"], r"@[0-9a-f]{40}$")
+                    if job_name == "release-preflight":
+                        self.assertEqual(steps[2]["if"], "inputs.go_source_hygiene == true || inputs.go_vulnerability_scan == true")
+                    else:
+                        self.assertNotIn("if", steps[2])
+                    prefix_length = 3
+                    tool_count += 1
+                else:
+                    self.assertEqual(tools, [])
+                caller_checkouts = [index for index, step in enumerate(steps)
+                                    if step.get("with", {}).get("path") in ("_caller", "_connector")]
+                checkouts = workflow_checkouts + caller_checkouts
+                verifications = [index for index, step in enumerate(steps)
+                                 if "verify-release-checkout.sh" in step.get("run", "")]
+                credentials = [index for index, step in enumerate(steps)
+                               if "secrets." in str(step) or "github.token" in str(step) or "core.getIDToken" in str(step)
+                               or "configure-aws-credentials@" in step.get("uses", "")]
+                self.assertTrue(all(index >= prefix_length for index in caller_checkouts))
+                if verifications:
+                    self.assertLess(max(checkouts), min(verifications))
+                if credentials:
+                    self.assertLess(prefix_length - 1, min(credentials))
+                    if verifications:
+                        self.assertLess(max(verifications), min(credentials))
+                installs = [index for index, step in enumerate(steps)
+                            if "cosign-installer@" in step.get("uses", "")
+                            or "setup-qemu-action@" in step.get("uses", "")
+                            or "setup-release-buildx.sh" in step.get("run", "")]
+                if installs and credentials:
+                    self.assertLess(max(installs), min(credentials))
+                module_gates = [index for index, step in enumerate(steps)
+                                if "/locked-tools/verify-locked-go.sh module " in step.get("run", "")]
+                if expected_tools[job_name]:
+                    self.assertEqual(len(module_gates), 1)
+                    gate = steps[module_gates[0]]
+                    self.assertEqual(gate["env"], GO_GATE_ENV)
+                    self.assertLess(max(checkouts), module_gates[0])
+                    if verifications:
+                        self.assertLess(max(verifications), module_gates[0])
+                    if credentials:
+                        self.assertLess(module_gates[0], min(credentials))
+                    modules = "_workflows/go.mod" if job_name in ("publish-release-manifest", "record-registry-api") else "_caller/go.mod _workflows/go.mod"
+                    self.assertEqual(gate["run"],
+                                     "bash _workflows/.github/actions/locked-tools/verify-locked-go.sh module " + modules)
+                    if job_name == "release-preflight":
+                        self.assertEqual(gate["if"], steps[2]["if"])
+                    gate_count += 1
+                for step in steps:
+                    self.assertNotEqual(step.get("with", {}).get("repository"), "ConductorOne/gon")
+                    if step.get("with", {}).get("path") in ("_caller", "_connector"):
+                        self.assertEqual(step["with"]["ref"], "${{ github.sha }}")
+                    if "verify-release-checkout.sh" in step.get("run", ""):
+                        self.assertEqual(step["env"]["EXPECTED_COMMIT"], "${{ github.sha }}")
+                    if "cosign-installer@" in step.get("uses", ""):
+                        self.assertEqual(step["with"]["cosign-release"], "v2.5.2")
+                        self.assertRegex(step["uses"], r"@[0-9a-f]{40}$")
+                ids = [step["id"] for step in steps if "id" in step]
+                self.assertEqual(len(ids), len(set(ids)))
+        self.assertEqual((checkout_count, guard_count, tool_count, gate_count), (9, 9, 6, 6))
+        for wrapper in ("install-tool.sh", "install-tool.ps1", "gon-source.sh", "verify-locked-go.sh"):
+            self.assertFalse((ROOT / "scripts" / wrapper).exists())
 
 
 if __name__ == "__main__":

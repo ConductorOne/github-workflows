@@ -8,6 +8,7 @@ on:
     paths:
       - .github/workflows/ci.yaml
       - .github/workflows/verify.yaml
+      - .github/workflows/release.yaml
       - .github/actions/**
       - .gitattributes
       - actions/**
@@ -23,6 +24,7 @@ on:
     paths:
       - .github/workflows/ci.yaml
       - .github/workflows/verify.yaml
+      - .github/workflows/release.yaml
       - .github/actions/**
       - .gitattributes
       - actions/**
