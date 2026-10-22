@@ -276,6 +276,65 @@ Tool-using jobs set `GOTOOLCHAIN=local` at job scope. The binaries job also sets
 `GOSUMDB=sum.golang.org` at job scope. Cosign and bundled-buildx/QEMU setup run
 after trust/tool bootstrap and before their signing or AWS credentials.
 
+### Privileged Action Allowlist
+
+`tools/privileged-actions.txt` is the reviewed third-party action repository
+allowlist. First-party `actions/*` actions are allowed separately, including
+the App-token mint action; every remote action must use a full 40-character
+commit SHA. A version comment is informational, not the execution reference.
+`scripts/check-release-actions.py`, exercised by `make test-scripts` in repository
+CI, checks every job with `id-token: write` or a secret reference, plus the
+explicit credential-bearing job inventory. It also checks the implementations
+of the two permitted local composite actions so they cannot hide a new remote
+action. Unknown local paths and container actions fail closed.
+
+The local guard and locked-tools actions come from the immutable `_workflows`
+checkout at `job.workflow_sha`; they are not third-party downloads. The remaining
+action inventory is below (counts include repeated conditional steps):
+
+| Job | Action | Class | Count | Why it remains |
+| --- | --- | --- | --- | --- |
+| validate-inputs | actions/checkout | First-party | 1 | Fetch the pinned workflow implementation. |
+| validate-inputs | ca-trust-guard (local) | Local | 1 | Enforce runner trust before validation. |
+| goreleaser-binaries | actions/checkout | First-party | 2 | Fetch pinned workflow and exact caller source. |
+| goreleaser-binaries | ca-trust-guard / locked-tools (local) | Local | 1 each | Enforce trust and install checksum-verified tools. |
+| goreleaser-binaries | sigstore/cosign-installer | Third-party | 1 | Bootstrap the pinned signing tool. |
+| goreleaser-binaries | apple-actions/import-codesign-certs | Third-party | 1 | Import the Apple signing identity into the temporary keychain. |
+| goreleaser-binaries | aws-actions/configure-aws-credentials | Third-party | 1 | Exchange job OIDC for the artifact publishing role. |
+| goreleaser-windows | actions/checkout | First-party | 2 | Fetch pinned workflow and exact caller source. |
+| goreleaser-windows | ca-trust-guard / locked-tools (local) | Local | 1 each | Enforce trust and install checksum-verified tools. |
+| goreleaser-windows | sigstore/cosign-installer | Third-party | 1 | Bootstrap the pinned signing tool. |
+| goreleaser-windows | aws-actions/configure-aws-credentials | Third-party | 1 | Exchange job OIDC for the artifact publishing role. |
+| goreleaser-docker | actions/checkout | First-party | 2 | Fetch pinned workflow and exact caller source. |
+| goreleaser-docker | ca-trust-guard / locked-tools (local) | Local | 1 each | Enforce trust and install checksum-verified tools. |
+| goreleaser-docker | sigstore/cosign-installer | Third-party | 1 | Bootstrap the pinned signing tool. |
+| goreleaser-docker | docker/setup-qemu-action | Third-party | 1 | Enable arm64 builds with a digest-pinned binfmt image. |
+| goreleaser-docker | aws-actions/configure-aws-credentials | Third-party | 2 | Assume the separate public and Lambda publishing roles. |
+| goreleaser-docker | aws-actions/amazon-ecr-login | Third-party | 2 | Authenticate to public and private ECR. |
+| publish-release-manifest | actions/checkout | First-party | 1 | Fetch the pinned workflow implementation. |
+| publish-release-manifest | ca-trust-guard / locked-tools (local) | Local | 1 each | Enforce trust and install checksum-verified tools. |
+| publish-release-manifest | sigstore/cosign-installer | Third-party | 1 | Bootstrap manifest signing. |
+| publish-release-manifest | aws-actions/configure-aws-credentials | Third-party | 1 | Exchange job OIDC for manifest publication. |
+| record-registry-api | actions/checkout | First-party | 2 | Fetch pinned workflow and exact caller metadata. |
+| record-registry-api | ca-trust-guard / locked-tools (local) | Local | 1 each | Enforce trust and install checksum-verified tools. |
+| record-registry-api | actions/github-script | First-party | 1 | Request the registry-audience OIDC token and mask it. |
+| verify-release | actions/checkout | First-party | 1 | Fetch the pinned verification implementation. |
+| verify-release | ca-trust-guard (local) | Local | 1 | Enforce runner trust before verification. |
+| verify-release | sigstore/cosign-installer | Third-party | 1 | Bootstrap signature verification. |
+| verify-release | aws-actions/configure-aws-credentials | Third-party | 1 | Assume the pull-only Public ECR role. |
+| verify-release | aws-actions/amazon-ecr-login | Third-party | 1 | Avoid anonymous pull throttling during verification. |
+| notify-release-failure | None | — | 0 | Post the existing Datadog event and a failure-count metric via curl. |
+
+The locked-tools composite additionally uses one SHA-pinned first-party
+`actions/checkout` to fetch the locked gon source. `docker/setup-buildx-action`
+is allowed but not currently used: Buildx comes from locked-tools. The mint
+action is allowed but this workflow does not currently need an App private key.
+The allowlist reduces download exposure; it does not eliminate the runner's
+pre-step action downloads. Datadog reporting preserves the existing event title,
+host, tags and details; API errors are best-effort and cannot fail the reporting
+job. Offline fixtures exercise both successful and rejected API requests.
+Live release and forced-failure rehearsals remain separate rollout checks.
+
 ### Locked Release Tools
 
 `.github/actions/locked-tools/tool-locks.txt` identifies tool versions, artifact

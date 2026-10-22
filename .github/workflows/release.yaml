@@ -422,7 +422,7 @@ jobs:
           tools: go,gon,syft,goreleaser
 
       - name: Checkout caller repo
-        uses: actions/checkout@v5
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
         with:
           path: _caller
           repository: ${{ github.event.repository.full_name }}
@@ -496,13 +496,13 @@ jobs:
           envsubst < templates/.slsa-provenance-predicate-template.json.tmpl | tee "${GENERATED_DIR}/predicate.json"
 
       - name: Import Keychain Certs
-        uses: apple-actions/import-codesign-certs@v1
+        uses: apple-actions/import-codesign-certs@253ddeeac23f2bdad1646faac5c8c2832e800071 # v1
         with:
           p12-file-base64: ${{ secrets.APPLE_SIGNING_KEY_P12 }}
           p12-password: ${{ secrets.APPLE_SIGNING_KEY_P12_PASSWORD }}
 
       - name: Configure AWS credentials via OIDC
-        uses: aws-actions/configure-aws-credentials@v5
+        uses: aws-actions/configure-aws-credentials@61815dcd50bd041e203e49132bacad1fd04d2708 # v5
         with:
           role-to-assume: arn:aws:iam::025044153841:role/${{ steps.role-names.outputs.gha_artifacts_role_name }}
           aws-region: us-west-2
@@ -745,7 +745,7 @@ jobs:
         run: git config --system core.longpaths true
 
       - name: Checkout caller repo
-        uses: actions/checkout@v5
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
         with:
           path: _caller
           repository: ${{ github.event.repository.full_name }}
@@ -942,7 +942,7 @@ jobs:
           ls "${CALLER_DIST}"/*.sbom.sigstore.json
 
       - name: Configure AWS credentials via OIDC
-        uses: aws-actions/configure-aws-credentials@v5
+        uses: aws-actions/configure-aws-credentials@61815dcd50bd041e203e49132bacad1fd04d2708 # v5
         with:
           role-to-assume: arn:aws:iam::025044153841:role/${{ steps.role-names.outputs.gha_artifacts_role_name }}
           aws-region: us-west-2
@@ -1024,7 +1024,7 @@ jobs:
           tools: go,goreleaser
 
       - name: Checkout caller repo
-        uses: actions/checkout@v5
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
         with:
           path: _caller
           repository: ${{ github.event.repository.full_name }}
@@ -1146,7 +1146,7 @@ jobs:
 
       - name: Set up QEMU
         if: inputs.docker == true || inputs.lambda == true
-        uses: docker/setup-qemu-action@v3
+        uses: docker/setup-qemu-action@c7c53464625b32c7a7e944ae62b3e17d2b600130 # v3
         with:
           platforms: linux/arm64
           image: tonistiigi/binfmt@sha256:400a4873b838d1b89194d982c45e5fb3cda4593fbfd7e08a02e76b03b21166f0
@@ -1157,14 +1157,14 @@ jobs:
 
       - name: Configure Public ECR AWS credentials via OIDC
         if: inputs.docker == true
-        uses: aws-actions/configure-aws-credentials@v5
+        uses: aws-actions/configure-aws-credentials@61815dcd50bd041e203e49132bacad1fd04d2708 # v5
         with:
           role-to-assume: arn:aws:iam::025044153841:role/${{ steps.role-names.outputs.gha_artifacts_role_name }}
           aws-region: us-east-1
 
       - name: Login to Public ECR
         if: inputs.docker == true
-        uses: aws-actions/amazon-ecr-login@v2
+        uses: aws-actions/amazon-ecr-login@03f1aad4c6c7ffd436567f42f9384779290529bd # v2
         with:
           registry-type: public
 
@@ -1196,14 +1196,14 @@ jobs:
 
       - name: Configure Lambda ECR AWS credentials via OIDC
         if: inputs.lambda == true
-        uses: aws-actions/configure-aws-credentials@v5
+        uses: aws-actions/configure-aws-credentials@61815dcd50bd041e203e49132bacad1fd04d2708 # v5
         with:
           role-to-assume: "arn:aws:iam::168442440833:role/${{ steps.role-names.outputs.ecr_push_role_name }}"
           aws-region: us-west-2
 
       - name: Login to Lambda ECR
         if: inputs.lambda == true
-        uses: aws-actions/amazon-ecr-login@v2
+        uses: aws-actions/amazon-ecr-login@03f1aad4c6c7ffd436567f42f9384779290529bd # v2
 
       - name: Run GoReleaser for Lambda
         if: inputs.lambda == true
@@ -1361,7 +1361,7 @@ jobs:
           cosign-release: v2.5.2
 
       - name: Configure AWS credentials via OIDC
-        uses: aws-actions/configure-aws-credentials@v5
+        uses: aws-actions/configure-aws-credentials@61815dcd50bd041e203e49132bacad1fd04d2708 # v5
         with:
           role-to-assume: arn:aws:iam::025044153841:role/${{ steps.role-names.outputs.gha_artifacts_role_name }}
           aws-region: us-west-2
@@ -1582,7 +1582,7 @@ jobs:
           tools: go
 
       - name: Checkout connector repo
-        uses: actions/checkout@v5
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
         with:
           path: _connector
           repository: ${{ github.event.repository.full_name }}
@@ -1618,7 +1618,7 @@ jobs:
 
       - name: Get GitHub OIDC token for registry API
         id: registry-oidc
-        uses: actions/github-script@v7
+        uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b # v7
         with:
           script: |
             const token = await core.getIDToken('connector-registry')
@@ -1752,14 +1752,14 @@ jobs:
       # anonymous rate limit, which shared runner addresses exhaust.
       - name: Configure Public ECR AWS credentials via OIDC
         if: inputs.docker == true
-        uses: aws-actions/configure-aws-credentials@v5
+        uses: aws-actions/configure-aws-credentials@61815dcd50bd041e203e49132bacad1fd04d2708 # v5
         with:
           role-to-assume: arn:aws:iam::025044153841:role/GHA-PublicECRPull
           aws-region: us-east-1
 
       - name: Login to Public ECR
         if: inputs.docker == true
-        uses: aws-actions/amazon-ecr-login@v2
+        uses: aws-actions/amazon-ecr-login@03f1aad4c6c7ffd436567f42f9384779290529bd # v2
         with:
           registry-type: public
 
@@ -1849,27 +1849,35 @@ jobs:
           } >> "$GITHUB_OUTPUT"
 
       - name: Send Datadog event on failure
-        uses: masci/datadog@93a16378298f4e1980f13f6b412c0b8e66b96185 # v1
-        with:
-          api-key: ${{ secrets.DATADOG_API_KEY }}
-          api-url: https://us3.datadoghq.com/
-          events: |
-            - title: "Baton Connector Release Failed"
-              text: |
-                %%%
-                # `${{ github.event.repository.name }}`:`${{ inputs.tag }}` Release Failed
-                ## Error
-                [View Workflow Run](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})
-                ```${{ steps.collect-ann.outputs.annotations }}```
-                ## Details
-                * **Repository:** `${{ github.event.repository.full_name }}`
-                * **Release Tag:** `${{ inputs.tag }}`
-                * **Workflow:** `baton-connector-release`
-                * **Action Run ID:** `${{ github.run_id }}`
-                %%%
-              alert_type: "error"
-              host: ${{ github.repository_owner }}
-              tags:
-                - "github_repository:${{ github.event.repository.full_name }}"
-                - "github_release_tag:${{ inputs.tag }}"
-                - "github_workflow:baton-connector-release"
+        continue-on-error: true # reporting must not obscure the release failure
+        env:
+          DATADOG_API_KEY: ${{ secrets.DATADOG_API_KEY }}
+          REPOSITORY: ${{ github.repository }}
+          REPOSITORY_NAME: ${{ github.event.repository.name }}
+          REPOSITORY_OWNER: ${{ github.repository_owner }}
+          RUN_ID: ${{ github.run_id }}
+          RELEASE_TAG: ${{ inputs.tag }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          ANNOTATIONS: ${{ steps.collect-ann.outputs.annotations }}
+        run: |
+          set -euo pipefail
+          jq -n --arg repo "$REPOSITORY" --arg tag "$RELEASE_TAG" \
+            --arg url "$RUN_URL" --arg annotations "$ANNOTATIONS" \
+            --arg name "$REPOSITORY_NAME" --arg owner "$REPOSITORY_OWNER" --arg run "$RUN_ID" \
+            '{title: "Baton Connector Release Failed",
+              text: ("%%%\n# `" + $name + "`:`" + $tag + "` Release Failed\n## Error\n[View Workflow Run](" + $url + ")\n```" + $annotations + "```\n## Details\n* **Repository:** `" + $repo + "`\n* **Release Tag:** `" + $tag + "`\n* **Workflow:** `baton-connector-release`\n* **Action Run ID:** `" + $run + "`\n%%%"),
+              alert_type: "error", host: $owner,
+              tags: [("github_repository:" + $repo), ("github_release_tag:" + $tag),
+                "github_workflow:baton-connector-release"]}' > "$RUNNER_TEMP/release-failure-event.json"
+          curl --fail-with-body --silent --show-error \
+            -H "DD-API-KEY: $DATADOG_API_KEY" -H "Content-Type: application/json" \
+            --data-binary "@$RUNNER_TEMP/release-failure-event.json" \
+            https://api.us3.datadoghq.com/api/v1/events || true
+          jq -n --arg repo "$REPOSITORY" --argjson now "$(date +%s)" \
+            '{series: [{metric: "baton.connector.release.failure", type: "count",
+              points: [[$now, 1]], tags: [("github_repository:" + $repo)]}]}' \
+            > "$RUNNER_TEMP/release-failure-metric.json"
+          curl --fail-with-body --silent --show-error \
+            -H "DD-API-KEY: $DATADOG_API_KEY" -H "Content-Type: application/json" \
+            --data-binary "@$RUNNER_TEMP/release-failure-metric.json" \
+            https://api.us3.datadoghq.com/api/v1/series || true
