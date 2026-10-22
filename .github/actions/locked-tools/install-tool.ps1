@@ -40,7 +40,7 @@ $workdir = Join-Path ([System.IO.Path]::GetTempPath()) ([System.Guid]::NewGuid()
 New-Item -ItemType Directory -Path $workdir | Out-Null
 try {
     $archive = Join-Path $workdir 'artifact.zip'
-    Invoke-WebRequest -Uri $url -OutFile $archive -MaximumRetryCount 3
+    Invoke-WebRequest -Uri $url -OutFile $archive -MaximumRetryCount 5 -RetryIntervalSec 2
     $actual = (Get-FileHash -Algorithm SHA256 -Path $archive).Hash.ToLowerInvariant()
     if ($actual -cne $expected) {
         Write-Host "::error title=locked-tools::$Tool sha256 mismatch"

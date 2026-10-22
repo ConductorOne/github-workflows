@@ -133,6 +133,7 @@ class IntegrityTests(unittest.TestCase):
                     installed = dest / self.archive_member(tool, platform)
                     self.assertTrue(installed.is_file())
                     self.assertIn(str(installed.parent), self.path_file.read_text().splitlines())
+                    self.assertIn("--retry 5 --retry-delay 2 --retry-all-errors", self.calls.read_text())
                     if tool == "go":
                         self.assertIn(f"GOROOT={dest}/go", self.env_file.read_text())
 
@@ -532,7 +533,8 @@ esac
         harness = """
 $ErrorActionPreference = 'Stop'
 function Invoke-WebRequest {
-    param([string]$Uri, [string]$OutFile, [int]$MaximumRetryCount)
+    param([string]$Uri, [string]$OutFile, [int]$MaximumRetryCount, [int]$RetryIntervalSec)
+    if ($MaximumRetryCount -ne 5 -or $RetryIntervalSec -ne 2) { throw 'retry policy mismatch' }
     Add-Content -LiteralPath $env:CALLS -Value "download $Uri"
     Copy-Item -LiteralPath $env:ARCHIVE -Destination $OutFile
 }
@@ -641,6 +643,10 @@ function Invoke-WebRequest {
         self.assertNotIn("gon-source.sh", text)
         for legacy in ("_workflows/scripts/install-tool", "_workflows/scripts/gon-source", "_workflows/scripts/verify-locked-go"):
             self.assertNotIn(legacy, text)
+        workflow = json.loads(subprocess.check_output(["yq", ".", str(ROOT / ".github/workflows/release.yaml")], text=True))
+        scopes = [workflow.get("env", {})] + [job.get("env", {}) for job in workflow["jobs"].values()]
+        for env in scopes:
+            self.assertFalse(set(env or {}) & {"GOFLAGS", "GOPROXY", "GOSUMDB"})
 
     def test_workflow_security_wiring(self) -> None:
         workflow = json.loads(subprocess.check_output(["yq", ".", str(ROOT / ".github/workflows/release.yaml")], text=True))
