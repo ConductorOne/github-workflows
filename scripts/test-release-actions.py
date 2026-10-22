@@ -63,6 +63,26 @@ class ReleaseActionsTest(unittest.TestCase):
             self.assertTrue(policy.check_local_bootstrap(changed, "fixture"))
         self.assertTrue(policy.check_local_bootstrap(list(reversed(steps)), "fixture"))
 
+    def test_empty_or_non_mapping_inputs_fail_cleanly(self):
+        steps = policy.load_yaml(ROOT / ".github/workflows/release.yaml")["jobs"]["validate-inputs"]["steps"][:2]
+        for inputs in (None, [], ["path", "_workflows"], "", "not-a-mapping", False, 0):
+            with self.subTest(inputs=inputs):
+                changed = copy.deepcopy(steps)
+                changed[0]["with"] = inputs
+                self.assertTrue(policy.check_local_bootstrap(changed, "fixture"))
+
+    def test_later_checkout_cannot_overwrite_verified_workflows(self):
+        steps = policy.load_yaml(ROOT / ".github/workflows/release.yaml")["jobs"]["validate-inputs"]["steps"][:2]
+        for path in ("_workflows", "./_workflows", "_workflows/", "_workflows/."):
+            with self.subTest(path=path):
+                overwrite = copy.deepcopy(steps[0])
+                overwrite["with"].update(path=path, repository="unreviewed/workflows", ref="main")
+                self.assertTrue(policy.check_local_bootstrap([steps[0], overwrite, steps[1]], "fixture"))
+        other_checkout = copy.deepcopy(overwrite)
+        other_checkout["with"]["path"] = "_caller"
+        self.assertEqual(policy.check_local_bootstrap([steps[0], other_checkout, steps[1]], "fixture"), [])
+        self.assertEqual(policy.check_local_bootstrap([steps[0], steps[0], steps[1]], "fixture"), [])
+
     def test_first_party_actions_require_sha(self):
         for name in ("checkout", "github-script", "upload-artifact", "download-artifact",
                      "setup-go", "cache", "cache/restore", "cache/save", "create-github-app-token"):
@@ -74,8 +94,9 @@ class ReleaseActionsTest(unittest.TestCase):
     def test_failure_reporting_preserves_fields_and_tolerates_api_failure(self):
         workflow = policy.load_yaml(ROOT / ".github/workflows/release.yaml")
         step = workflow["jobs"]["notify-release-failure"]["steps"][-1]
+        self.assertEqual(workflow["jobs"]["notify-release-failure"]["timeout-minutes"], 5)
         self.assertTrue(step["continue-on-error"])
-        for status in (0, 22):
+        for status in (0, 22, 28):
             with self.subTest(status=status), tempfile.TemporaryDirectory() as directory:
                 directory = Path(directory)
                 fake = directory / "curl"
@@ -96,7 +117,10 @@ class ReleaseActionsTest(unittest.TestCase):
                 self.assertEqual(event["tags"], ["github_repository:ConductorOne/example",
                                                 "github_release_tag:v1.2.3", "github_workflow:baton-connector-release"])
                 self.assertIn(environment["ANNOTATIONS"], event["text"])
-                self.assertEqual(len((directory / "calls").read_text().splitlines()), 2)
+                calls = (directory / "calls").read_text().splitlines()
+                self.assertEqual(len(calls), 2)
+                for call in calls:
+                    self.assertIn("--connect-timeout 10 --max-time 30", call)
                 metric = json.loads((directory / "release-failure-metric.json").read_text())["series"][0]
                 self.assertEqual(metric["metric"], "baton.connector.release.failure")
                 self.assertEqual(metric["points"][0][1], 1)
