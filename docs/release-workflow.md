@@ -238,7 +238,7 @@ Every GoReleaser invocation receives `GORELEASER_CURRENT_TAG` from the workflow 
 Nine release jobs first check out `_workflows` at `${{ job.workflow_sha }}`
 with a SHA-pinned checkout action and `persist-credentials: false`. This fetch
 necessarily precedes the guard and, like the runner's own action downloads,
-authenticates to github.com with the job's read-scoped `GITHUB_TOKEN`
+authenticates to github.com with the job-scoped `GITHUB_TOKEN`
 (actions/checkout requires a token); the token is not persisted, the host is not
 behind the incident intermediates, and content integrity is bound to
 `job.workflow_sha`. This read-only infrastructure checkout provides the
@@ -291,6 +291,51 @@ explicit inputs; job-scoped credentials remain available according to permission
 | aws-actions/amazon-ecr-login | `03f1aad4c6c7ffd436567f42f9384779290529bd` | goreleaser-docker, verify-release | Job AWS credentials; registry authentication for publishing or pulling. |
 | docker/setup-qemu-action | `c7c53464625b32c7a7e944ae62b3e17d2b600130` | goreleaser-docker | Digest-pinned binfmt setup in an OIDC-enabled job; no explicit secret input. |
 | masci/datadog | `93a16378298f4e1980f13f6b412c0b8e66b96185` | notify-release-failure | `DATADOG_API_KEY` (Datadog org write key), only step `with: api-key`; non-signing, notification only. Best-effort (`continue-on-error: true`), five-minute job; event-only. Re-pin review: diff the action's tag-to-SHA source; re-pinning is manual (no Renovate tracking exists for workflow SHAs). |
+
+### Release and Tap Token Boundaries
+
+The binaries job creates the caller repository's GitHub release and uploads its
+archives using `${{ github.token }}`, with `contents: write` granted on that job
+only. The other GoReleaser jobs disable GitHub release publication and retain
+`contents: read`; they also receive the job token rather than an organization-wide
+release token. Existing release metadata reads already use the job token and
+remain read-only. Top-level workflow permissions stay empty. The job token is
+scoped to the caller repository and expires with the job; `contents: write` is
+not asset-only and can still modify repository contents and tags while valid.
+
+Before rollout, inventory every caller workflow's effective permissions.
+A reusable workflow cannot elevate a read-only caller grant, and the Go caller
+template has no explicit grant, so source alone does not establish fleet
+defaults. Releases GoReleaser creates with the job token do not trigger caller
+`on: release` workflows; inventory callers for such workflows as part of the
+rollout. Callers must permit `contents: write` and `id-token: write` for the
+release call, plus `actions: read` and `checks: read` for existing workflow-run
+and failure-annotation reads; do not broaden unrelated jobs. For example:
+
+```yaml
+jobs:
+  release:
+    permissions:
+      contents: write
+      id-token: write
+      actions: read
+      checks: read
+    uses: ConductorOne/github-workflows/.github/workflows/release.yaml@<reviewed-commit-sha>
+```
+
+The Homebrew tap token migration is deferred pending an organization administrator:
+provision a short-lived fine-grained `HOMEBREW_TAP_TOKEN` with `contents: write`
+on `conductorone/homebrew-baton` only, and arrange rotation before switching the
+tap step. Until that handoff, the `RELENG_GITHUB_TOKEN` secret declaration and its
+single use in `Publish Homebrew formula` are the only permitted residuals; the
+token is never passed to GoReleaser or metadata reads. This change does not create
+or rotate secrets or alter the tap repository's rules.
+
+Offline tests check job-local permission and token wiring, including negative
+controls for a read-only publishing job and a legacy-token GoReleaser regression.
+They do not prove caller defaults or live uploads. Before rollout, run a
+pre-release canary with Homebrew enabled, verify GitHub assets and the tap write,
+then confirm that a deliberately read-only publishing grant rejects the upload.
 
 ### Locked Release Tools
 
