@@ -1,0 +1,13 @@
+monitoredValues:
+  certIdentities:
+    - certSubject: '^https://github\.com/ConductorOne/github-workflows/\.github/workflows/release\.yaml@.+$'
+      issuers: ['^https://token\.actions\.githubusercontent\.com$']
+    - certSubject: '^https://github\.com/ConductorOne/github-axiomatic-workflows/\.github/workflows/release\.yaml@.+$'
+      issuers: ['^https://token\.actions\.githubusercontent\.com$']
+    - certSubject: '^https://github\.com/ConductorOne/multipass-workflows/\.github/workflows/release-artifacts\.yaml@.+$'
+      issuers: ['^https://token\.actions\.githubusercontent\.com$']
+outputIdentities: monitor-state/identities.jsonl
+outputIdentitiesFormat: json
+identityMetadataFile: monitor-state/identity-metadata.json
+caRootsFile: tools/rekor-fulcio-roots.pem
+caIntermediatesFile: tools/rekor-fulcio-intermediates.pem
