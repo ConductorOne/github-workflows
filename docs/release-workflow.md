@@ -146,12 +146,17 @@ Post-release validation (non-blocking):
 
 ### notify-release-failure
 
-Posts the existing Datadog failure event and adds a failure-count metric via
-best-effort curl requests. The metric is an addition to the previous event-only
-notification, intended to support future staleness monitoring. The axiomatic
-workflow remains event-only; aligning its notification behavior is a low-priority
-follow-up. Reporting is best-effort: a Datadog failure does not fail this job;
-the workflow is already failed.
+Posts the existing Datadog failure event through the named, SHA-pinned
+`masci/datadog` notification-only survivor. The latest-attempt annotation
+collector feeds `steps.collect-ann.outputs.annotations` into the action's
+`events` input, unchanged from main. Notification is event-only: the added
+failure-count metric has been removed. Reporting is best-effort: a Datadog
+failure does not fail this job; the workflow is already failed.
+The job timeout remains five minutes.
+
+| Action / immutable ref | Credential custody | Re-pin review |
+| --- | --- | --- |
+| `masci/datadog@93a16378298f4e1980f13f6b412c0b8e66b96185` | `DATADOG_API_KEY`, a Datadog org write key; only this step's `with: api-key` receives it. Non-signing, notification only; never job-level environment. | Reviewer diffs the action's tag-to-SHA source. Renovate PRs are not auto-merged (`renovate.json` keeps `automerge: false`). |
 
 ## Security Properties
 
@@ -288,7 +293,8 @@ after trust/tool bootstrap and before their signing or AWS credentials.
 ### Privileged Action Allowlist
 
 `tools/privileged-actions.txt` is the reviewed third-party action repository
-allowlist. First-party `actions/*` actions are allowed separately, including
+allowlist; exact-reference rows bind named exceptions to one reviewed commit.
+First-party `actions/*` actions are allowed separately, including
 the App-token mint action; every remote action must use a full 40-character
 commit SHA. A version comment is informational, not the execution reference.
 `scripts/check-release-actions.py`, exercised by `make test-scripts` in repository
@@ -334,17 +340,17 @@ action inventory is below (counts include repeated conditional steps):
 | verify-release | sigstore/cosign-installer | Third-party | 1 | Bootstrap signature verification. |
 | verify-release | aws-actions/configure-aws-credentials | Third-party | 1 | Assume the pull-only Public ECR role. |
 | verify-release | aws-actions/amazon-ecr-login | Third-party | 1 | Avoid anonymous pull throttling during verification. |
-| notify-release-failure | None | — | 0 | Post the existing Datadog event and a failure-count metric via curl. |
+| notify-release-failure | masci/datadog | Third-party | 1 | Named, pinned notification-only survivor; the immutable ref, key custody and re-pin review are recorded above. |
 
 The locked-tools composite additionally uses one SHA-pinned first-party
 `actions/checkout` to fetch the locked gon source. `docker/setup-buildx-action`
 is allowed but not currently used: Buildx comes from locked-tools. The mint
 action is allowed but this workflow does not currently need an App private key.
 The allowlist reduces download exposure; it does not eliminate the runner's
-pre-step action downloads. Datadog reporting preserves the existing event title,
-host, tags and details; API errors are best-effort and cannot fail the reporting
-job. Offline fixtures exercise both successful and rejected API requests.
-Live release and forced-failure rehearsals remain separate rollout checks.
+pre-step action downloads. Datadog reporting preserves main's action pin,
+event configuration and annotation plumbing. Offline fixtures check the exact
+allowlist row, step-only key custody and best-effort configuration, including
+negative controls. Live failure delivery remains a separate rollout check.
 
 ### Locked Release Tools
 

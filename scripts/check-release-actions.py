@@ -40,7 +40,7 @@ def check_steps(steps, location):
         first_party = (len(components) >= 2 and components[0] == "actions"
                        and all(re.fullmatch(r"[A-Za-z0-9_.-]+", part) and part not in {".", ".."}
                                for part in components[1:]))
-        if (not first_party and name not in ALLOWED_ACTIONS) or not separator:
+        if (not first_party and name not in ALLOWED_ACTIONS and action not in ALLOWED_ACTIONS) or not separator:
             errors.append(f"{location}: action not allowlisted: {action}")
         elif not re.fullmatch(r"[0-9a-f]{40}", ref):
             errors.append(f"{location}: action must use a full commit SHA: {action}")

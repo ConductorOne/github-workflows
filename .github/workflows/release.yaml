@@ -1840,7 +1840,7 @@ jobs:
 
           # Keep Datadog payload compact (~4k limit on text)
           out="$(printf "%s" "$out" | tail -c 3500)"
-          # Single line: keeps the annotation block compact for the jq-built event text.
+          # Single line: multi-line output breaks the events YAML block scalar.
           out="$(printf "%s" "$out" | tr '\n' ' ' | sed 's/  \+/ /g')"
 
           {
@@ -1851,34 +1851,27 @@ jobs:
 
       - name: Send Datadog event on failure
         continue-on-error: true # best-effort reporting: a Datadog failure does not fail this job (the workflow is already failed)
-        env:
-          DATADOG_API_KEY: ${{ secrets.DATADOG_API_KEY }}
-          REPOSITORY: ${{ github.repository }}
-          REPOSITORY_NAME: ${{ github.event.repository.name }}
-          REPOSITORY_OWNER: ${{ github.repository_owner }}
-          RUN_ID: ${{ github.run_id }}
-          RELEASE_TAG: ${{ inputs.tag }}
-          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
-          ANNOTATIONS: ${{ steps.collect-ann.outputs.annotations }}
-        run: |
-          set -euo pipefail
-          jq -n --arg repo "$REPOSITORY" --arg tag "$RELEASE_TAG" \
-            --arg url "$RUN_URL" --arg annotations "$ANNOTATIONS" \
-            --arg name "$REPOSITORY_NAME" --arg owner "$REPOSITORY_OWNER" --arg run "$RUN_ID" \
-            '{title: "Baton Connector Release Failed",
-              text: ("%%%\n# `" + $name + "`:`" + $tag + "` Release Failed\n## Error\n[View Workflow Run](" + $url + ")\n```" + $annotations + "```\n## Details\n* **Repository:** `" + $repo + "`\n* **Release Tag:** `" + $tag + "`\n* **Workflow:** `baton-connector-release`\n* **Action Run ID:** `" + $run + "`\n%%%"),
-              alert_type: "error", host: $owner,
-              tags: [("github_repository:" + $repo), ("github_release_tag:" + $tag),
-                "github_workflow:baton-connector-release"]}' > "$RUNNER_TEMP/release-failure-event.json"
-          curl --fail-with-body --silent --show-error --connect-timeout 10 --max-time 30 \
-            -H "DD-API-KEY: $DATADOG_API_KEY" -H "Content-Type: application/json" \
-            --data-binary "@$RUNNER_TEMP/release-failure-event.json" \
-            https://api.us3.datadoghq.com/api/v1/events || true
-          jq -n --arg repo "$REPOSITORY" --argjson now "$(date +%s)" \
-            '{series: [{metric: "baton.connector.release.failure", type: "count",
-              points: [[$now, 1]], tags: [("github_repository:" + $repo)]}]}' \
-            > "$RUNNER_TEMP/release-failure-metric.json"
-          curl --fail-with-body --silent --show-error --connect-timeout 10 --max-time 30 \
-            -H "DD-API-KEY: $DATADOG_API_KEY" -H "Content-Type: application/json" \
-            --data-binary "@$RUNNER_TEMP/release-failure-metric.json" \
-            https://api.us3.datadoghq.com/api/v1/series || true
+        uses: masci/datadog@93a16378298f4e1980f13f6b412c0b8e66b96185 # v1
+        with:
+          api-key: ${{ secrets.DATADOG_API_KEY }}
+          api-url: https://us3.datadoghq.com/
+          events: |
+            - title: "Baton Connector Release Failed"
+              text: |
+                %%%
+                # `${{ github.event.repository.name }}`:`${{ inputs.tag }}` Release Failed
+                ## Error
+                [View Workflow Run](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})
+                ```${{ steps.collect-ann.outputs.annotations }}```
+                ## Details
+                * **Repository:** `${{ github.event.repository.full_name }}`
+                * **Release Tag:** `${{ inputs.tag }}`
+                * **Workflow:** `baton-connector-release`
+                * **Action Run ID:** `${{ github.run_id }}`
+                %%%
+              alert_type: "error"
+              host: ${{ github.repository_owner }}
+              tags:
+                - "github_repository:${{ github.event.repository.full_name }}"
+                - "github_release_tag:${{ inputs.tag }}"
+                - "github_workflow:baton-connector-release"
