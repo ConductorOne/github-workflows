@@ -71,9 +71,13 @@ The first checkpoint establishes a baseline, **not** historical coverage.
 Subsequent runs restore the newest non-expired `rekor-monitor-state` artifact
 from a main-branch run of this workflow (30-day retention), preserving the
 checkpoint, pending entries, digest budget and reports. Artifact-less cancelled
-or early-failed runs cannot wedge restoration. Missing or expired state fails
-closed rather than silently restarting; an operator must recover the last valid
-artifact before resuming.
+or early-failed runs cannot wedge restoration. Each candidate is downloaded to
+an isolated temporary directory and accepted only when `checkpoint.txt` and
+`reconciliation.json` are both non-empty; incomplete candidates fall through to
+older artifacts. An always-run completeness check applies the same requirement
+before uploading state, so partial first attempts do not perpetuate incomplete
+artifacts. Missing or expired usable state fails closed rather than silently
+restarting; an operator must recover the last valid artifact before resuming.
 Artifacts and job logs remain the evidence; no state is committed by the bot.
 
 Signed checkpoints contain no timestamp. The adapter persists the first
