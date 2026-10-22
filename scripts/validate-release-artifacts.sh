@@ -122,8 +122,8 @@ fail_verify() {
   sed 's/^/     /' "$COSIGN_STDERR"
 }
 
-# Certificate identity pattern for cosign verification
-CERT_IDENTITY_REGEXP='https://github.com/ConductorOne/github-workflows/.github/workflows/release.yaml@.*'
+# Exact protected workflow ref; coordinate changes with registry identity policy.
+CERT_IDENTITY_REGEXP='^https://github\.com/ConductorOne/github-workflows/\.github/workflows/release\.yaml@refs/tags/v4$'
 CERT_OIDC_ISSUER='https://token.actions.githubusercontent.com'
 
 echo ""

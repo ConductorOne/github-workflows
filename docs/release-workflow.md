@@ -585,6 +585,27 @@ The `scripts/validate-release-artifacts.sh` script validates:
 - ECR Public image attestations (if present)
 - Manifest signature (if present)
 
+All cosign checks use the exact certificate identity
+`https://github.com/ConductorOne/github-workflows/.github/workflows/release.yaml@refs/tags/v4`
+and the GitHub Actions issuer. The anchored regexp escapes literal dots and
+rejects branch refs, other tags, commit refs, lookalike paths and suffixes.
+It is configured locally, never derived from the presented certificate and not
+widenable by an environment override. `v4` is the selected moving release tag,
+not a frozen commit SHA; tag protection and reviewed, logged promotions are
+prerequisites for the coordinated cutover.
+
+**Coordinated rollout hold:** do not merge or promote this validation-policy
+change independently of the fleet registry exact-ref enforcement flip. Complete
+the observed-ref inventory and protect the workflow tag first, then ship the
+producer pin and registry policy as one coordinated cutover. This change does
+not alter registry configuration, tag protections or any release ref.
+
+`python3 scripts/test-certificate-identities.py` runs the actual validation
+script with offline curl/cosign fixtures for every verification path, including
+the legacy detached-manifest fallback. Positive and negative identity fixtures
+and an intentionally widened-regexp control prove the expected policy wiring;
+they are not live certificate or registry-cutover evidence.
+
 ```bash
 ./scripts/validate-release-artifacts.sh ORG/REPO VERSION
 ```
