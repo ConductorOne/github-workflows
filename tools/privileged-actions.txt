@@ -1,0 +1,8 @@
+# Third-party action repositories allowed in credential-bearing release jobs.
+# First-party actions/* are allowed separately; all remote actions need full SHAs.
+sigstore/cosign-installer
+aws-actions/configure-aws-credentials
+aws-actions/amazon-ecr-login
+apple-actions/import-codesign-certs
+docker/setup-qemu-action
+docker/setup-buildx-action
