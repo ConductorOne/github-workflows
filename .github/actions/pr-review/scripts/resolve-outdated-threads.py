@@ -35,14 +35,14 @@ query($owner: String!, $repo: String!, $number: Int!, $after: String) {
           id
           isResolved
           isOutdated
-          resolvedBy { login }
+          resolvedBy { login __typename }
           path
           line
           comments(first: 20) {
             totalCount
             nodes {
               body
-              author { login }
+              author { login __typename }
             }
           }
         }
@@ -178,6 +178,17 @@ def severity_of(body: str) -> str:
     return "unknown"
 
 
+def _is_person(actor: Optional[dict]) -> bool:
+    """Whether a GraphQL Actor is a human, by node type rather than by login.
+
+    Every GitHub App is a `Bot`, so this excludes the other apps that write on
+    these PRs as well as this reviewer. Matching on the login instead would
+    need a list of every app anyone ever installs, and would miss them by
+    default — the direction that silently retires a finding.
+    """
+    return bool(actor) and actor.get("__typename") == "User"
+
+
 def collect_prior_findings(threads: list[dict]) -> list[dict]:
     """Build the prior-findings list the review prompt audits against.
 
@@ -198,6 +209,16 @@ def collect_prior_findings(threads: list[dict]) -> list[dict]:
     reply-free threads on every run, so most resolved threads are the action's
     doing. `resolvedBy` is what tells those apart from a person clicking
     Resolve, which people do far more often than they reply.
+
+    "A person" is GraphQL's `__typename == "User"`, not "a login outside
+    BOT_LOGINS". Plenty of other apps write on these PRs — Copilot,
+    CodeRabbit, linear-code, dependabot — and counting any of them as
+    engagement would retire the finding from inline reporting for good. The
+    login is no help: GraphQL reports the GitHub Actions bot as
+    `github-actions`, with no `[bot]` suffix, which is why BOT_LOGINS carries
+    both spellings. BOT_LOGINS stays narrow on purpose — _review_state uses it
+    as a trust allowlist for summary authorship, which is a different question
+    from "is this commenter a human".
     """
     findings = []
     for thread in threads:
@@ -232,17 +253,10 @@ def collect_prior_findings(threads: list[dict]) -> list[dict]:
             # not read.
             "human_engaged": (
                 thread["comments"]["totalCount"] > len(comments)
-                or any(
-                    (c.get("author") or {}).get("login", "") not in BOT_LOGINS
-                    for c in comments[1:]
-                )
-                # Resolved by a person rather than by should_resolve. The bot's
-                # own resolutions carry a BOT_LOGINS resolver, so they stay
-                # false here and keep the re-anchor path.
-                or (
-                    (thread.get("resolvedBy") or {}).get("login", "")
-                    not in BOT_LOGINS | {""}
-                )
+                or any(_is_person(c.get("author")) for c in comments[1:])
+                # Resolved by a person rather than by should_resolve, whose
+                # resolutions come back as a Bot and so keep the re-anchor path.
+                or _is_person(thread.get("resolvedBy"))
             ),
         })
     findings.sort(key=lambda f: (f["thread_resolved"], f["path"] or "", f["line"] or 0))

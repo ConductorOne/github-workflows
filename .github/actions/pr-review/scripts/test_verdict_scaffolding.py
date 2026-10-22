@@ -1758,14 +1758,21 @@ class PriorFindingsTest(unittest.TestCase):
         replies: list[tuple[str, str]] | None = None,
         resolved_by: str | None = None,
     ) -> dict:
-        nodes = [{"body": body, "author": {"login": author}}]
+        def actor(login: str) -> dict:
+            # GraphQL reports every GitHub App as a Bot, and the Actions bot's
+            # login comes back without the "[bot]" suffix.
+            kind = "Bot" if login in ("github-actions", "github-actions[bot]") \
+                or login.endswith("[bot]") else "User"
+            return {"login": login, "__typename": kind}
+
+        nodes = [{"body": body, "author": actor(author)}]
         for reply_author, reply_body in replies or []:
-            nodes.append({"body": reply_body, "author": {"login": reply_author}})
+            nodes.append({"body": reply_body, "author": actor(reply_author)})
         return {
             "id": "PRRT_x",
             "isResolved": resolved,
             "isOutdated": outdated,
-            "resolvedBy": {"login": resolved_by} if resolved_by else None,
+            "resolvedBy": actor(resolved_by) if resolved_by else None,
             "path": path,
             "line": line,
             "comments": {"totalCount": len(nodes), "nodes": nodes},
@@ -1865,6 +1872,38 @@ class PriorFindingsTest(unittest.TestCase):
         )
         thread["comments"]["totalCount"] = n if total is None else total
         return thread
+
+    def test_other_apps_are_not_engagement(self):
+        # Copilot, CodeRabbit, linear-code and friends write on these PRs.
+        # Counting any of them as a person would retire the finding from
+        # inline reporting permanently.
+        for app in ("copilot-pull-request-reviewer", "linear-code", "dependabot"):
+            with self.subTest(app=app):
+                replied = self._thread("🟠 Bug: x", replies=[(app + "[bot]", "noted")])
+                self.assertFalse(
+                    rot.collect_prior_findings([replied])[0]["human_engaged"]
+                )
+                resolved = self._thread(
+                    "🟠 Bug: x", resolved=True, outdated=True,
+                    resolved_by=app + "[bot]",
+                )
+                self.assertFalse(
+                    rot.collect_prior_findings([resolved])[0]["human_engaged"]
+                )
+
+    def test_engagement_is_decided_by_node_type_not_login(self):
+        # A human login is a User even if it looks bot-ish, and the Actions
+        # bot is a Bot even though its login carries no "[bot]" suffix.
+        human = self._thread("🟠 Bug: x")
+        human["comments"]["nodes"].append(
+            {"body": "mine", "author": {"login": "robot-dev", "__typename": "User"}}
+        )
+        human["comments"]["totalCount"] = 2
+        self.assertTrue(rot.collect_prior_findings([human])[0]["human_engaged"])
+
+        bot = self._thread("🟠 Bug: x", resolved=True, outdated=True)
+        bot["resolvedBy"] = {"login": "github-actions", "__typename": "Bot"}
+        self.assertFalse(rot.collect_prior_findings([bot])[0]["human_engaged"])
 
     def test_silent_human_resolution_counts_as_engagement(self):
         # Resolving without replying is the common case, and the earlier rule
