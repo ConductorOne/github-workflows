@@ -8,6 +8,14 @@ if [[ ! "$commit" =~ ^[0-9a-f]{40}$ ]]; then
   echo '::error title=GF13::Expected a single immutable gon source commit lock' >&2
   exit 1
 fi
+verify_go() {
+  if [ -z "${EXPECTED_GO_VERSION:-}${EXPECTED_LOCK_SHA256:-}${LOCK_PATH:-}" ]; then
+    # DEPRECATED legacy source-build callers; metadata still comes from prepare.
+    bash "$script_dir/verify-locked-go.sh" "$1" "$lock" "${@:2}"
+  else
+    bash "$script_dir/verify-locked-go.sh" "$@"
+  fi
+}
 case "${1:-}" in
   ref)
     printf 'ref=%s\n' "$commit" >> "${GITHUB_OUTPUT:?GITHUB_OUTPUT must be set}"
@@ -28,8 +36,8 @@ case "${1:-}" in
       echo '::error title=GF13::gon requires readonly modules, proxy.golang.org, and sum.golang.org' >&2
       exit 1
     fi
-    bash "$script_dir/verify-locked-go.sh" version
-    bash "$script_dir/verify-locked-go.sh" module "$source_dir/go.mod"
+    verify_go version
+    verify_go module "$source_dir/go.mod"
     mkdir -p "$dest"
     dest="$(cd "$dest" && pwd)"
     # Match the fork's release build directory (the module root has no Go files).

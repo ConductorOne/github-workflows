@@ -267,10 +267,13 @@ Both installers require the expected binary layout before publishing PATH; missi
 The workflow checks out its own source using GitHub's `job.workflow_sha`
 context, eliminating the previous Python package bootstrap.
 
-Go is installed once per job, with `GOTOOLCHAIN=local`. Separate assertions
-check `go version` against the lock and reject any caller/workflow `go.mod`
-directive newer than the locked toolchain. Module caching from the former
-setup action is intentionally dropped.
+Go is installed once per job, with `GOTOOLCHAIN=local`. Preferred gate callers
+take `EXPECTED_GO_VERSION`, `EXPECTED_LOCK_SHA256`, and `LOCK_PATH` from the
+locked-tools action's `go`, `lock_sha256`, and `lock_path` outputs. The gate
+hashes the referenced lock to check identity but never parses its versions;
+prepare owns the single-version sanity. Version equality and readonly/offline
+`GOTOOLCHAIN=local go list -m` checks reject incompatible module requirements.
+Module caching from the former setup action is intentionally dropped.
 
 The versions below were observed in [release run 38979848074](https://github.com/ConductorOne/baton-github-test/actions/runs/38979848074).
 Artifact hashes were fetched once from the upstream release checksums and
@@ -299,16 +302,24 @@ action directory is available, rather than in the caller-context input default.
 the caller on Linux, macOS, and Windows.
 
 Outputs include each installed tool's version (`gon` reports its source commit),
-a `versions` JSON object, and `lock_sha256` for provenance. The action verifies
-that the lock bytes have not changed between preparation, installation, and
-output publication. Each phase is a one-line script call in the composite.
-Standalone helpers honor `TOOL_LOCK_FILE` as the same reviewed-lock override.
+a `versions` JSON object, `lock_sha256`, and absolute `lock_path` for provenance.
+The path identifies the action-local canonical lock by default, or the actual
+reviewed override used. The action verifies that lock bytes have not changed
+between preparation, installation, and output publication; internal Go gates
+receive the same expected version/path/hash. Each phase is a one-line script
+call in the composite. See the [action contract](../.github/actions/locked-tools/README.md).
 
 During the consumer transition, `scripts/install-tool.sh`, `install-tool.ps1`,
 `gon-source.sh`, and `verify-locked-go.sh` are thin forwarding wrappers to the
 canonical action-local implementations. This keeps this branch's release
 workflow unchanged and executable without duplicating implementation or lock
 files. The old `tools/tool-locks.txt` is removed, not copied or mirrored.
+The Go gate's positional lockfile mode and the no-environment wrapper are
+**DEPRECATED** compatibility adapters: they delegate metadata lookup to action
+prepare, keeping current main's workflow calls intact. Remove them in a
+follow-up after all six release jobs and other consumers migrate to the
+environment contract; missing both environment and an explicit lock argument
+fails closed in the action-local gate.
 
 | Tool / version | Lock platform | SHA256 or source commit | Committed artifact/source |
 | --- | --- | --- | --- |
