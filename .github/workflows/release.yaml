@@ -90,6 +90,7 @@ on:
     secrets:
       RELENG_GITHUB_TOKEN:
         required: true
+        description: "Temporary Homebrew tap write token only; release assets use the caller job token."
       APPLE_SIGNING_KEY_P12:
         required: true
       APPLE_SIGNING_KEY_P12_PASSWORD:
@@ -396,7 +397,7 @@ jobs:
       GOPROXY: https://proxy.golang.org
       GOSUMDB: sum.golang.org
     permissions:
-      contents: read
+      contents: write # Create/upload the caller repository's GitHub release assets.
       id-token: write # <-- needed for cosign keyless (OIDC)
     outputs:
       s3_directory: ${{ steps.s3-directory.outputs.S3_DIRECTORY }}
@@ -511,13 +512,14 @@ jobs:
         working-directory: _caller
         run: goreleaser release --clean --config ../_workflows/_generated/.goreleaser.binaries.yaml
         env:
-          GITHUB_TOKEN: ${{ secrets.RELENG_GITHUB_TOKEN }}
+          GITHUB_TOKEN: ${{ github.token }}
           GORELEASER_CURRENT_TAG: ${{ inputs.tag }}
           AC_PASSWORD: ${{ secrets.AC_PASSWORD }}
           AC_PROVIDER: ${{ secrets.AC_PROVIDER }}
 
       # GoReleaser renders the formula (skip_upload) and this step writes it,
       # retrying when a concurrent release moved the tap's branch.
+      # The tap-scoped replacement token is deferred; this is the only legacy-token consumer.
       - name: Publish Homebrew formula
         if: inputs.brew == true
         working-directory: _workflows
@@ -847,7 +849,7 @@ jobs:
         working-directory: _caller
         run: goreleaser release --clean --skip=publish --config ../_workflows/_generated/.goreleaser.windows.yaml
         env:
-          GITHUB_TOKEN: ${{ secrets.RELENG_GITHUB_TOKEN }}
+          GITHUB_TOKEN: ${{ github.token }}
           GORELEASER_CURRENT_TAG: ${{ inputs.tag }}
           RELEASE_TAG: ${{ inputs.tag }}
           GORELEASER_KEY: ${{ secrets.GORELEASER_PRO_KEY }}
@@ -1173,7 +1175,7 @@ jobs:
         working-directory: _caller
         run: goreleaser release --clean --config ../_workflows/_generated/.goreleaser.docker.yaml
         env:
-          GITHUB_TOKEN: ${{ secrets.RELENG_GITHUB_TOKEN }}
+          GITHUB_TOKEN: ${{ github.token }}
           GORELEASER_CURRENT_TAG: ${{ inputs.tag }}
           COSIGN_EXPERIMENTAL: "1"
 
@@ -1210,7 +1212,7 @@ jobs:
         working-directory: _caller
         run: goreleaser release --clean --config ../_workflows/_generated/.goreleaser.lambda.yaml
         env:
-          GITHUB_TOKEN: ${{ secrets.RELENG_GITHUB_TOKEN }}
+          GITHUB_TOKEN: ${{ github.token }}
           GORELEASER_CURRENT_TAG: ${{ inputs.tag }}
 
       - name: Extract image digests from GoReleaser assets

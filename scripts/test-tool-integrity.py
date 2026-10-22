@@ -685,7 +685,8 @@ function Invoke-WebRequest {
                 })
                 self.assertNotIn("if", bootstrap)
                 self.assertNotIn("continue-on-error", bootstrap)
-                self.assertEqual(job["permissions"]["contents"], "read")
+                expected_contents = "write" if job_name == "goreleaser-binaries" else "read"
+                self.assertEqual(job["permissions"]["contents"], expected_contents)
                 checkout_count += 1
                 self.assertEqual(guards, [1])
                 self.assertEqual(steps[1].get("with", {}), {}, "use enforce/true/true/fail defaults")
