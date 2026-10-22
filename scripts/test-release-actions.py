@@ -73,10 +73,14 @@ class ReleaseActionsTest(unittest.TestCase):
 
     def test_later_checkout_cannot_overwrite_verified_workflows(self):
         steps = policy.load_yaml(ROOT / ".github/workflows/release.yaml")["jobs"]["validate-inputs"]["steps"][:2]
-        for path in ("_workflows", "./_workflows", "_workflows/", "_workflows/."):
+        for path in (None, ".", "", "_workflows", "./_workflows", "_workflows/", "_workflows/.",
+                     "_workflows/.github", "${{ github.workspace }}/_workflows", "..", "../caller",
+                     "/tmp/workflows"):
             with self.subTest(path=path):
                 overwrite = copy.deepcopy(steps[0])
                 overwrite["with"].update(path=path, repository="unreviewed/workflows", ref="main")
+                if path is None:
+                    overwrite["with"].pop("path")
                 self.assertTrue(policy.check_local_bootstrap([steps[0], overwrite, steps[1]], "fixture"))
         other_checkout = copy.deepcopy(overwrite)
         other_checkout["with"]["path"] = "_caller"
