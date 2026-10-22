@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Reject unreviewed action downloads in credential-bearing release jobs."""
 import json
+import os
 from pathlib import Path
 import re
 import subprocess
@@ -51,14 +52,26 @@ def check_local_bootstrap(steps, location):
     ready = False
     for step in steps:
         action = step.get("uses", "")
-        settings = step.get("with", {})
-        if (re.fullmatch(r"actions/checkout@[0-9a-f]{40}", action)
-                and settings.get("repository") == "ConductorOne/github-workflows"
-                and settings.get("path") == "_workflows"
-                and settings.get("ref") == "${{ job.workflow_sha }}"
-                and settings.get("persist-credentials") is False
-                and "token" not in settings and "if" not in step):
-            ready = True
+        settings = step.get("with") or {}
+        checkout = action.startswith("actions/checkout@")
+        if "with" in step and not isinstance(step["with"], dict):
+            errors.append(f"{location}: action inputs must be a mapping")
+            if checkout:
+                ready = False
+            continue
+        if checkout:
+            path = settings.get("path", "")
+            if not isinstance(path, str):
+                errors.append(f"{location}: checkout path must be a string")
+                ready = False
+                continue
+            if os.path.normpath(path) == "_workflows":
+                ready = (re.fullmatch(r"actions/checkout@[0-9a-f]{40}", action) is not None
+                         and settings.get("repository") == "ConductorOne/github-workflows"
+                         and settings.get("path") == "_workflows"
+                         and settings.get("ref") == "${{ job.workflow_sha }}"
+                         and settings.get("persist-credentials") is False
+                         and "token" not in settings and "if" not in step)
         if action in LOCAL_ACTIONS and not ready:
             errors.append(f"{location}: local action requires the preceding pinned workflow checkout")
     return errors

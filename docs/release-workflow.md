@@ -294,7 +294,9 @@ commit SHA. A version comment is informational, not the execution reference.
 CI, checks every job with `id-token: write` or a secret reference, plus the
 explicit credential-bearing job inventory. It also checks the implementations
 of the two permitted local composite actions so they cannot hide a new remote
-action. Unknown local paths and container actions fail closed.
+action. Unknown local paths and step-level `docker://` references fail closed.
+Job-level `container:` and `services:` are not covered by this checker;
+extending coverage is a low-priority follow-up.
 
 The local guard and locked-tools actions come from the immutable `_workflows`
 checkout at `job.workflow_sha`; they are not third-party downloads. The remaining
