@@ -1772,7 +1772,11 @@ class PriorFindingsTest(unittest.TestCase):
             "id": "PRRT_x",
             "isResolved": resolved,
             "isOutdated": outdated,
-            "resolvedBy": actor(resolved_by) if resolved_by else None,
+            # resolvedBy is the User OBJECT, so even an app comes back typed
+            # "User" — with the "[bot]" suffix the Bot node does not carry.
+            "resolvedBy": (
+                {"login": resolved_by, "__typename": "User"} if resolved_by else None
+            ),
             "path": path,
             "line": line,
             "comments": {"totalCount": len(nodes), "nodes": nodes},
@@ -1874,10 +1878,11 @@ class PriorFindingsTest(unittest.TestCase):
         return thread
 
     def test_other_apps_are_not_engagement(self):
-        # Copilot, CodeRabbit, linear-code and friends write on these PRs.
+        # Copilot, CodeRabbit, linear-code and friends write on these PRs, and
+        # c1-squire-dev[bot] has resolved 37 threads on a real connector PR.
         # Counting any of them as a person would retire the finding from
         # inline reporting permanently.
-        for app in ("copilot-pull-request-reviewer", "linear-code", "dependabot"):
+        for app in ("copilot-pull-request-reviewer", "linear-code", "c1-squire-dev"):
             with self.subTest(app=app):
                 replied = self._thread("🟠 Bug: x", replies=[(app + "[bot]", "noted")])
                 self.assertFalse(
@@ -1891,9 +1896,9 @@ class PriorFindingsTest(unittest.TestCase):
                     rot.collect_prior_findings([resolved])[0]["human_engaged"]
                 )
 
-    def test_engagement_is_decided_by_node_type_not_login(self):
-        # A human login is a User even if it looks bot-ish, and the Actions
-        # bot is a Bot even though its login carries no "[bot]" suffix.
+    def test_author_engagement_is_decided_by_node_type(self):
+        # `author` is the Actor interface, so an app is a Bot node and a human
+        # login that looks bot-ish is still a User.
         human = self._thread("🟠 Bug: x")
         human["comments"]["nodes"].append(
             {"body": "mine", "author": {"login": "robot-dev", "__typename": "User"}}
@@ -1901,9 +1906,23 @@ class PriorFindingsTest(unittest.TestCase):
         human["comments"]["totalCount"] = 2
         self.assertTrue(rot.collect_prior_findings([human])[0]["human_engaged"])
 
-        bot = self._thread("🟠 Bug: x", resolved=True, outdated=True)
-        bot["resolvedBy"] = {"login": "github-actions", "__typename": "Bot"}
-        self.assertFalse(rot.collect_prior_findings([bot])[0]["human_engaged"])
+    def test_resolver_engagement_cannot_use_node_type(self):
+        # `resolvedBy` is the User OBJECT, so an app that resolves a thread is
+        # reported as "User" too — keying on the type here would read every
+        # bot resolution as a person and kill the re-anchor path. Shapes taken
+        # from the live API.
+        for login, engaged in (
+            ("c1-squire-dev[bot]", False),   # observed on baton-datadog#40
+            ("github-actions[bot]", False),
+            ("github-actions", False),       # BOT_LOGINS carries both spellings
+            ("octocat", True),
+        ):
+            with self.subTest(login=login):
+                t = self._thread("🟠 Bug: x", resolved=True, outdated=True)
+                t["resolvedBy"] = {"login": login, "__typename": "User"}
+                self.assertEqual(
+                    rot.collect_prior_findings([t])[0]["human_engaged"], engaged
+                )
 
     def test_silent_human_resolution_counts_as_engagement(self):
         # Resolving without replying is the common case, and the earlier rule

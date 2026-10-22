@@ -178,15 +178,36 @@ def severity_of(body: str) -> str:
     return "unknown"
 
 
-def _is_person(actor: Optional[dict]) -> bool:
-    """Whether a GraphQL Actor is a human, by node type rather than by login.
+def _author_is_person(actor: Optional[dict]) -> bool:
+    """Whether a comment author is a human.
 
-    Every GitHub App is a `Bot`, so this excludes the other apps that write on
-    these PRs as well as this reviewer. Matching on the login instead would
-    need a list of every app anyone ever installs, and would miss them by
-    default — the direction that silently retires a finding.
+    `PullRequestReviewComment.author` is the `Actor` INTERFACE, so every
+    GitHub App arrives as a `Bot` node and the type alone settles it. Matching
+    on the login instead would need a list of every app anyone ever installs,
+    and would miss them by default — the direction that silently retires a
+    finding from inline reporting.
     """
     return bool(actor) and actor.get("__typename") == "User"
+
+
+def _resolver_is_person(resolver: Optional[dict]) -> bool:
+    """Whether a thread was resolved by a human.
+
+    This cannot use the same test. `PullRequestReviewThread.resolvedBy` is the
+    `User` OBJECT, not `Actor`, so an app that resolves a thread is coerced
+    into a User and its `__typename` is ALWAYS "User" — checking the type here
+    would read every bot resolution as a person and permanently retire the
+    finding. Observed on a real PR: `c1-squire-dev[bot]` resolved 37 threads,
+    each reported as `User`.
+
+    Under that coercion the login keeps the `[bot]` suffix (`c1-squire-dev[bot]`),
+    which it does NOT carry as a `Bot` node — which is also why BOT_LOGINS has
+    to list `github-actions` both ways.
+    """
+    if not resolver:
+        return False
+    login = resolver.get("login", "")
+    return bool(login) and login not in BOT_LOGINS and not login.endswith("[bot]")
 
 
 def collect_prior_findings(threads: list[dict]) -> list[dict]:
@@ -210,15 +231,13 @@ def collect_prior_findings(threads: list[dict]) -> list[dict]:
     doing. `resolvedBy` is what tells those apart from a person clicking
     Resolve, which people do far more often than they reply.
 
-    "A person" is GraphQL's `__typename == "User"`, not "a login outside
-    BOT_LOGINS". Plenty of other apps write on these PRs — Copilot,
-    CodeRabbit, linear-code, dependabot — and counting any of them as
-    engagement would retire the finding from inline reporting for good. The
-    login is no help: GraphQL reports the GitHub Actions bot as
-    `github-actions`, with no `[bot]` suffix, which is why BOT_LOGINS carries
-    both spellings. BOT_LOGINS stays narrow on purpose — _review_state uses it
-    as a trust allowlist for summary authorship, which is a different question
-    from "is this commenter a human".
+    "A person" is decided differently for the two halves, because GraphQL
+    types them differently — see _author_is_person and _resolver_is_person.
+    Either way it is not "a login outside BOT_LOGINS": plenty of other apps
+    write on these PRs, and counting one as engagement retires the finding
+    from inline reporting for good. BOT_LOGINS stays narrow on purpose —
+    _review_state uses it as a trust allowlist for summary authorship, which
+    is a different question from "is this commenter a human".
     """
     findings = []
     for thread in threads:
@@ -253,10 +272,10 @@ def collect_prior_findings(threads: list[dict]) -> list[dict]:
             # not read.
             "human_engaged": (
                 thread["comments"]["totalCount"] > len(comments)
-                or any(_is_person(c.get("author")) for c in comments[1:])
-                # Resolved by a person rather than by should_resolve, whose
-                # resolutions come back as a Bot and so keep the re-anchor path.
-                or _is_person(thread.get("resolvedBy"))
+                or any(_author_is_person(c.get("author")) for c in comments[1:])
+                # Resolved by a person rather than by should_resolve or any
+                # other automation, which keeps the re-anchor path for those.
+                or _resolver_is_person(thread.get("resolvedBy"))
             ),
         })
     findings.sort(key=lambda f: (f["thread_resolved"], f["path"] or "", f["line"] or 0))
