@@ -17,9 +17,8 @@ import zipfile
 
 ROOT = Path(__file__).resolve().parent.parent
 ACTION = ROOT / ".github/actions/locked-tools"
-ACTION_PIN = "99f9b2fc150f0351f2ef6f9bf9f631a17749ef15"
-GUARD_ACTION = f"ConductorOne/github-workflows/.github/actions/ca-trust-guard@{ACTION_PIN}"
-TOOLS_ACTION = f"ConductorOne/github-workflows/.github/actions/locked-tools@{ACTION_PIN}"
+GUARD_ACTION = "ConductorOne/github-workflows/.github/actions/ca-trust-guard@4d06ff31da09d2012770879c2c43c54dec24fe76"
+TOOLS_ACTION = "ConductorOne/github-workflows/.github/actions/locked-tools@562a1ea6fa6abd0460950dfc95c7f845aa5f1448"
 
 
 class IntegrityTests(unittest.TestCase):

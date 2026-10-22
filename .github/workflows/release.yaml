@@ -121,7 +121,7 @@ jobs:
 
     steps:
       - name: Enforce runner CA trust
-        uses: ConductorOne/github-workflows/.github/actions/ca-trust-guard@99f9b2fc150f0351f2ef6f9bf9f631a17749ef15
+        uses: ConductorOne/github-workflows/.github/actions/ca-trust-guard@4d06ff31da09d2012770879c2c43c54dec24fe76
 
       - name: Validate tag format
         env:
@@ -180,7 +180,7 @@ jobs:
       brew_tap: ${{ steps.release-options.outputs.brew_tap }}
     steps:
       - name: Enforce runner CA trust
-        uses: ConductorOne/github-workflows/.github/actions/ca-trust-guard@99f9b2fc150f0351f2ef6f9bf9f631a17749ef15
+        uses: ConductorOne/github-workflows/.github/actions/ca-trust-guard@4d06ff31da09d2012770879c2c43c54dec24fe76
 
       - name: Checkout pinned connector workflows
         uses: actions/checkout@v5
@@ -264,11 +264,11 @@ jobs:
       github_prerelease: ${{ steps.github-release.outputs.prerelease }}
     steps:
       - name: Enforce runner CA trust
-        uses: ConductorOne/github-workflows/.github/actions/ca-trust-guard@99f9b2fc150f0351f2ef6f9bf9f631a17749ef15
+        uses: ConductorOne/github-workflows/.github/actions/ca-trust-guard@4d06ff31da09d2012770879c2c43c54dec24fe76
 
       - name: Install locked release tools
         if: inputs.go_source_hygiene == true || inputs.go_vulnerability_scan == true
-        uses: ConductorOne/github-workflows/.github/actions/locked-tools@99f9b2fc150f0351f2ef6f9bf9f631a17749ef15
+        uses: ConductorOne/github-workflows/.github/actions/locked-tools@562a1ea6fa6abd0460950dfc95c7f845aa5f1448
         with:
           tools: go
 
@@ -391,10 +391,10 @@ jobs:
       released_at: ${{ steps.release-meta.outputs.released_at }}
     steps:
       - name: Enforce runner CA trust
-        uses: ConductorOne/github-workflows/.github/actions/ca-trust-guard@99f9b2fc150f0351f2ef6f9bf9f631a17749ef15
+        uses: ConductorOne/github-workflows/.github/actions/ca-trust-guard@4d06ff31da09d2012770879c2c43c54dec24fe76
 
       - name: Install locked release tools
-        uses: ConductorOne/github-workflows/.github/actions/locked-tools@99f9b2fc150f0351f2ef6f9bf9f631a17749ef15
+        uses: ConductorOne/github-workflows/.github/actions/locked-tools@562a1ea6fa6abd0460950dfc95c7f845aa5f1448
         with:
           tools: go,gon,syft,goreleaser
 
@@ -705,10 +705,10 @@ jobs:
       windows_manifest: ${{ steps.generate-windows-manifest.outputs.windows_manifest }}
     steps:
       - name: Enforce runner CA trust
-        uses: ConductorOne/github-workflows/.github/actions/ca-trust-guard@99f9b2fc150f0351f2ef6f9bf9f631a17749ef15
+        uses: ConductorOne/github-workflows/.github/actions/ca-trust-guard@4d06ff31da09d2012770879c2c43c54dec24fe76
 
       - name: Install locked release tools
-        uses: ConductorOne/github-workflows/.github/actions/locked-tools@99f9b2fc150f0351f2ef6f9bf9f631a17749ef15
+        uses: ConductorOne/github-workflows/.github/actions/locked-tools@562a1ea6fa6abd0460950dfc95c7f845aa5f1448
         with:
           tools: go,syft,goreleaser-pro
 
@@ -983,10 +983,10 @@ jobs:
       GOTOOLCHAIN: local
     steps:
       - name: Enforce runner CA trust
-        uses: ConductorOne/github-workflows/.github/actions/ca-trust-guard@99f9b2fc150f0351f2ef6f9bf9f631a17749ef15
+        uses: ConductorOne/github-workflows/.github/actions/ca-trust-guard@4d06ff31da09d2012770879c2c43c54dec24fe76
 
       - name: Install locked release tools
-        uses: ConductorOne/github-workflows/.github/actions/locked-tools@99f9b2fc150f0351f2ef6f9bf9f631a17749ef15
+        uses: ConductorOne/github-workflows/.github/actions/locked-tools@562a1ea6fa6abd0460950dfc95c7f845aa5f1448
         with:
           tools: go,goreleaser
 
@@ -1275,10 +1275,10 @@ jobs:
       GOTOOLCHAIN: local
     steps:
       - name: Enforce runner CA trust
-        uses: ConductorOne/github-workflows/.github/actions/ca-trust-guard@99f9b2fc150f0351f2ef6f9bf9f631a17749ef15
+        uses: ConductorOne/github-workflows/.github/actions/ca-trust-guard@4d06ff31da09d2012770879c2c43c54dec24fe76
 
       - name: Install locked release tools
-        uses: ConductorOne/github-workflows/.github/actions/locked-tools@99f9b2fc150f0351f2ef6f9bf9f631a17749ef15
+        uses: ConductorOne/github-workflows/.github/actions/locked-tools@562a1ea6fa6abd0460950dfc95c7f845aa5f1448
         with:
           tools: go
 
@@ -1532,10 +1532,10 @@ jobs:
       GOTOOLCHAIN: local
     steps:
       - name: Enforce runner CA trust
-        uses: ConductorOne/github-workflows/.github/actions/ca-trust-guard@99f9b2fc150f0351f2ef6f9bf9f631a17749ef15
+        uses: ConductorOne/github-workflows/.github/actions/ca-trust-guard@4d06ff31da09d2012770879c2c43c54dec24fe76
 
       - name: Install locked release tools
-        uses: ConductorOne/github-workflows/.github/actions/locked-tools@99f9b2fc150f0351f2ef6f9bf9f631a17749ef15
+        uses: ConductorOne/github-workflows/.github/actions/locked-tools@562a1ea6fa6abd0460950dfc95c7f845aa5f1448
         with:
           tools: go
 
@@ -1695,7 +1695,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Enforce runner CA trust
-        uses: ConductorOne/github-workflows/.github/actions/ca-trust-guard@99f9b2fc150f0351f2ef6f9bf9f631a17749ef15
+        uses: ConductorOne/github-workflows/.github/actions/ca-trust-guard@4d06ff31da09d2012770879c2c43c54dec24fe76
 
       - name: Checkout shared workflows
         uses: actions/checkout@v5

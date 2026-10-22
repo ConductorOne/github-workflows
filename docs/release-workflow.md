@@ -239,9 +239,10 @@ Nine release jobs start with the SHA-pinned `ca-trust-guard` action before
 **any checkout or credential access**, using its default
 `enforce`/`true`/`true`/`fail` inputs. Six tool-using jobs then run the pinned
 `locked-tools` action as step 2, followed by source/workflow checkouts, release
-commit verification, module requirements, and release credentials. Both actions
-use commit `99f9b2fc150f0351f2ef6f9bf9f631a17749ef15`; neither requires a caller
-checkout to bootstrap. The guard's measurements and residual-client limits are
+commit verification, module requirements, and release credentials. The guard
+uses commit `4d06ff31da09d2012770879c2c43c54dec24fe76`; locked-tools uses
+`562a1ea6fa6abd0460950dfc95c7f845aa5f1448`. Neither requires a caller checkout
+to bootstrap. The guard's measurements and residual-client limits are
 documented in [CA Trust Guard](../.github/actions/ca-trust-guard/README.md).
 
 `notify-release-failure` is deliberately exempt: guard errors must not prevent
