@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"go/version"
+	"io"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -72,7 +73,7 @@ func TestDiscoverStoresDarwin(t *testing.T) {
 func TestClassifyStores(t *testing.T) {
 	dir := fixtureDir(t)
 	chains := fixtureChains(t)
-	verifier, err := newVerifier()
+	verifier, err := newVerifier(chains[0], dir, t.TempDir(), io.Discard)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -265,7 +266,7 @@ func TestJSONRowsEscapeDetails(t *testing.T) {
 	}
 }
 
-func TestProbePositiveControlFirst(t *testing.T) {
+func TestProbeIsolationThenPositiveControls(t *testing.T) {
 	var stdout bytes.Buffer
 	err := probe([]string{"--phase", "before", "--stores", "fixture=" + filepath.Join(fixtureDir(t), "vulnerable-roots.pem"),
 		"--chains", filepath.Join(fixtureDir(t), "chains.json"), "--out", filepath.Join(t.TempDir(), "before.jsonl")}, &stdout)
@@ -273,13 +274,20 @@ func TestProbePositiveControlFirst(t *testing.T) {
 		t.Fatal(err)
 	}
 	lines := strings.Split(strings.TrimSpace(stdout.String()), "\n")
-	for i := range 2 {
+	for i := range 3 {
 		var r row
 		if err := json.Unmarshal([]byte(strings.TrimPrefix(lines[i], "ca-trust-guard ")), &r); err != nil {
 			t.Fatal(err)
 		}
-		if r.Phase != "positive-control" || r.Verdict != trusts {
-			t.Fatalf("first observations must be positive controls: %+v", r)
+		wantPhase, wantVerdict := "positive-control", trusts
+		if i == 0 {
+			wantPhase, wantVerdict = "isolation-self-check", distrust
+		}
+		if r.Phase != wantPhase || r.Verdict != wantVerdict {
+			t.Fatalf("isolation must precede both positive controls: %+v", r)
+		}
+		if r.OpenSSLPath == "" || r.OpenSSLVersion == "" {
+			t.Fatalf("instrument identity missing: %+v", r)
 		}
 	}
 }

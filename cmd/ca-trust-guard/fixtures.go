@@ -68,7 +68,7 @@ func verifyFixtures(dir string) error {
 		}
 	}
 	for _, name := range []string{
-		"chains.json", "incident-certs.json", "vulnerable-roots.pem", "clean-ca-bundle.pem",
+		"chains.json", "incident-certs.json", "isolation-ca.pem", "vulnerable-roots.pem", "clean-ca-bundle.pem",
 		"leaf-1.pem", "leaf-2.pem", "intermediates-1.pem", "intermediates-2.pem",
 		"expected-1.json", "expected-2.json",
 	} {

@@ -229,6 +229,7 @@ func summarize(args []string, stdout io.Writer) error {
 		return err
 	}
 	defer writer.file.Close()
+	writer.instrument = evidenceInstrument(*dir)
 	if err := writer.emit(result); err != nil {
 		return err
 	}
