@@ -151,14 +151,11 @@ Post-release validation (non-blocking):
 The default Dockerfile templates select immutable multi-architecture base-image
 indexes. Buildx selects the target platform from each index; the Lambda build
 continues to select Linux arm64. `tools/image-locks.txt` records each image
-reference, index digest, and UTC resolution date. The helper-image locks are
-consumed by the companion release-workflow change that pins QEMU and the
-docker-container BuildKit driver.
-The companion release-workflow change is now merged, so the helper-image locks
-and release-workflow/setup-script Renovate managers are active. Tool-version
-proposal managers read `.github/actions/locked-tools/tool-locks.txt`.
+reference, index digest, and UTC resolution date. QEMU and the docker-container
+BuildKit driver use pinned helper-image locks. Renovate managers track these
+image references and `.github/actions/locked-tools/tool-locks.txt`.
 
-Resolved on **2026-10-21** with `crane digest <ref>`:
+Committed image references and digests:
 
 | Image reference / lock line or distroless platform | Index / platform manifest digest |
 | --- | --- |
@@ -173,21 +170,11 @@ Resolved on **2026-10-21** with `crane digest <ref>`:
 | `tonistiigi/binfmt:latest` | `sha256:400a4873b838d1b89194d982c45e5fb3cda4593fbfd7e08a02e76b03b21166f0` |
 | `moby/buildkit:buildx-stable-1` | `sha256:cec9f139f45e93c5c69c60f8b07cfad9f43f4ef6b6a6cd917527fea5ff2e3dea` |
 
-Distroless intentionally sets image-config creation times to the Unix epoch.
-Its registry's [manifest metadata](https://gcr.io/v2/distroless/static-debian13/tags/list)
-records this index's `timeUploadedMs` as `1792595040699`
-(**2026-10-21 15:04:00.699 UTC**), after the required
-**2026-10-20 06:04 UTC** cutoff for the patched CA bundle
-([distroless #2215](https://github.com/GoogleContainerTools/distroless/pull/2215)).
-Do not use the reproducible config timestamp to infer publication time.
-
-The Lambda arm64 config was created on 2026-10-19 at 23:50:49 UTC, before that
-cutoff. AL2023's unpatched `ca-certificates` bundle
-([Amazon Linux 2023 #1147](https://github.com/amazonlinux/amazon-linux-2023/issues/1147))
-does not block Go **1.27.3 or newer** binaries; it is not a claim that the base
-image's bundle is patched. Binfmt's index creation annotation is
-2026-06-08 09:32:02 UTC, and BuildKit's is 2026-09-30 15:17:55 UTC; both predate
-the cutoff, which applies to the distroless runtime base, not these helpers.
+Distroless image-config creation times use the Unix epoch for reproducibility;
+registry manifest metadata identifies publication time. The runtime base uses
+the pinned Distroless index. Lambda uses the pinned AL2023 base; its certificate
+bundle is independent of the Go 1.27.3-or-newer runtime's incident-key distrust.
+Helper-image digest pins identify the exact QEMU and BuildKit code used by builds.
 
 `scripts/check-image-locks.sh` checks repository Dockerfile `FROM` declarations
 (including documented examples), helper driver image assignments, and YAML image
@@ -208,25 +195,16 @@ Tagless QEMU and BuildKit execution references are tracked against explicit
 `latest` and `buildx-stable-1` update channels, respectively; refreshes replace
 their digests without adding mutable tags to the execution references.
 
-Neither Dependabot nor Renovate natively refreshes this repository's arbitrary
-artifact SHA-256 lock format. Regex managers instead open **draft version-proposal
-PRs** for GoReleaser OSS/Pro, Syft, and Go. Gon is built from a locked source
-commit: the `# gon-release <tag>` marker and its following commit lock are tracked
-against `ConductorOne/gon` tags. These proposals are not ready-to-merge locks.
+Neither Dependabot nor Renovate refreshes this repository's artifact SHA256
+values automatically. Regex managers open draft version proposals for the
+locked tools; each artifact entry still requires a matching URL and checksum.
+Gon's `# gon-release <tag>` marker and source commit are tracked together
+against `ConductorOne/gon` tags.
 
-Before merging an update:
-
-1. For tools, refresh every affected platform's artifact URL and SHA-256 from the
-   reviewed upstream release assets. Keep the version, URL, and checksum together;
-   installers reject a version/URL mismatch. For gon, review the source commit
-   against its release tag and exercise the source build.
-2. For images, resolve the multi-arch index, inspect every architecture with
-   `crane manifest`, and record the resolution date and build/publication evidence.
-   Keep templates, helper inputs, lock entries, and this table in sync. Distroless
-   must remain newer than the CA-bundle cutoff above.
-3. Run the image-lock check and relevant installer negative controls, then a
-   canary release and artifact/base-layer verification. A bot PR or green fixture
-   test is not evidence of a successful release.
+Tool lock entries keep each platform's version, artifact URL and SHA256 together;
+installers reject a version/URL mismatch. Gon identifies source by immutable
+commit. Image lock entries, templates and helper inputs use the same immutable
+index digest, and the lock table records each selected reference and digest.
 
 ### Immutable S3 Release Objects
 
@@ -257,31 +235,28 @@ Every GoReleaser invocation receives `GORELEASER_CURRENT_TAG` from the workflow 
 
 ### Locked Release Tools
 
-`.github/actions/locked-tools/tool-locks.txt` is the single source of truth for tool versions, artifact
-URLs, and committed SHA256 values. The Bash and PowerShell `install-tool`
-helpers fetch only that URL, verify the hash **before extraction**, and add the
-verified directory to the next step's PATH. They never run the downloaded
-binary. All tool installations, including cosign and the native gon build,
-finish before Apple certificates, release secrets, or AWS credentials are read.
-Both installers require the expected binary layout before publishing PATH; missing tools never silently fall back to runner-bundled binaries.
-The workflow checks out its own source using GitHub's `job.workflow_sha`
-context, eliminating the previous Python package bootstrap.
+`.github/actions/locked-tools/tool-locks.txt` identifies tool versions, artifact
+URLs and committed SHA256 values. The action-local Bash and PowerShell installers
+fetch the selected URL, verify its hash **before extraction**, and check the
+expected executable leaf before publishing PATH. They do not execute downloaded
+binaries during extraction. The action's Go assertion and native gon build run
+after verified installation. Release credentials are configured only after
+tool installation and checks. Helper code checkouts use `job.workflow_sha`.
 
-Go is installed once per job, with `GOTOOLCHAIN=local`. Preferred gate callers
-take `EXPECTED_GO_VERSION`, `EXPECTED_LOCK_SHA256`, and `LOCK_PATH` from the
-locked-tools action's `go`, `lock_sha256`, and `lock_path` outputs. The gate
+Go is installed once per job, with `GOTOOLCHAIN=local`. Go gates take
+`EXPECTED_GO_VERSION`, `EXPECTED_LOCK_SHA256` and `LOCK_PATH` from the
+locked-tools action's `go`, `lock_sha256` and `lock_path` outputs. The gate
 hashes the referenced lock to check identity but never parses its versions;
 prepare owns the single-version sanity. Version equality and readonly/offline
 `GOTOOLCHAIN=local go list -m` checks reject incompatible module requirements.
-Module caching from the former setup action is intentionally dropped.
+The release workflow does not cache Go modules.
 
-The versions below were observed in [release run 38979848074](https://github.com/ConductorOne/baton-github-test/actions/runs/38979848074).
-Artifact hashes were fetched once from the upstream release checksums and
-[Go's release metadata](https://go.dev/dl/?mode=json), then checked against real
-downloads before committing. Checksums and artifacts share upstream TLS origins;
-the integrity boundary during a release is the reviewed, committed lock.
+Artifact hashes identify the archives at the upstream release URLs.
+[Go release metadata](https://go.dev/dl/?mode=json) provides the toolchain
+checksums. Checksums and artifacts share upstream TLS origins; release
+integrity uses the committed lock rather than a checksum fetched during the job.
 
-Node.js 26.12.1, consumed by axiomatic, is the approved single tool-version change in this series: the uniform patched Node line, superseding the earlier 22.23.4 choice and locked using [SHASUMS256.txt](https://nodejs.org/dist/v26.12.1/SHASUMS256.txt).
+Node.js 26.12.1 uses platform-specific archive locks with checksums from [SHASUMS256.txt](https://nodejs.org/dist/v26.12.1/SHASUMS256.txt).
 
 The `ConductorOne/github-workflows/.github/actions/locked-tools@<commit-sha>`
 composite action accepts a comma-separated `tools` list, an optional reviewed
@@ -296,8 +271,7 @@ Node is supported on Linux amd64, macOS arm64, and Windows amd64. The Windows
 installer verifies the ZIP hash before extraction, checks the nested
 `node-v26.12.1-win-x64/node.exe` leaf, and publishes that package directory to PATH.
 
-An empty `locks` input is resolved inside the action's prepare step, where the
-action directory is available, rather than in the caller-context input default.
+An empty `locks` input selects the action-local canonical lock inside prepare.
 `dest` keeps its `runner.temp` metadata default: that context is available in
 the caller on Linux, macOS, and Windows.
 
@@ -309,11 +283,8 @@ between preparation, installation, and output publication; internal Go gates
 receive the same expected version/path/hash. Each phase is a one-line script
 call in the composite. See the [action contract](../.github/actions/locked-tools/README.md).
 
-The Go gate is action-local and environment-only; there is no repository-level
-wrapper or positional lockfile fallback. Callers must wire the installed action's
-version and lock-identity outputs. The main-tip workflow's old wrapper calls are
-not executable until the coordinated caller amendment lands; moving-tag
-promotion remains blocked until that migration is complete.
+The action-local Go gate is environment-only. Callers supply the installed
+action's version and lock-identity outputs; positional lockfile lookup is not supported.
 
 | Tool / version | Lock platform | SHA256 or source commit | Committed artifact/source |
 | --- | --- | --- | --- |
@@ -331,17 +302,14 @@ promotion remains blocked until that migration is complete.
 | node v26.12.1 | linux/amd64 | `0fd1eb7770598f52a21995edf6ed35fc690400fa437c2386af329519e9143132` | [Linux package](https://nodejs.org/dist/v26.12.1/node-v26.12.1-linux-x64.tar.gz) |
 | node v26.12.1 | darwin/arm64 | `1901d539912c02afa10d1cc126943a8855a7eedebe830119463470db5e6c59e8` | [Darwin package](https://nodejs.org/dist/v26.12.1/node-v26.12.1-darwin-arm64.tar.gz) |
 | node v26.12.1 | windows/amd64 | `b3efd5c70cba3308ed46e7e699a9b8aac075bbc6b027fcb39c84c31acc25e2b4` | [Windows package](https://nodejs.org/dist/v26.12.1/node-v26.12.1-win-x64.zip) |
-| minisign 0.12 | darwin/arm64 | `89000b19535765f9cffc65a65d64a820f433ef6db8020667f7570e06bf6aac63` | [macOS ZIP](https://github.com/jedisct1/minisign/releases/download/0.12/minisign-0.12-macos.zip), ported from [multipass #953](https://github.com/ductone/multipass/pull/953) |
+| minisign 0.12 | darwin/arm64 | `89000b19535765f9cffc65a65d64a820f433ef6db8020667f7570e06bf6aac63` | [macOS ZIP](https://github.com/jedisct1/minisign/releases/download/0.12/minisign-0.12-macos.zip) |
 
-The gon fork publishes only an amd64 asset for v0.2.10. Rather than using
-Rosetta, `actions/checkout` fetches the locked commit by object ID and
-`scripts/gon-source.sh` builds it natively with the already-verified Go.
-It checks gon's Go requirement, requires `GOFLAGS=-mod=readonly`,
-`GOPROXY=https://proxy.golang.org`, and `GOSUMDB=sum.golang.org`, and logs the
-built binary's SHA256 for cross-run comparison. A native darwin-arm64 release
-asset is a follow-up improvement, not a prerequisite for this source-locked build.
+Gon builds natively from a pinned source commit with the verified Go toolchain.
+The action checks out the exact source object, checks its Go requirement, and
+requires `GOFLAGS=-mod=readonly`, `GOPROXY=https://proxy.golang.org` and
+`GOSUMDB=sum.golang.org`. It records the resulting binary's SHA256.
 
-Cosign remains on its observed v2.5.2, installed by
+Cosign v2.5.2 is installed by
 `sigstore/cosign-installer@398d4b0eeef1380460a10c8013a76f728fb906ac`.
 That action verifies its bootstrap binary against hashes embedded in the
 pinned action and verifies other requested versions by signature. The
@@ -400,7 +368,7 @@ Both Windows zip and MSI have:
 - SLSA provenance attestations
 - SBOM attestations
 
-**Note:** Windows code signing via Azure Trusted Signing is planned for Stage 2.
+Windows artifacts have Sigstore signatures, not Windows Authenticode signatures.
 
 ### Verification
 
@@ -491,7 +459,7 @@ to connector callers. Real image-pin enforcement stays in the existing
 CI installs ShellCheck and script-test dependencies through Ubuntu 24.04 apt.
 The tests select apt's Python/jq `yq` ahead of the runner's different `yq`.
 `bash scripts/lint-shell.sh` checks every repository Bash source, including
-action implementations, guard scripts, tests, and compatibility wrappers.
+action implementations, guard scripts, tests and repository helper entrypoints.
 Local lifecycle fixtures also verify connector failure propagation without
 calling a live connector.
 
@@ -623,23 +591,8 @@ Test the MSI installer on an actual Windows machine:
 - **Cosign version:** Ensure using latest cosign (`cosign version`)
 - **MSI UpgradeCode:** If upgrades don't work, verify UpgradeCode is consistent across versions
 
-## Future Work
+## Platform Limitations
 
-### Stage 2: Windows Code Signing
-
-Currently MSI installers have Sigstore signatures (cosign) but not Windows Authenticode signatures. Stage 2 will add:
-
-- **Azure Trusted Signing** integration for Authenticode signatures
-- MSI files will be signed with Microsoft-trusted certificate
-- Windows SmartScreen warnings will be eliminated
-- Users can verify publisher identity in Windows UAC prompts
-
-This requires:
-- Azure Trusted Signing account setup
-- GitHub Actions OIDC integration with Azure
-- Workflow updates to sign MSI after build
-
-### Other Potential Improvements
-
-- Support for Windows ARM64 builds
-- Windows Service installer templates (for connectors that run as services)
+- Windows artifacts use Sigstore signatures and do not include Windows Authenticode signatures.
+- Windows build and toolchain targets use amd64; Windows ARM64 is not supported.
+- Windows Service installers require a caller-provided custom WXS template.

@@ -154,7 +154,7 @@ class IntegrityTests(unittest.TestCase):
         self.env.update(TEST_OS="Linux", TEST_ARCH="aarch64")
         dest = self.root / "bad-go-arm64"
         result = self.run_script("install-tool.sh", "go", dest, ok=False)
-        self.assertIn("::error title=GF13::go sha256 mismatch", result.stderr)
+        self.assertIn("::error title=locked-tools::go sha256 mismatch", result.stderr)
         self.assertNotIn("tar\n", self.calls.read_text())
         self.assertFalse(dest.exists())
         self.assertFalse(self.path_file.exists())
@@ -167,7 +167,7 @@ class IntegrityTests(unittest.TestCase):
                 archive.write_bytes(archive.read_bytes() + b"tampered")
                 self.calls.unlink(missing_ok=True)
                 result = self.run_script("install-tool.sh", tool, self.root / "dest", ok=False)
-                self.assertIn(f"::error title=GF13::{tool} sha256 mismatch", result.stderr)
+                self.assertIn(f"::error title=locked-tools::{tool} sha256 mismatch", result.stderr)
                 self.assertNotIn("tar\n", self.calls.read_text())
                 self.assertFalse((self.root / "dest").exists())
                 self.assertFalse(self.path_file.exists())
@@ -179,7 +179,7 @@ class IntegrityTests(unittest.TestCase):
                 self.env.update(TEST_OS=os_name, TEST_ARCH="arm64" if os_name == "Darwin" else "x86_64")
                 dest = self.root / f"wrong-layout-{os_name}"
                 result = self.run_script("install-tool.sh", "node", dest, ok=False)
-                self.assertIn("::error title=GF13::node package layout mismatch", result.stderr)
+                self.assertIn("::error title=locked-tools::node package layout mismatch", result.stderr)
                 self.assertTrue((dest / "unexpected-node/bin/node").is_file(), "fixture must reach extraction")
                 self.assertFalse(self.path_file.exists())
 
@@ -188,7 +188,7 @@ class IntegrityTests(unittest.TestCase):
             with self.subTest(tool=tool):
                 self.fixture_download(tool, "linux/amd64", mode=0o644)
                 result = self.run_script("install-tool.sh", tool, self.root / tool, ok=False)
-                self.assertIn(f"::error title=GF13::{tool} package layout mismatch", result.stderr)
+                self.assertIn(f"::error title=locked-tools::{tool} package layout mismatch", result.stderr)
                 self.assertFalse(self.path_file.exists())
                 self.assertFalse(self.env_file.exists())
 
@@ -262,7 +262,7 @@ esac
         self.calls.unlink()
         module.write_bytes(b"module example.com/fixture\r\n\r\ngo 1.27.4\r\n")
         result = self.run_script("verify-locked-go.sh", "module", module, ok=False)
-        self.assertIn(f"::error title=GF13::{module} requires Go 1.27.4, newer than locked go1.27.3", result.stderr)
+        self.assertIn(f"::error title=locked-tools::{module} requires Go 1.27.4, newer than locked go1.27.3", result.stderr)
         for directive in ("go 1.27.4", "go 1.28", "go 2.0", "go 1.28rc1", "", "go 1.27\ngo 1.26"):
             module.write_text(f"module example.com/fixture\n\n{directive}\n")
             self.run_script("verify-locked-go.sh", "module", module, ok=False)
@@ -408,7 +408,7 @@ esac
         self.path_file.unlink()
         archive.write_bytes(archive.read_bytes() + b"tampered")
         result = self.run_script("install-tool.sh", "minisign", self.root / "bad-minisign", ok=False)
-        self.assertIn("::error title=GF13::minisign sha256 mismatch", result.stderr)
+        self.assertIn("::error title=locked-tools::minisign sha256 mismatch", result.stderr)
         self.assertFalse(self.path_file.exists())
         self.assertFalse((self.root / "bad-minisign").exists())
 
@@ -588,7 +588,7 @@ function Invoke-WebRequest {
         self.env.update(LOCKED_TOOLS="node", LOCKS_INPUT=str(self.root / "missing-lock.txt"),
                         ACTION_DIR=str(self.action_dir))
         result = self.run_script("locked-tools.sh", "prepare", ok=False)
-        self.assertIn("::error title=GF13::Lock file missing or not readable:", result.stderr)
+        self.assertIn("::error title=locked-tools::Lock file missing or not readable:", result.stderr)
         self.assertFalse(self.calls.exists())
         self.assertFalse(self.path_file.exists())
 

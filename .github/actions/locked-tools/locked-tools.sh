@@ -2,7 +2,7 @@
 # Composite-action glue. Artifact verification remains in the gated installers.
 set -euo pipefail
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-fail() { echo "::error title=GF13::$*" >&2; exit 1; }
+fail() { echo "::error title=locked-tools::$*" >&2; exit 1; }
 phase="${1:-}"
 case "$phase" in prepare|install|gon|outputs) ;; *) fail 'Unknown locked-tools phase' ;; esac
 request="${LOCKED_TOOLS:-}"

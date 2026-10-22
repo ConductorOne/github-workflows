@@ -2,7 +2,7 @@
 # Expectations come only from locked-tools outputs through the environment.
 # Never parse a checkout's lock or fall back to positional lock arguments.
 set -euo pipefail
-fail() { echo "::error title=GF13::$*" >&2; exit 1; }
+fail() { echo "::error title=locked-tools::$*" >&2; exit 1; }
 mode="${1:-}"
 case "$mode" in version|module) shift;; *) fail 'Usage: verify-locked-go.sh version | module <go.mod> [...]';; esac
 [ "${GOTOOLCHAIN:-}" = local ] || fail 'GOTOOLCHAIN must be local; automatic toolchain downloads are forbidden'

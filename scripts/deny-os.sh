@@ -98,7 +98,7 @@ case "$os" in
     if [ "$dry_run" = true ]; then exit 0; fi
     BUNDLE=/etc/ssl/certs/ca-certificates.crt
     [ -s "$BUNDLE" ] || { echo 'compiled system bundle missing/empty' >&2; exit 1; }
-    # Retain #951's compiled-bundle verification, scoped to incident roots.
+    # Verify the compiled bundle contains none of the incident roots.
     awk -v dir="$work" '/-----BEGIN CERTIFICATE-----/{n++} n {print > sprintf("%s/dca-%03d.pem", dir, n)}' "$BUNDLE"
     for cert in "$work"/dca-*.pem; do
       [ -s "$cert" ] || continue
