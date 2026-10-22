@@ -306,7 +306,9 @@ not asset-only and can still modify repository contents and tags while valid.
 Before rollout, inventory every caller workflow's effective permissions.
 A reusable workflow cannot elevate a read-only caller grant, and the Go caller
 template has no explicit grant, so source alone does not establish fleet
-defaults. Callers must permit `contents: write` and `id-token: write` for the
+defaults. Releases GoReleaser creates with the job token do not trigger caller
+`on: release` workflows; inventory callers for such workflows as part of the
+rollout. Callers must permit `contents: write` and `id-token: write` for the
 release call, plus `actions: read` and `checks: read` for existing workflow-run
 and failure-annotation reads; do not broaden unrelated jobs. For example:
 
