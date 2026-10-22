@@ -346,11 +346,15 @@ The `test-flow` parameter can be:
 ## Development
 
 `make test` runs this repository's own Go tests and script tests, including the
-`pr-review` Python suite under `.github/actions/pr-review/scripts`.
-`self-test.yaml` runs it on every pull request and every push to `main`;
-whether that check is also *required* is a ruleset setting and is not set
-today. Running it locally needs `yq` (three script tests shell out to it) and
-optionally `pwsh`, which is skipped when absent.
+`pr-review` Python suite under `.github/actions/pr-review/scripts`. `ci.yaml`
+("Repository CI") runs the same targets on pull requests and pushes to `main`.
+
+Running them locally needs **kislyuk's Python/jq `yq`** — `apt install yq` or
+`pip install yq` — not the more common Go `yq` from mikefarah. Several script
+tests pipe `yq` output into `json.loads`, which only works with the Python
+one; with the Go build they fail with a `JSONDecodeError`. `ci.yaml` installs
+the right one explicitly for the same reason. `pwsh` is optional and its test
+is skipped when absent.
 
 Note that `verify.yaml` is **not** this: it is a reusable workflow that tests
 whichever repo calls it, not this one.
