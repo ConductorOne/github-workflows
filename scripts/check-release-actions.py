@@ -35,7 +35,10 @@ def check_steps(steps, location):
         if action in LOCAL_ACTIONS:
             continue
         name, separator, ref = action.partition("@")
-        first_party = re.fullmatch(r"actions/[a-zA-Z0-9_-]+", name) is not None
+        components = name.split("/")
+        first_party = (len(components) >= 2 and components[0] == "actions"
+                       and all(re.fullmatch(r"[A-Za-z0-9_.-]+", part) and part not in {".", ".."}
+                               for part in components[1:]))
         if (not first_party and name not in ALLOWED_ACTIONS) or not separator:
             errors.append(f"{location}: action not allowlisted: {action}")
         elif not re.fullmatch(r"[0-9a-f]{40}", ref):
@@ -67,8 +70,9 @@ def check_workflow(workflow):
         permissions = job.get("permissions", workflow.get("permissions", {}))
         oidc = permissions == "write-all" or (
             isinstance(permissions, dict) and permissions.get("id-token") == "write")
-        if name in PRIVILEGED_JOBS or oidc or "secrets." in json.dumps(job):
-            errors.extend(check_steps(job.get("steps", []), name))
+        inherited_secret = "secrets." in json.dumps(workflow.get("env", {}))
+        if name in PRIVILEGED_JOBS or oidc or job.get("secrets") or inherited_secret or "secrets." in json.dumps(job):
+            errors.extend(check_steps([job] if "uses" in job else job.get("steps", []), name))
             errors.extend(check_local_bootstrap(job.get("steps", []), name))
     return errors
 
