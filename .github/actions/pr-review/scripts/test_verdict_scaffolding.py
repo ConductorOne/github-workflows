@@ -1755,17 +1755,31 @@ class PriorFindingsTest(unittest.TestCase):
         outdated: bool = False,
         path: str = "pkg/foo.go",
         line: int | None = 42,
+        replies: list[tuple[str, str]] | None = None,
+        resolved_by: str | None = None,
     ) -> dict:
+        def actor(login: str) -> dict:
+            # GraphQL reports every GitHub App as a Bot, and the Actions bot's
+            # login comes back without the "[bot]" suffix.
+            kind = "Bot" if login in ("github-actions", "github-actions[bot]") \
+                or login.endswith("[bot]") else "User"
+            return {"login": login, "__typename": kind}
+
+        nodes = [{"body": body, "author": actor(author)}]
+        for reply_author, reply_body in replies or []:
+            nodes.append({"body": reply_body, "author": actor(reply_author)})
         return {
             "id": "PRRT_x",
             "isResolved": resolved,
             "isOutdated": outdated,
+            # resolvedBy is the User OBJECT, so even an app comes back typed
+            # "User" — with the "[bot]" suffix the Bot node does not carry.
+            "resolvedBy": (
+                {"login": resolved_by, "__typename": "User"} if resolved_by else None
+            ),
             "path": path,
             "line": line,
-            "comments": {
-                "totalCount": 1,
-                "nodes": [{"body": body, "author": {"login": author}}],
-            },
+            "comments": {"totalCount": len(nodes), "nodes": nodes},
         }
 
     def test_collects_bot_findings_only(self):
@@ -1795,6 +1809,158 @@ class PriorFindingsTest(unittest.TestCase):
     def test_outdated_state_preserved(self):
         findings = rot.collect_prior_findings([self._thread("🟠 Bug: x", outdated=True)])
         self.assertTrue(findings[0]["thread_outdated"])
+
+    def test_reply_counts_as_engagement(self):
+        # The signal the audit needs to tell "a human engaged with this" from
+        # "the bot has been talking to itself".
+        findings = rot.collect_prior_findings([
+            self._thread("🟠 Bug: x", replies=[("octocat", "fixed in abc1234")]),
+        ])
+        self.assertTrue(findings[0]["human_engaged"])
+
+    def test_bot_only_thread_is_not_engagement(self):
+        for replies in (None, [("github-actions[bot]", "re-posting, prior thread outdated")]):
+            with self.subTest(replies=replies):
+                findings = rot.collect_prior_findings([
+                    self._thread("🟠 Bug: x", replies=replies),
+                ])
+                self.assertFalse(findings[0]["human_engaged"])
+
+    def test_prior_findings_report_pre_resolution_state(self):
+        # main() resolves outdated bot-only threads and THEN collects prior
+        # findings from the same, un-refreshed list. That ordering is what
+        # lets the review re-anchor the finding once before the resolution
+        # takes effect; "report the state we just set" would look like a
+        # cleanup and would silently turn every outdated finding into a
+        # summary line forever. If this fails, read the comment in main().
+        thread = self._thread("🟠 Bug: x", outdated=True)
+        self.assertTrue(rot.should_resolve(thread))        # main() would resolve it
+        finding = rot.collect_prior_findings([thread])[0]  # ...and still reports it
+        self.assertFalse(finding["thread_resolved"])       # as unresolved + outdated,
+        self.assertTrue(finding["thread_outdated"])        # which is the re-anchor path
+
+    def test_reply_survives_a_later_bot_comment(self):
+        # Ordering must not matter: the bot replying last does not erase the
+        # fact that a human wrote in the thread.
+        findings = rot.collect_prior_findings([
+            self._thread("🟠 Bug: x", replies=[
+                ("octocat", "accepted trade-off, see the docs"),
+                ("github-actions[bot]", "acknowledged"),
+            ]),
+        ])
+        self.assertTrue(findings[0]["human_engaged"])
+
+    def test_resolved_and_outdated_thread_still_reported(self):
+        # The entry is still produced — the audit must re-verify it against
+        # the code. What changed is the prompt's instruction about opening a
+        # NEW thread for it, not whether the finding is surfaced at all.
+        findings = rot.collect_prior_findings([
+            self._thread("🟠 Bug: x", resolved=True, outdated=True,
+                         replies=[("octocat", "accepted")]),
+        ])
+        self.assertEqual(len(findings), 1)
+        self.assertTrue(findings[0]["thread_resolved"])
+        self.assertTrue(findings[0]["thread_outdated"])
+        self.assertTrue(findings[0]["human_engaged"])
+
+    def _bot_thread_of_length(self, n: int, total: int | None = None) -> dict:
+        """A bot-only thread of n FETCHED comments, totalCount defaulting to n.
+
+        The query is comments(first: 20), so a truncated thread really looks
+        like 20 fetched nodes with a higher totalCount — not one node and a
+        big number, which the API cannot produce.
+        """
+        thread = self._thread(
+            "\U0001f7e0 Bug: x",
+            replies=[("github-actions[bot]", f"bot {i}") for i in range(n - 1)],
+        )
+        thread["comments"]["totalCount"] = n if total is None else total
+        return thread
+
+    def test_other_apps_are_not_engagement(self):
+        # Copilot, CodeRabbit, linear-code and friends write on these PRs, and
+        # c1-squire-dev[bot] has resolved 37 threads on a real connector PR.
+        # Counting any of them as a person would retire the finding from
+        # inline reporting permanently.
+        for app in ("copilot-pull-request-reviewer", "linear-code", "c1-squire-dev"):
+            with self.subTest(app=app):
+                replied = self._thread("🟠 Bug: x", replies=[(app + "[bot]", "noted")])
+                self.assertFalse(
+                    rot.collect_prior_findings([replied])[0]["human_engaged"]
+                )
+                resolved = self._thread(
+                    "🟠 Bug: x", resolved=True, outdated=True,
+                    resolved_by=app + "[bot]",
+                )
+                self.assertFalse(
+                    rot.collect_prior_findings([resolved])[0]["human_engaged"]
+                )
+
+    def test_author_engagement_is_decided_by_node_type(self):
+        # `author` is the Actor interface, so an app is a Bot node and a human
+        # login that looks bot-ish is still a User.
+        human = self._thread("🟠 Bug: x")
+        human["comments"]["nodes"].append(
+            {"body": "mine", "author": {"login": "robot-dev", "__typename": "User"}}
+        )
+        human["comments"]["totalCount"] = 2
+        self.assertTrue(rot.collect_prior_findings([human])[0]["human_engaged"])
+
+    def test_resolver_engagement_cannot_use_node_type(self):
+        # `resolvedBy` is the User OBJECT, so an app that resolves a thread is
+        # reported as "User" too — keying on the type here would read every
+        # bot resolution as a person and kill the re-anchor path. Shapes taken
+        # from the live API.
+        for login, engaged in (
+            ("c1-squire-dev[bot]", False),   # observed on baton-datadog#40
+            ("github-actions[bot]", False),
+            ("github-actions", False),       # BOT_LOGINS carries both spellings
+            ("octocat", True),
+        ):
+            with self.subTest(login=login):
+                t = self._thread("🟠 Bug: x", resolved=True, outdated=True)
+                t["resolvedBy"] = {"login": login, "__typename": "User"}
+                self.assertEqual(
+                    rot.collect_prior_findings([t])[0]["human_engaged"], engaged
+                )
+
+    def test_silent_human_resolution_counts_as_engagement(self):
+        # Resolving without replying is the common case, and the earlier rule
+        # read it as "nobody engaged" and re-posted into it — the #147 loop by
+        # another route.
+        thread = self._thread(
+            "🟠 Bug: x", resolved=True, outdated=True, resolved_by="octocat",
+        )
+        self.assertTrue(rot.collect_prior_findings([thread])[0]["human_engaged"])
+
+    def test_bot_resolution_is_not_engagement(self):
+        # should_resolve closes this reviewer's own reply-free threads every
+        # run. Those must stay false, or the re-anchor path disappears.
+        for resolver in ("github-actions[bot]", "github-actions"):
+            with self.subTest(resolver=resolver):
+                thread = self._thread(
+                    "🟠 Bug: x", resolved=True, outdated=True,
+                    resolved_by=resolver,
+                )
+                self.assertFalse(
+                    rot.collect_prior_findings([thread])[0]["human_engaged"]
+                )
+
+    def test_unresolved_thread_has_no_resolver(self):
+        # resolvedBy is null on an open thread; that must not read as a human.
+        thread = self._thread("🟠 Bug: x", outdated=True)
+        self.assertIsNone(thread["resolvedBy"])
+        self.assertFalse(rot.collect_prior_findings([thread])[0]["human_engaged"])
+
+    def test_truncation_boundary(self):
+        # 20 fetched of 20 is complete and must stay False; 20 of 21 is the
+        # first truncated shape the query can actually return.
+        complete = self._bot_thread_of_length(20)
+        self.assertEqual(len(complete["comments"]["nodes"]), 20)
+        self.assertFalse(rot.collect_prior_findings([complete])[0]["human_engaged"])
+
+        truncated = self._bot_thread_of_length(20, total=21)
+        self.assertTrue(rot.collect_prior_findings([truncated])[0]["human_engaged"])
 
     def test_severity_mapping(self):
         self.assertEqual(rot.severity_of("🔴 Security: s"), "security")
