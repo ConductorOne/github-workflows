@@ -83,7 +83,8 @@ get_user_status() {
 # Function to check if user is enabled
 is_user_enabled() {
   local user_id="$1"
-  local status=$(get_user_status "$user_id")
+  local status
+  status=$(get_user_status "$user_id")
   # Based on baton-sdk UserTrait_Status_Status enum: STATUS_ENABLED is the only enabled state
   if [ "$status" = "STATUS_ENABLED" ]; then
     return 0  # User is enabled
@@ -99,12 +100,12 @@ enable_user() {
   echo "Using action: $ENABLE_ACTION_NAME with parameter: $ID_PARAMETER_NAME"
   
   # Build the JSON arguments with the configured parameter name
-  local json_args=$(jq -n --arg id "$user_id" --arg param "$ID_PARAMETER_NAME" "{(\$param): \$id}")
+  local json_args
+  json_args=$(jq -n --arg id "$user_id" --arg param "$ID_PARAMETER_NAME" "{(\$param): \$id}")
   
-  local result=$($BATON_CONNECTOR --invoke-action="$ENABLE_ACTION_NAME" \
-    --invoke-action-args="$json_args" 2>&1)
-  
-  if [ $? -eq 0 ]; then
+  local result
+  if result=$($BATON_CONNECTOR --invoke-action="$ENABLE_ACTION_NAME" \
+    --invoke-action-args="$json_args" 2>&1); then
     echo "Enable user action completed successfully"
     echo "Result: $result"
     return 0
@@ -122,12 +123,12 @@ disable_user() {
   echo "Using action: $DISABLE_ACTION_NAME with parameter: $ID_PARAMETER_NAME"
   
   # Build the JSON arguments with the configured parameter name
-  local json_args=$(jq -n --arg id "$user_id" --arg param "$ID_PARAMETER_NAME" "{(\$param): \$id}")
+  local json_args
+  json_args=$(jq -n --arg id "$user_id" --arg param "$ID_PARAMETER_NAME" "{(\$param): \$id}")
   
-  local result=$($BATON_CONNECTOR --invoke-action="$DISABLE_ACTION_NAME" \
-    --invoke-action-args="$json_args" 2>&1)
-  
-  if [ $? -eq 0 ]; then
+  local result
+  if result=$($BATON_CONNECTOR --invoke-action="$DISABLE_ACTION_NAME" \
+    --invoke-action-args="$json_args" 2>&1); then
     echo "Disable user action completed successfully"
     echo "Result: $result"
     return 0
@@ -148,7 +149,8 @@ verify_user_status() {
   # Sync to get latest data
   $BATON_CONNECTOR
   
-  local actual_status=$(get_user_status "$user_id")
+  local actual_status
+  actual_status=$(get_user_status "$user_id")
   echo "User $user_id current status: $actual_status"
   
   if [ "$expected_status" = "ENABLED" ]; then

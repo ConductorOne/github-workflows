@@ -20,8 +20,12 @@ if [ -n "$windows_pre_build_script" ]; then
     echo "::error::Windows pre-build script not found: $windows_pre_build_script" >&2
     exit 1
   fi
+  # These quotes are YAML data for envsubst, not a shell command.
+  # shellcheck disable=SC2089
   printf -v WINDOWS_BEFORE_HOOKS_BLOCK 'before:\n  hooks:\n    - "bash ./%s"\n' "$windows_pre_build_script"
 fi
+# Export the literal YAML quoting unchanged for envsubst.
+# shellcheck disable=SC2090
 export WINDOWS_BEFORE_HOOKS_BLOCK
 
 envsubst < "$script_dir/../templates/.goreleaser-windows-template.yaml.tmpl"

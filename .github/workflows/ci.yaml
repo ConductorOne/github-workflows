@@ -1,0 +1,111 @@
+# Repository-owned checks run here, not in the caller-facing verify.yaml workflow.
+# Real image-lock enforcement stays in general-pr-review.yaml's PR image-locks job;
+# this workflow does not duplicate that job.
+name: Repository CI
+
+on:
+  pull_request:
+    paths:
+      - .github/workflows/ci.yaml
+      - .github/workflows/verify.yaml
+      - .github/workflows/release.yaml
+      - .github/actions/**
+      - .gitattributes
+      - actions/**
+      - cmd/**
+      - scripts/**
+      - tools/**
+      - go.*
+      - renovate.json
+      - templates/**
+      - Makefile
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/ci.yaml
+      - .github/workflows/verify.yaml
+      - .github/workflows/release.yaml
+      - .github/actions/**
+      - .gitattributes
+      - actions/**
+      - cmd/**
+      - scripts/**
+      - tools/**
+      - go.*
+      - renovate.json
+      - templates/**
+      - Makefile
+
+permissions:
+  contents: read
+
+jobs:
+  go-tests:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    env:
+      GOTOOLCHAIN: local
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # actions/checkout@v5
+        with:
+          persist-credentials: false
+      - name: Set up Go
+        uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: false
+      - name: Vet Go packages
+        run: go vet ./...
+      - name: Test Go packages
+        run: go test ./...
+
+  shell-tests:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # actions/checkout@v5
+        with:
+          persist-credentials: false
+      # The tests need kislyuk's Python/jq yq, not the runner's mikefarah yq.
+      - name: Install script test dependencies from Ubuntu apt
+        run: sudo apt-get update && sudo apt-get install --yes jq yq gettext-base
+      - name: Select the apt-provided Python yq
+        run: echo /usr/bin >> "$GITHUB_PATH"
+      - name: Test scripts and workflow contracts
+        run: make test-scripts
+
+  shellcheck:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # actions/checkout@v5
+        with:
+          persist-credentials: false
+      - name: Install ShellCheck from Ubuntu apt
+        run: sudo apt-get update && sudo apt-get install --yes shellcheck
+      - name: Check all repository Bash scripts
+        env:
+          SHELLCHECK: /usr/bin/shellcheck
+        run: bash scripts/lint-shell.sh
+
+  windows-installer-tests:
+    runs-on: windows-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # actions/checkout@v5
+        with:
+          persist-credentials: false
+      - name: Check native test runtimes
+        shell: pwsh
+        run: |
+          python --version
+          Get-Command pwsh -CommandType Application -ErrorAction Stop
+      - name: Test verified Windows Node installer
+        shell: pwsh
+        run: python scripts/test-tool-integrity.py IntegrityTests.test_windows_node_installer_fixture

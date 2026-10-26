@@ -91,7 +91,7 @@ Windows config generation verifies that the safe repo-relative path exists as a
 file in `_caller`. The config adds a `before.hooks` command, `bash ./<path>`,
 which GoReleaser runs in that same tagged caller checkout after its normal
 clean-tree/tag validation and before compilation. Only the Windows GoReleaser
-action forwards `RELEASE_TAG` from the validated `tag` input to the hook. Hook
+step forwards `RELEASE_TAG` from the validated `tag` input to the hook. Hook
 failures fail the release; generated resources remain local to the Windows
 build workspace. The workflow does not run this hook on macOS, Linux, Docker,
 or callers with the default empty input, and does not skip validation, build
@@ -146,6 +146,66 @@ Post-release validation (non-blocking):
 
 ## Security Properties
 
+### Pinned Container Images
+
+The default Dockerfile templates select immutable multi-architecture base-image
+indexes. Buildx selects the target platform from each index; the Lambda build
+continues to select Linux arm64. `tools/image-locks.txt` records each image
+reference, index digest, and UTC resolution date. QEMU and the docker-container
+BuildKit driver use pinned helper-image locks. Renovate managers track these
+image references and `.github/actions/locked-tools/tool-locks.txt`.
+
+Committed image references and digests:
+
+| Image reference / lock line or distroless platform | Index / platform manifest digest |
+| --- | --- |
+| `gcr.io/distroless/static-debian13:nonroot` | `sha256:d62067879de890a1def9da0e7766b7d20810a5e5555cef8506b752437d7a3e88` |
+| ↳ `linux/amd64` | `sha256:d4df213e27178b79e05ee2bdf8a23d8c54baab3b5a0dc083b039ad9929fa4219` |
+| ↳ `linux/arm64/v8` | `sha256:8a198f3cf5e9b249577c18010ec18382a3e9f94a6e5676d57b1ff8438ae113e9` |
+| ↳ `linux/arm/v7` | `sha256:38489751a0d2feecbe3b7a840d979e6c4db380558f15c61ee025f378b84b2cf3` |
+| ↳ `linux/s390x` | `sha256:c63ef2a68c5ffa9bd31feaa573d606208c10d54b1bee2caf3c168dc5ddec78d9` |
+| ↳ `linux/ppc64le` | `sha256:be4a6d22e53c1118d0c026dc08be71ec3f1954ae75f6e5ff4a10ce97b837ff80` |
+| ↳ `linux/riscv64` | `sha256:0b160fd367891825201f06378982d59900bf35992cfcc453daf7449892d91226` |
+| `public.ecr.aws/lambda/provided:al2023` | `sha256:49c8b85e353ea6052759c3dcf6761b35c055c29c8016a9cd734ac4d24a060729` |
+| `tonistiigi/binfmt:latest` | `sha256:400a4873b838d1b89194d982c45e5fb3cda4593fbfd7e08a02e76b03b21166f0` |
+| `moby/buildkit:buildx-stable-1` | `sha256:cec9f139f45e93c5c69c60f8b07cfad9f43f4ef6b6a6cd917527fea5ff2e3dea` |
+
+Distroless image-config creation times use the Unix epoch for reproducibility;
+registry manifest metadata identifies publication time. The runtime base uses
+the pinned Distroless index. Lambda uses the pinned AL2023 base; its certificate
+bundle is independent of the Go 1.27.3-or-newer runtime's incident-key distrust.
+Helper-image digest pins identify the exact QEMU and BuildKit code used by builds.
+
+`scripts/check-image-locks.sh` checks repository Dockerfile `FROM` declarations
+(including documented examples), helper driver image assignments, and YAML image
+inputs for complete SHA-256 pins. The repository's pull-request workflow runs the
+check and its isolated positive/negative fixture tests without release secrets.
+Custom Dockerfiles in caller repositories are still the caller's responsibility.
+Test sources under `scripts/test-*` are excluded; `FROM scratch` and `FROM <stage>` multi-stage forms fail closed unless explicitly annotated with `# image-locks: ignore` on the immediately preceding line for Dockerfiles (trailing comments are not allowed); shell/YAML annotations may be inline.
+
+#### Updating Locks
+
+`renovate.json` adds Dockerfile-template discovery and regex managers for image
+locks, helper workflow inputs and setup script, the README's Java example, and tool locks.
+Enable the Renovate app for this repository to activate these rules; configuration
+alone does not grant the app access. Digest refreshes are grouped into reviewable
+PRs, with no automerge. Image tags are retained as readable update channels, not
+trusted build identities.
+Tagless QEMU and BuildKit execution references are tracked against explicit
+`latest` and `buildx-stable-1` update channels, respectively; refreshes replace
+their digests without adding mutable tags to the execution references.
+
+Neither Dependabot nor Renovate refreshes this repository's artifact SHA256
+values automatically. Regex managers open draft version proposals for the
+locked tools; each artifact entry still requires a matching URL and checksum.
+Gon's `# gon-release <tag>` marker and source commit are tracked together
+against `ConductorOne/gon` tags.
+
+Tool lock entries keep each platform's version, artifact URL and SHA256 together;
+installers reject a version/URL mismatch. Gon identifies source by immutable
+commit. Image lock entries, templates and helper inputs use the same immutable
+index digest, and the lock table records each selected reference and digest.
+
 ### Immutable S3 Release Objects
 
 Versioned release objects are uploaded through S3 `PutObject` with
@@ -164,12 +224,165 @@ in release identity data.
 
 ### Release Source Identity
 
-Release jobs check out caller code from `refs/tags/<tag>` and verify the
-checked-out commit matches the tag target before building artifacts or recording
-registry metadata. This prevents a release run from publishing artifacts for one
-commit while labeling them as a different tag.
+Release jobs check out caller code by the caller event's `${{ github.sha }}`,
+not by a mutable tag reference. `scripts/verify-release-checkout.sh` requires
+both HEAD and `refs/tags/<tag>^{commit}` to equal that event SHA before building
+or recording metadata. Peeling supports lightweight and annotated tags; a
+missing tag, a moved tag, or an event SHA that is a tag object fails closed.
+The same event commit remains in the provenance's resolved Git dependency.
 
 Every GoReleaser invocation receives `GORELEASER_CURRENT_TAG` from the workflow input. This pins archive names, release metadata, and image digest files to the requested tag when multiple tags identify the same commit.
+
+### Release Job Bootstrap
+
+Nine release jobs first check out `_workflows` at `${{ job.workflow_sha }}`
+with a SHA-pinned checkout action and `persist-credentials: false`. This fetch
+necessarily precedes the guard and, like the runner's own action downloads,
+authenticates to github.com with the job's read-scoped `GITHUB_TOKEN`
+(actions/checkout requires a token); the token is not persisted, the host is not
+behind the incident intermediates, and content integrity is bound to
+`job.workflow_sha`. This read-only infrastructure checkout provides the
+workflow's own action implementations and canonical lock; it does not execute
+caller code.
+The job then runs `./_workflows/.github/actions/ca-trust-guard` with its default
+`enforce`/`true`/`true`/`fail` inputs. Six tool-using jobs next run
+`./_workflows/.github/actions/locked-tools` with `id: tools`, before caller
+checkout, release-commit verification, module requirements, and credentials.
+The workflow uses no remote self-action SHA references: its workflow, local
+actions, and lock come from the same checkout commit. The guard's measurements
+and residual-client limits are documented in
+[CA Trust Guard](../.github/actions/ca-trust-guard/README.md).
+
+`notify-release-failure` is deliberately exempt: guard errors must not prevent
+failure reporting. The job remains failure-only and does not install build
+tools. `validate-inputs`, `determine-workflows-ref`, and `verify-release` need
+the guard but no locked-tools installation.
+
+| Tool-using job | `locked-tools` input |
+| --- | --- |
+| release-preflight | `go` |
+| goreleaser-binaries | `go,gon,syft,goreleaser` |
+| goreleaser-windows | `go,syft,goreleaser-pro` |
+| goreleaser-docker | `go,goreleaser` |
+| publish-release-manifest | `go` |
+| record-registry-api | `go` |
+
+The preflight `_workflows` checkout and local guard always run. Its
+`go_source_hygiene || go_vulnerability_scan` condition applies to locked-tools,
+caller checkout, source verification, and the module gate, so disabling both
+optional checks does not download a Go toolchain.
+Tool-using jobs set `GOTOOLCHAIN=local` at job scope. Caller builds do not override
+`GOFLAGS`, `GOPROXY`, or `GOSUMDB` at workflow/job scope, preserving Go's default
+vendor/readonly mode selection and caller proxy configuration. The trusted gon
+build retains its separate step-local module and checksum requirements.
+Cosign and bundled-buildx/QEMU setup run after trust/tool bootstrap and before
+their signing or AWS credentials.
+
+### Locked Release Tools
+
+`.github/actions/locked-tools/tool-locks.txt` identifies tool versions, artifact
+URLs and committed SHA256 values. The action-local Bash and PowerShell installers
+fetch the selected URL, verify its hash **before extraction**, and check the
+expected executable leaf before publishing PATH. They do not execute downloaded
+binaries during extraction. The action's Go assertion and native gon build run
+after verified installation. Release credentials are configured only after
+tool installation and checks. Helper code checkouts use `job.workflow_sha`.
+
+Artifact downloads use five retries with a two-second delay; curl retries all
+errors, including stream failures. PowerShell uses its native retry count and
+interval parameters. The committed SHA256 is still checked before extraction.
+
+Go is installed once per tool-using job, with `GOTOOLCHAIN=local`. Each of the
+six module gates invokes the checked-out action-local `verify-locked-go.sh`
+after source verification and receives the installed action's identity:
+
+- `EXPECTED_GO_VERSION`: `${{ fromJSON(steps.tools.outputs.versions || '{}').go }}`
+- `EXPECTED_LOCK_SHA256`: `${{ steps.tools.outputs.lock_sha256 }}`
+- `LOCK_PATH`: `${{ steps.tools.outputs.lock_path }}`
+
+The empty-JSON expression is safe when optional tools are skipped: step
+environments are evaluated before step conditions. It supplies no version
+fallback; an executing gate with incomplete outputs fails closed.
+The gate hashes the referenced lock to check identity but never parses its
+versions; prepare owns the single-version sanity. Version equality and
+readonly/offline `GOTOOLCHAIN=local go list -m` checks reject incompatible module
+requirements. The action asserts the installed Go version itself; the workflow
+does not duplicate standalone version gates or cache Go modules.
+
+Artifact hashes identify the archives at the upstream release URLs.
+[Go release metadata](https://go.dev/dl/?mode=json) provides the toolchain
+checksums. Checksums and artifacts share upstream TLS origins; release
+integrity uses the committed lock rather than a checksum fetched during the job.
+
+Node.js 26.12.1 uses platform-specific archive locks with checksums from [SHASUMS256.txt](https://nodejs.org/dist/v26.12.1/SHASUMS256.txt).
+
+The local `./_workflows/.github/actions/locked-tools`
+composite action accepts a comma-separated `tools` list, an optional reviewed
+`locks` file (default: the action's canonical lock), and `dest` (default:
+`${{ runner.temp }}/locked-tools`). Invoke it before configuring release
+credentials. Supported tools are `go`, `node`, `syft`, `goreleaser`,
+`goreleaser-pro`, `gon`, and `minisign`; missing platform locks and unknown or
+duplicate tool names fail closed. Requesting `gon` automatically adds Go,
+installs/verifies it first, then builds the SHA-checked-out gon source with the
+existing readonly-module/proxy/checksum-database constraints.
+Node is supported on Linux amd64, macOS arm64, and Windows amd64. The Windows
+installer verifies the ZIP hash before extraction, checks the nested
+`node-v26.12.1-win-x64/node.exe` leaf, and publishes that package directory to PATH.
+
+An empty `locks` input selects the action-local canonical lock inside prepare.
+`dest` keeps its `runner.temp` metadata default: that context is available in
+the caller on Linux, macOS, and Windows.
+
+Outputs include each installed tool's version (`gon` reports its source commit),
+a `versions` JSON object, `lock_sha256`, and absolute `lock_path` for provenance.
+The path identifies the action-local canonical lock by default, or the actual
+reviewed override used. The action verifies that lock bytes have not changed
+between preparation, installation, and output publication; internal Go gates
+receive the same expected version/path/hash. Each phase is a one-line script
+call in the composite. See the [action contract](../.github/actions/locked-tools/README.md).
+
+The action-local Go gate is environment-only. It consumes the installed
+action's version and lock-identity outputs, not a version re-read from a
+checkout lock or positional lockfile arguments. Canonical implementations
+and the single lock reside under `.github/actions/locked-tools/`; forwarding
+wrappers under `scripts/` are not supported.
+
+| Tool / version | Lock platform | SHA256 or source commit | Committed artifact/source |
+| --- | --- | --- | --- |
+| goreleaser v2.13.3 | linux/amd64 | `4b66f2f78f78561330350651ade557b70328664718490f37834749073af21d20` | [Linux archive](https://github.com/goreleaser/goreleaser/releases/download/v2.13.3/goreleaser_Linux_x86_64.tar.gz) |
+| goreleaser v2.13.3 | darwin/arm64 | `5516c37779efb3935d5b213cda3b0b9025ae94ddbcb51df6919acbcdef4194b0` | [Universal Darwin archive](https://github.com/goreleaser/goreleaser/releases/download/v2.13.3/goreleaser_Darwin_all.tar.gz) |
+| goreleaser-pro v2.13.3 | windows/amd64 | `8f65fca431ae6aa083805c9287d4b98b7937d54649712f1185b0590ae02001de` | [Windows archive](https://github.com/goreleaser/goreleaser-pro/releases/download/v2.13.3/goreleaser-pro_Windows_x86_64.zip) |
+| gon v0.2.10 | darwin/* | `f4c3f2be10a2ee8d50067d2c8a8828a14c83977c` (Git commit, not SHA256) | [Pinned source](https://github.com/ConductorOne/gon/commit/f4c3f2be10a2ee8d50067d2c8a8828a14c83977c) |
+| syft v1.42.3 | linux/amd64 | `0d6be741479eddd2c8644a288990c04f3df0d609bbc1599a005532a9dff63509` | [Linux archive](https://github.com/anchore/syft/releases/download/v1.42.3/syft_1.42.3_linux_amd64.tar.gz) |
+| syft v1.42.3 | darwin/arm64 | `d71ee7db2be0fe2e96f679fd9d69ef04274cc86c8604707797080a21070b3f32` | [Darwin archive](https://github.com/anchore/syft/releases/download/v1.42.3/syft_1.42.3_darwin_arm64.tar.gz) |
+| syft v1.42.3 | windows/amd64 | `e1b9f4945aa64c2b34970bec617623d7f803d0661b48a50b966768b363322e2d` | [Windows archive](https://github.com/anchore/syft/releases/download/v1.42.3/syft_1.42.3_windows_amd64.zip) |
+| go go1.27.3 | linux/amd64 | `65efbc80fdc1fa2cd2631cad5b481777a68e8725f34e89f50fc6ac714e379b40` | [Linux toolchain](https://go.dev/dl/go1.27.3.linux-amd64.tar.gz) |
+| go go1.27.3 | linux/arm64 | `a06e99309dbcbdca1a8ccd2282c3ee146e55930886e26b4f1193269587165f49` | [Linux arm64 toolchain](https://go.dev/dl/go1.27.3.linux-arm64.tar.gz) |
+| go go1.27.3 | darwin/arm64 | `dd3908cf20959d798c1e06ebe5b72213f0505ce01373b40ce3110975a6cd99c2` | [Darwin toolchain](https://go.dev/dl/go1.27.3.darwin-arm64.tar.gz) |
+| go go1.27.3 | windows/amd64 | `f26081f438319757f8a1b46d7d0b2c5ec7583d4038e485e0aa725cfde7885fff` | [Windows toolchain](https://go.dev/dl/go1.27.3.windows-amd64.zip) |
+| node v26.12.1 | linux/amd64 | `0fd1eb7770598f52a21995edf6ed35fc690400fa437c2386af329519e9143132` | [Linux package](https://nodejs.org/dist/v26.12.1/node-v26.12.1-linux-x64.tar.gz) |
+| node v26.12.1 | darwin/arm64 | `1901d539912c02afa10d1cc126943a8855a7eedebe830119463470db5e6c59e8` | [Darwin package](https://nodejs.org/dist/v26.12.1/node-v26.12.1-darwin-arm64.tar.gz) |
+| node v26.12.1 | windows/amd64 | `b3efd5c70cba3308ed46e7e699a9b8aac075bbc6b027fcb39c84c31acc25e2b4` | [Windows package](https://nodejs.org/dist/v26.12.1/node-v26.12.1-win-x64.zip) |
+| minisign 0.12 | darwin/arm64 | `89000b19535765f9cffc65a65d64a820f433ef6db8020667f7570e06bf6aac63` | [macOS ZIP](https://github.com/jedisct1/minisign/releases/download/0.12/minisign-0.12-macos.zip) |
+
+Gon builds natively from a pinned source commit with the verified Go toolchain.
+The action checks out the exact source object, checks its Go requirement, and
+requires `GOFLAGS=-mod=readonly`, `GOPROXY=https://proxy.golang.org` and
+`GOSUMDB=sum.golang.org`. It records the resulting binary's SHA256.
+
+Cosign v2.5.2 is installed by
+`sigstore/cosign-installer@398d4b0eeef1380460a10c8013a76f728fb906ac`.
+That action verifies its bootstrap binary against hashes embedded in the
+pinned action and verifies other requested versions by signature. The
+failure-only Datadog action is also commit-pinned.
+
+Buildx is never downloaded: `scripts/setup-release-buildx.sh` prints the
+runner-bundled plugin's version, fails if it is absent, and creates a builder
+with `moby/buildkit@sha256:cec9f139f45e93c5c69c60f8b07cfad9f43f4ef6b6a6cd917527fea5ff2e3dea`.
+QEMU uses `tonistiigi/binfmt@sha256:400a4873b838d1b89194d982c45e5fb3cda4593fbfd7e08a02e76b03b21166f0`.
+The setup-buildx action was not retained because even `install: false` can
+download a plugin when the runner's plugin is unavailable.
+
 
 ### Keyless Signing
 
@@ -216,7 +429,7 @@ Both Windows zip and MSI have:
 - SLSA provenance attestations
 - SBOM attestations
 
-**Note:** Windows code signing via Azure Trusted Signing is planned for Stage 2.
+Windows artifacts have Sigstore signatures, not Windows Authenticode signatures.
 
 ### Verification
 
@@ -296,6 +509,21 @@ releases/{org}/{release_storage_name}/{tag}/
 
 ## Testing Changes
 
+### Repository CI
+
+`.github/workflows/ci.yaml` runs repository-owned Go vet/tests, `make test-scripts`,
+and ShellCheck for relevant pull requests and pushes to `main`, with read-only
+contents permission and no secrets. The reusable `verify.yaml` remains scoped
+to connector callers. Real image-pin enforcement stays in the existing
+`general-pr-review.yaml` image-locks job rather than adding a duplicate CI job.
+
+CI installs ShellCheck and script-test dependencies through Ubuntu 24.04 apt.
+The tests select apt's Python/jq `yq` ahead of the runner's different `yq`.
+`bash scripts/lint-shell.sh` checks every repository Bash source, including
+action implementations, guard scripts, tests and repository helper entrypoints.
+Local lifecycle fixtures also verify connector failure propagation without
+calling a live connector.
+
 ### Test Repositories
 
 Use test connectors for validation:
@@ -316,6 +544,28 @@ Use test connectors for validation:
    ```bash
    ./scripts/validate-release-artifacts.sh ConductorOne/baton-github-test v0.1.xxx
    ```
+
+### Local Tool and Source Integrity Checks
+
+`python3 scripts/test-tool-integrity.py` exercises verified archive extraction,
+tampered hashes failing before extraction/PATH changes, stale version/URL and
+duplicate locks, newer or malformed Go requirements, the source-locked gon
+build gates, bundled-buildx failure, and event-SHA checks with both lightweight
+and annotated tags. It also checks workflow credential ordering. These are
+deterministic local fixtures, not deployed macOS or Windows proof.
+Repository CI additionally runs the single Windows Node installer fixture on
+`windows-latest`, using real ZIP/hash/extraction/leaf checks and a shadowed
+download command, without release secrets. This is native fixture proof, not a
+deployed Windows release or signing test.
+
+Before release adoption, run canaries on `ConductorOne/baton-github-test`:
+mutate one artifact hash at a time for GoReleaser and Syft and require the
+installer to fail before credentials or binary invocation; mutate the gon
+source commit and require checkout/verification to fail before certificates.
+Run positive lightweight and annotated tag releases with correct locks and
+validate the published artifacts with `scripts/validate-release-artifacts.sh`.
+Real platform runs, including PowerShell extraction and native macOS gon
+compilation/signing, remain mandatory integration evidence.
 
 ### Local Windows Hook Checks
 
@@ -402,23 +652,8 @@ Test the MSI installer on an actual Windows machine:
 - **Cosign version:** Ensure using latest cosign (`cosign version`)
 - **MSI UpgradeCode:** If upgrades don't work, verify UpgradeCode is consistent across versions
 
-## Future Work
+## Platform Limitations
 
-### Stage 2: Windows Code Signing
-
-Currently MSI installers have Sigstore signatures (cosign) but not Windows Authenticode signatures. Stage 2 will add:
-
-- **Azure Trusted Signing** integration for Authenticode signatures
-- MSI files will be signed with Microsoft-trusted certificate
-- Windows SmartScreen warnings will be eliminated
-- Users can verify publisher identity in Windows UAC prompts
-
-This requires:
-- Azure Trusted Signing account setup
-- GitHub Actions OIDC integration with Azure
-- Workflow updates to sign MSI after build
-
-### Other Potential Improvements
-
-- Support for Windows ARM64 builds
-- Windows Service installer templates (for connectors that run as services)
+- Windows artifacts use Sigstore signatures and do not include Windows Authenticode signatures.
+- Windows build and toolchain targets use amd64; Windows ARM64 is not supported.
+- Windows Service installers require a caller-provided custom WXS template.

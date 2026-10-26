@@ -34,7 +34,7 @@ jobs:
         TOKEN: ${{ secrets.RELENG_GITHUB_TOKEN }}
       run: |
         if [ -n "$TOKEN" ]; then
-          git config --global url."https://${TOKEN}@github.com/".insteadOf "https://github.com/"
+          git config --global url."https://x-access-token:${TOKEN}@github.com/".insteadOf "https://github.com/"
         fi
     - name: Install Go
       uses: actions/setup-go@v5
@@ -68,7 +68,7 @@ jobs:
           TOKEN: ${{ secrets.RELENG_GITHUB_TOKEN }}
         run: |
           if [ -n "$TOKEN" ]; then
-            git config --global url."https://${TOKEN}@github.com/".insteadOf "https://github.com/"
+            git config --global url."https://x-access-token:${TOKEN}@github.com/".insteadOf "https://github.com/"
           fi
       - name: Install Go
         uses: actions/setup-go@v5
