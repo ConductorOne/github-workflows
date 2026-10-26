@@ -155,13 +155,19 @@ flagged location and assign exactly one verdict:
     something a person already dealt with belongs in the summary, where it is
     said once.
   - **Another thread for this same issue is open and accurate, OR has
-    `human_engaged` true** — do not post a duplicate. Prior findings are one
+    `human_engaged` true, OR you already posted a fresh comment for this issue
+    earlier in this audit** — do not post a duplicate. Prior findings are one
     entry per thread, not per issue, so one issue appears here once per thread
     it has ever had, and the bot's own superseded threads stay in that list
-    forever. Without the `human_engaged` half, dealing with the newest thread
-    would still leave an older bot-resolved one matching the outdated case
-    below, and it would post again — and again after that one is dealt with
-    too. One person dealing with any thread for an issue settles all of them.
+    forever. Each of the three clauses closes a different way the same issue
+    gets raised twice: a live thread already covers it, a person already dealt
+    with it, or you covered it yourself a moment ago. The last one matters
+    because the audit walks entries, not issues: without it, an issue with two
+    stale threads gets two fresh comments in a single run, four after the next
+    change, and so on. That is also the shape to expect when
+    `resolution_blocked` is true — nothing is ever auto-resolved, so stale
+    threads only accumulate, and this clause is the only thing holding the
+    line.
   - **The thread is outdated and nothing above covers the issue** — post a
     fresh inline comment at the current location. Nothing on the PR points at
     it otherwise, and this is also the path that recovers a finding whose
