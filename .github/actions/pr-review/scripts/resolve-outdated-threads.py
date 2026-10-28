@@ -20,7 +20,11 @@ from typing import Optional
 REVIEW_PREFIXES = ("🔴 Security:", "🟠 Bug:", "🟡 Suggestion:")
 DEFAULT_API_ATTEMPTS = 3
 HTTP_STATUS_PATTERN = re.compile(r"HTTP\s+(\d{3})")
-BOT_LOGINS = {"github-actions[bot]", "github-actions"}
+# Shared with publish-review-report.py and fetch-pr-context.py so every side
+# of the contract classifies comments identically. Thread classification is one
+# of those sides: an unlisted bot login would read as a human reply here and
+# suppress re-raising a finding, so a private copy drifting is fail-open.
+from _review_state import BOT_LOGINS  # noqa: E402
 
 LIST_THREADS_QUERY = """
 query($owner: String!, $repo: String!, $number: Int!, $after: String) {
@@ -31,13 +35,14 @@ query($owner: String!, $repo: String!, $number: Int!, $after: String) {
           id
           isResolved
           isOutdated
+          resolvedBy { login __typename }
           path
           line
           comments(first: 20) {
             totalCount
             nodes {
               body
-              author { login }
+              author { login __typename }
             }
           }
         }
@@ -173,6 +178,38 @@ def severity_of(body: str) -> str:
     return "unknown"
 
 
+def _author_is_person(actor: Optional[dict]) -> bool:
+    """Whether a comment author is a human.
+
+    `PullRequestReviewComment.author` is the `Actor` INTERFACE, so every
+    GitHub App arrives as a `Bot` node and the type alone settles it. Matching
+    on the login instead would need a list of every app anyone ever installs,
+    and would miss them by default — the direction that silently retires a
+    finding from inline reporting.
+    """
+    return bool(actor) and actor.get("__typename") == "User"
+
+
+def _resolver_is_person(resolver: Optional[dict]) -> bool:
+    """Whether a thread was resolved by a human.
+
+    This cannot use the same test. `PullRequestReviewThread.resolvedBy` is the
+    `User` OBJECT, not `Actor`, so an app that resolves a thread is coerced
+    into a User and its `__typename` is ALWAYS "User" — checking the type here
+    would read every bot resolution as a person and permanently retire the
+    finding. Observed on a real PR: `c1-squire-dev[bot]` resolved 37 threads,
+    each reported as `User`.
+
+    Under that coercion the login keeps the `[bot]` suffix (`c1-squire-dev[bot]`),
+    which it does NOT carry as a `Bot` node — which is also why BOT_LOGINS has
+    to list `github-actions` both ways.
+    """
+    if not resolver:
+        return False
+    login = resolver.get("login", "")
+    return bool(login) and login not in BOT_LOGINS and not login.endswith("[bot]")
+
+
 def collect_prior_findings(threads: list[dict]) -> list[dict]:
     """Build the prior-findings list the review prompt audits against.
 
@@ -181,6 +218,26 @@ def collect_prior_findings(threads: list[dict]) -> list[dict]:
     not mean the issue was fixed; an open one does not mean it is still
     present), so the reviewer re-verifies each entry against the current code.
     Unresolved entries sort first, then by path.
+
+    `human_engaged` records whether a person has dealt with the thread at all:
+    wrote in it, or resolved it. It is not evidence about the code either —
+    it says the thread is not just this bot talking to itself. Step 3 of the
+    review prompt branches on it to decide whether to open a NEW inline thread
+    for a still-present finding, never to skip verifying one.
+
+    It is the axis rather than `thread_resolved`, which does not separate the
+    populations: should_resolve above resolves this reviewer's own outdated,
+    reply-free threads on every run, so most resolved threads are the action's
+    doing. `resolvedBy` is what tells those apart from a person clicking
+    Resolve, which people do far more often than they reply.
+
+    "A person" is decided differently for the two halves, because GraphQL
+    types them differently — see _author_is_person and _resolver_is_person.
+    Either way it is not "a login outside BOT_LOGINS": plenty of other apps
+    write on these PRs, and counting one as engagement retires the finding
+    from inline reporting for good. BOT_LOGINS stays narrow on purpose —
+    _review_state uses it as a trust allowlist for summary authorship, which
+    is a different question from "is this commenter a human".
     """
     findings = []
     for thread in threads:
@@ -200,6 +257,26 @@ def collect_prior_findings(threads: list[dict]) -> list[dict]:
             "excerpt": body.splitlines()[0][:200],
             "thread_resolved": thread["isResolved"],
             "thread_outdated": thread["isOutdated"],
+            # A truncated thread counts as engaged-with. The query takes the
+            # first 20 comments, so on a longer thread a human reply can sit
+            # past the cut and read as "nobody ever answered".
+            #
+            # Note which way this errs, because it is not the usual one: the
+            # audit suppresses a new inline thread when this is true, so True
+            # buys silence, and for a reviewer silence is the unsafe
+            # direction. It is chosen anyway because a thread past twenty
+            # comments has demonstrably been engaged with, and re-raising into
+            # a conversation that long is the worse failure. should_resolve
+            # above reads the same truncation as a reason not to auto-resolve:
+            # opposite literal value, same instinct — do not act on what was
+            # not read.
+            "human_engaged": (
+                thread["comments"]["totalCount"] > len(comments)
+                or any(_author_is_person(c.get("author")) for c in comments[1:])
+                # Resolved by a person rather than by should_resolve or any
+                # other automation, which keeps the re-anchor path for those.
+                or _resolver_is_person(thread.get("resolvedBy"))
+            ),
         })
     findings.sort(key=lambda f: (f["thread_resolved"], f["path"] or "", f["line"] or 0))
     return findings
@@ -286,6 +363,13 @@ def main():
     }
 
     write_summary(summary)
+    # DELIBERATELY the pre-mutation snapshot. `resolve_thread` changes GitHub,
+    # not these dicts, so a thread resolved seconds ago is still reported
+    # unresolved and outdated — which is the one path that lets the review
+    # re-anchor that finding at its new location before the resolution takes
+    # effect for good. "Reporting the state we just set" looks like an obvious
+    # cleanup and would silently turn every outdated finding into a summary
+    # line forever. test_prior_findings_report_pre_resolution_state pins it.
     write_prior_findings(collect_prior_findings(threads))
 
     print(f"\nDone: resolved {len(resolved)}/{len(to_resolve)} threads")
