@@ -14,7 +14,11 @@ test: test-go test-scripts
 
 .PHONY: test-go
 test-go:
-	go test ./...
+	# Explicit, not ./..., so ca-trust-guard is run ONCE and only by the
+	# offline line below. An unrestricted run first would warm the module and
+	# toolchain cache and the hermetic assertion would stop asserting anything.
+	# New packages go here; ci.yaml's go-tests job runs ./... separately.
+	go test ./cmd/extract-images ./cmd/record-release ./cmd/release-metadata ./cmd/generate-manifest ./cmd/merge-manifests ./cmd/publish-public-ecr-release-tags
 	GOTOOLCHAIN=local GOPROXY=off go test ./cmd/ca-trust-guard/...
 
 .PHONY: test-scripts

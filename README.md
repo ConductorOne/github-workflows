@@ -347,7 +347,9 @@ The `test-flow` parameter can be:
 
 `make test` runs this repository's own Go tests and script tests, including the
 `pr-review` Python suite under `.github/actions/pr-review/scripts`. `ci.yaml`
-("Repository CI") runs the same targets on pull requests and pushes to `main`.
+("Repository CI") covers the same ground on pull requests and pushes to
+`main`, though not through `make`: its `go-tests` job runs `go vet ./...` and
+`go test ./...` directly, and its `shell-tests` job runs `make test-scripts`.
 
 Running them locally needs **kislyuk's Python/jq `yq`** — `apt install yq` or
 `pip install yq` — not the more common Go `yq` from mikefarah. Several script
