@@ -166,7 +166,7 @@ Committed image references and digests:
 | ↳ `linux/s390x` | `sha256:c63ef2a68c5ffa9bd31feaa573d606208c10d54b1bee2caf3c168dc5ddec78d9` |
 | ↳ `linux/ppc64le` | `sha256:be4a6d22e53c1118d0c026dc08be71ec3f1954ae75f6e5ff4a10ce97b837ff80` |
 | ↳ `linux/riscv64` | `sha256:0b160fd367891825201f06378982d59900bf35992cfcc453daf7449892d91226` |
-| `public.ecr.aws/lambda/provided:al2023` | `sha256:49c8b85e353ea6052759c3dcf6761b35c055c29c8016a9cd734ac4d24a060729` |
+| `public.ecr.aws/lambda/provided:al2023` | `sha256:2dc0f1f26731018b369932201d1dac295edd1730d1280f194486ae093ac39798` |
 | `tonistiigi/binfmt:latest` | `sha256:400a4873b838d1b89194d982c45e5fb3cda4593fbfd7e08a02e76b03b21166f0` |
 | `moby/buildkit:buildx-stable-1` | `sha256:cec9f139f45e93c5c69c60f8b07cfad9f43f4ef6b6a6cd917527fea5ff2e3dea` |
 
