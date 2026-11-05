@@ -20,12 +20,14 @@ test-go:
 	# from `go list` rather than hand-listed so a new package cannot be skipped.
 	go test $$(go list ./... | grep -vE '/cmd/ca-trust-guard(/|$$)')
 	GOTOOLCHAIN=local GOPROXY=off go test ./cmd/ca-trust-guard/...
+	GOTOOLCHAIN=local go -C tools/rekor-entry test ./...
 
 .PHONY: test-scripts
 test-scripts:
 	bash scripts/test-derive-iam-role-name.sh
 	bash scripts/test-normalize-release-options.sh
 	python3 scripts/test-release-config-templates.py
+	python3 scripts/test-rekor-monitor.py
 	python3 scripts/test-check-image-locks.py
 	python3 scripts/test-windows-pre-build-script.py
 	python3 scripts/test-safe-relative-path.py
