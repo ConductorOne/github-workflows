@@ -383,8 +383,12 @@ jobs:
         run: |
           set -euo pipefail
           go install golang.org/x/vuln/cmd/govulncheck@v1.7.0
+          # locked-tools does not put GOBIN or GOPATH/bin on PATH.
+          gopath="$(go env GOPATH)"
+          bin="$(go env GOBIN)"
+          bin="${bin:-${gopath%%:*}/bin}"
           for goos in linux darwin windows; do
-            GOOS="$goos" govulncheck ./...
+            GOOS="$goos" "$bin/govulncheck" ./...
           done
 
   goreleaser-binaries:
