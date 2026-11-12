@@ -226,7 +226,7 @@ class IntegrityTests(unittest.TestCase):
         self.run_script("install-tool.sh", "node", self.root / "dest", ok=False)
         self.assertFalse(self.calls.exists())
 
-    def go_contract(self, version: str = "go1.27.3", lock: Path | None = None) -> None:
+    def go_contract(self, version: str = "go1.27.4", lock: Path | None = None) -> None:
         lock = lock or self.lock
         self.env.update(EXPECTED_GO_VERSION=version, LOCK_PATH=str(lock.resolve()),
                         EXPECTED_LOCK_SHA256=hashlib.sha256(lock.read_bytes()).hexdigest())
@@ -235,7 +235,7 @@ class IntegrityTests(unittest.TestCase):
         self.executable("go", r'''
 printf 'go %s\n' "$*" >> "$CALLS"
 case "$1" in
-  version) echo "go version ${TEST_GO_VERSION:-go1.27.3} linux/arm64" ;;
+  version) echo "go version ${TEST_GO_VERSION:-go1.27.4} linux/arm64" ;;
   list)
     [ "$2" = -m ] && [ "$GOTOOLCHAIN" = local ] && [ "$GOWORK" = off ]
     [ "$GOPROXY" = off ] && [ "$GOSUMDB" = off ]
@@ -254,27 +254,27 @@ esac
         self.go_contract()
         self.mock_go_gate()
         self.run_script("verify-locked-go.sh", "version")
-        self.env["TEST_GO_VERSION"] = "go1.27.4"
+        self.env["TEST_GO_VERSION"] = "go1.27.5"
         self.run_script("verify-locked-go.sh", "version", ok=False)
         self.env.pop("TEST_GO_VERSION")
         self.calls.unlink()
         module = self.root / "go.mod"
-        for version in ("1.13", "1.27", "1.27.3"):
+        for version in ("1.13", "1.27", "1.27.3", "1.27.4"):
             module.write_text(f"module example.com/fixture\n\ngo {version}\n")
             self.run_script("verify-locked-go.sh", "module", module)
-        module.write_bytes(b"module example.com/fixture\r\n\r\ngo 1.27.3\r\n")
-        self.run_script("verify-locked-go.sh", "module", module)
-        self.assertEqual(self.calls.read_text().count("go list -m"), 4)
-        self.calls.unlink()
         module.write_bytes(b"module example.com/fixture\r\n\r\ngo 1.27.4\r\n")
+        self.run_script("verify-locked-go.sh", "module", module)
+        self.assertEqual(self.calls.read_text().count("go list -m"), 5)
+        self.calls.unlink()
+        module.write_bytes(b"module example.com/fixture\r\n\r\ngo 1.27.5\r\n")
         result = self.run_script("verify-locked-go.sh", "module", module, ok=False)
-        self.assertIn(f"::error title=locked-tools::{module} requires Go 1.27.4, newer than locked go1.27.3", result.stderr)
-        for directive in ("go 1.27.4", "go 1.28", "go 2.0", "go 1.28rc1", "", "go 1.27\ngo 1.26"):
+        self.assertIn(f"::error title=locked-tools::{module} requires Go 1.27.5, newer than locked go1.27.4", result.stderr)
+        for directive in ("go 1.27.5", "go 1.28", "go 2.0", "go 1.28rc1", "", "go 1.27\ngo 1.26"):
             module.write_text(f"module example.com/fixture\n\n{directive}\n")
             self.run_script("verify-locked-go.sh", "module", module, ok=False)
         self.assertFalse(self.calls.exists(), "invalid directives must fail before invoking Go")
         module.write_text("module fixture\ngo 1.27.3\n")
-        self.env["TEST_GO_VERSION"] = "go1.27.4"
+        self.env["TEST_GO_VERSION"] = "go1.27.5"
         self.run_script("verify-locked-go.sh", "module", module, ok=False)
         self.assertNotIn("go list", self.calls.read_text())
         self.env.pop("TEST_GO_VERSION")
@@ -375,7 +375,7 @@ esac
         self.run_script("gon-source.sh", "ref")
         self.assertEqual(self.output_file.read_text(), f"ref={commit}\n")
         self.env.update(GOFLAGS="-mod=readonly", GOPROXY="https://proxy.golang.org", GOSUMDB="sum.golang.org")
-        self.executable("go", 'echo "go $*" >> "$CALLS"\ncase "$1" in version) echo "go version go1.27.3 linux/arm64";; list) awk \'$1 == "go" { print $2 }\' go.mod;; build) [[ "$PWD" == */cmd/gon ]]; [ "$1 $2 $3" = "build -trimpath -o" ]; printf fixture > "$4";; *) exit 99;; esac\n')
+        self.executable("go", 'echo "go $*" >> "$CALLS"\ncase "$1" in version) echo "go version go1.27.4 linux/arm64";; list) awk \'$1 == "go" { print $2 }\' go.mod;; build) [[ "$PWD" == */cmd/gon ]]; [ "$1 $2 $3" = "build -trimpath -o" ]; printf fixture > "$4";; *) exit 99;; esac\n')
         module = self.repo / "go.mod"
         module.write_text("module fixture\ngo 1.13\n")
         (self.repo / "cmd/gon").mkdir(parents=True)
@@ -465,7 +465,7 @@ esac
     def test_action_prepare_owns_single_go_version_sanity(self) -> None:
         self.fixture_download("go", "linux/amd64")
         self.env.update(LOCKED_TOOLS="go", LOCKS_INPUT="", ACTION_DIR=str(self.action_dir))
-        self.lock.write_text(self.lock.read_text().replace("go go1.27.3 darwin/arm64", "go go1.27.4 darwin/arm64"))
+        self.lock.write_text(self.lock.read_text().replace("go go1.27.4 darwin/arm64", "go go1.27.5 darwin/arm64"))
         self.run_script("locked-tools.sh", "prepare", ok=False)
         self.assertFalse(self.calls.exists())
         self.assertFalse(self.path_file.exists())
