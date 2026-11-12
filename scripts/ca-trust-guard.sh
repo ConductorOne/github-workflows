@@ -3,7 +3,7 @@
 # delegate observations/decisions to Go and OS mutations to their own scripts.
 # Only this bootstrap build is module-off for runner-Go compatibility (Go 1.22+
 # language/API floor, stdlib only, still local/offline). Vet/tests retain the
-# repository module and its Go 1.27.3 toolchain requirement.
+# repository module and its Go 1.27.4 toolchain requirement.
 set -euo pipefail
 root=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 fixtures="$root/.github/actions/ca-trust-guard/fixtures"

@@ -67,7 +67,7 @@ The stdlib-only `cmd/ca-trust-guard` is built using the runner-image Go toolchai
 with `GOTOOLCHAIN=local`, `GOPROXY=off` and `GOSUMDB=off`. **Only the bootstrap
 build** uses `GO111MODULE=off`: it has no dependencies and a Go 1.22+ language/API
 floor, so an older runner Go is not forced to satisfy the repository module's
-Go 1.27.3 directive. Vet/tests retain that module/toolchain requirement. Nothing
+Go 1.27.4 directive. Vet/tests retain that module/toolchain requirement. Nothing
 is downloaded; a missing/too-old compiler fails closed. The runner Go compiler
 is a residual bootstrap dependency in the same trust class as the runner agent.
 
