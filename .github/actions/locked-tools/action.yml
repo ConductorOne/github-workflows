@@ -2,7 +2,7 @@ name: Locked release tools
 description: Install checksum-verified release tools before configuring release credentials.
 inputs:
   tools:
-    description: Comma-separated tools (go,node,syft,goreleaser,goreleaser-pro,gon,minisign). Gon automatically adds Go.
+    description: Comma-separated tools (go,node,syft,goreleaser,goreleaser-pro,gon,govulncheck,minisign). Gon and govulncheck automatically add Go.
     required: true
   locks:
     description: Path to the reviewed tool lock file; empty selects the action-local canonical lock.
@@ -12,7 +12,7 @@ inputs:
     default: ${{ runner.temp }}/locked-tools
 outputs:
   go:
-    description: Installed Go version, when requested or required by gon.
+    description: Installed Go version, when requested or required by a source-built tool.
     value: ${{ steps.result.outputs.go }}
   node:
     description: Installed Node version, when requested.
@@ -29,6 +29,9 @@ outputs:
   gon:
     description: Built gon source commit, when requested.
     value: ${{ steps.result.outputs.gon }}
+  govulncheck:
+    description: Built govulncheck source commit, when requested.
+    value: ${{ steps.result.outputs.govulncheck }}
   minisign:
     description: Installed Minisign version, when requested.
     value: ${{ steps.result.outputs.minisign }}
@@ -63,6 +66,15 @@ runs:
         path: ${{ steps.prepare.outputs.gon_path }}
         persist-credentials: false
 
+    - name: Checkout locked govulncheck source
+      if: steps.prepare.outputs.govulncheck_ref != ''
+      uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # actions/checkout@v5
+      with:
+        repository: golang/vuln
+        ref: ${{ steps.prepare.outputs.govulncheck_ref }}
+        path: ${{ steps.prepare.outputs.govulncheck_path }}
+        persist-credentials: false
+
     - name: Install verified artifacts
       shell: bash
       env:
@@ -90,6 +102,23 @@ runs:
         GOPROXY: https://proxy.golang.org
         GOSUMDB: sum.golang.org
       run: bash "$GITHUB_ACTION_PATH/locked-tools.sh" gon
+
+    - name: Build locked govulncheck source
+      if: steps.prepare.outputs.govulncheck_ref != ''
+      shell: bash
+      env:
+        LOCKED_TOOLS: ${{ steps.prepare.outputs.tools }}
+        TOOL_LOCK_FILE: ${{ steps.prepare.outputs.lock_file }}
+        LOCK_PATH: ${{ steps.prepare.outputs.lock_path }}
+        EXPECTED_GO_VERSION: ${{ steps.prepare.outputs.go_version }}
+        LOCKED_TOOLS_DEST: ${{ steps.prepare.outputs.dest }}
+        EXPECTED_LOCK_SHA256: ${{ steps.prepare.outputs.lock_sha256 }}
+        LOCKED_GOVULNCHECK_PATH: ${{ steps.prepare.outputs.govulncheck_path }}
+        GOTOOLCHAIN: local
+        GOFLAGS: -mod=readonly
+        GOPROXY: https://proxy.golang.org
+        GOSUMDB: sum.golang.org
+      run: bash "$GITHUB_ACTION_PATH/locked-tools.sh" govulncheck
 
     - name: Report installed tool versions and lock hash
       id: result

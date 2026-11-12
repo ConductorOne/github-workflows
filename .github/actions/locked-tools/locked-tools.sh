@@ -4,7 +4,7 @@ set -euo pipefail
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 fail() { echo "::error title=locked-tools::$*" >&2; exit 1; }
 phase="${1:-}"
-case "$phase" in prepare|install|gon|outputs) ;; *) fail 'Unknown locked-tools phase' ;; esac
+case "$phase" in prepare|install|gon|govulncheck|outputs) ;; *) fail 'Unknown locked-tools phase' ;; esac
 request="${LOCKED_TOOLS:-}"
 if [[ -z "$request" || "$request" == *$'\n'* || "$request" == *$'\r'* ]]; then
   fail 'tools must be a nonempty comma-separated list'
@@ -20,15 +20,15 @@ for tool in "${requested[@]}"; do
   tool="${tool#"${tool%%[![:space:]]*}"}"
   tool="${tool%"${tool##*[![:space:]]}"}"
   case "$tool" in
-    go|node|syft|goreleaser|goreleaser-pro|minisign|gon) ;;
+    go|node|syft|goreleaser|goreleaser-pro|minisign|gon|govulncheck) ;;
     *) fail "Unsupported tool: $tool" ;;
   esac
   [[ "$seen" != *",$tool,"* ]] || fail "Duplicate tool: $tool"
   seen+="$tool,"
   tools+=("$tool")
-  if [ "$tool" = go ] || [ "$tool" = gon ]; then needs_go=true; fi
+  if [ "$tool" = go ] || [ "$tool" = gon ] || [ "$tool" = govulncheck ]; then needs_go=true; fi
 done
-# Go must precede every source build, even when gon is the only requested tool.
+# Go must precede every source build, even when a source-built tool is the only request.
 if [ "$needs_go" = true ]; then
   ordered=(go)
   for tool in "${tools[@]}"; do
@@ -74,13 +74,18 @@ lock_row() {
   awk -v tool="$tool" -v platform="$platform" '$1 == tool && $3 == platform { print; count++ } END { if (count != 1) exit 1 }' "$lock" || fail "Expected exactly one $tool lock for $platform"
 }
 gon_ref=
+govulncheck_ref=
 for tool in "${tools[@]}"; do
   row="$(lock_row "$tool")"
   read -r _ version _ checksum url extra <<< "$row"
   [[ "$version" =~ ^[a-zA-Z0-9][a-zA-Z0-9.+_-]*$ ]] || fail "Invalid locked version for $tool"
-  if [ "$tool" = gon ]; then
-    [[ "$version" =~ ^[0-9a-f]{40}$ && "$checksum" = source && -z "$url" && -z "$extra" ]] || fail 'Invalid gon source lock'
-    gon_ref="$version"
+  if [ "$tool" = gon ] || [ "$tool" = govulncheck ]; then
+    [[ "$version" =~ ^[0-9a-f]{40}$ && "$checksum" = source && -z "$url" && -z "$extra" ]] || fail "Invalid $tool source lock"
+    if [ "$tool" = gon ]; then
+      gon_ref="$version"
+    else
+      govulncheck_ref="$version"
+    fi
   else
     [[ "$checksum" =~ ^[0-9a-f]{64}$ && -n "$url" && -z "$extra" ]] || fail "Invalid artifact lock for $tool"
   fi
@@ -119,15 +124,21 @@ case "$phase" in
       source_dir="$(mktemp -d "${GITHUB_WORKSPACE:?GITHUB_WORKSPACE must be set}/.locked-tools-gon.XXXXXX")"
       gon_path="$(basename "$source_dir")"
     fi
+    govulncheck_path=
+    if [ -n "$govulncheck_ref" ]; then
+      source_dir="$(mktemp -d "${GITHUB_WORKSPACE:?GITHUB_WORKSPACE must be set}/.locked-tools-govulncheck.XXXXXX")"
+      govulncheck_path="$(basename "$source_dir")"
+    fi
     {
       printf 'tools=%s\nlock_file=%s\ndest=%s\nlock_sha256=%s\n' "$normalized" "$lock" "$dest" "$lock_sha256"
       printf 'lock_path=%s\ngo_version=%s\n' "$lock_path" "$expected_go_version"
       printf 'gon_ref=%s\ngon_path=%s\n' "$gon_ref" "$gon_path"
+      printf 'govulncheck_ref=%s\ngovulncheck_path=%s\n' "$govulncheck_ref" "$govulncheck_path"
     } >> "${GITHUB_OUTPUT:?GITHUB_OUTPUT must be set}"
     ;;
   install)
     for tool in "${tools[@]}"; do
-      [ "$tool" != gon ] || continue
+      if [ "$tool" = gon ] || [ "$tool" = govulncheck ]; then continue; fi
       target="$dest/$tool"
       if [ "$tool" = go ]; then target="$dest"; fi
       if [ "$os" = windows ]; then
@@ -154,6 +165,15 @@ case "$phase" in
     [[ "$gon_path" =~ ^\.locked-tools-gon\.[a-zA-Z0-9]+$ ]] || fail 'Invalid temporary gon checkout path'
     source_dir="${GITHUB_WORKSPACE:?GITHUB_WORKSPACE must be set}/$gon_path"
     bash "$script_dir/gon-source.sh" build "$source_dir" "$dest/gon"
+    # The action owns this unique checkout. Do not leave it in caller source trees.
+    rm -rf -- "$source_dir"
+    ;;
+  govulncheck)
+    [ -n "$govulncheck_ref" ] || fail 'govulncheck was not requested'
+    govulncheck_path="${LOCKED_GOVULNCHECK_PATH:-}"
+    [[ "$govulncheck_path" =~ ^\.locked-tools-govulncheck\.[a-zA-Z0-9]+$ ]] || fail 'Invalid temporary govulncheck checkout path'
+    source_dir="${GITHUB_WORKSPACE:?GITHUB_WORKSPACE must be set}/$govulncheck_path"
+    bash "$script_dir/govulncheck-source.sh" build "$source_dir" "$dest/govulncheck"
     # The action owns this unique checkout. Do not leave it in caller source trees.
     rm -rf -- "$source_dir"
     ;;

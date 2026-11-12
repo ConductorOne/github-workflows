@@ -12,7 +12,8 @@ Install checksum-verified release tools before configuring release credentials:
 The action owns the version/URL/checksum reader. It resolves its canonical
 `tool-locks.txt` from the action directory, not from a caller checkout, verifies
 artifacts before extraction, and checks each expected executable leaf before
-publishing PATH. Requesting `gon` also installs Go first.
+publishing PATH. Requesting `gon` or `govulncheck` also installs Go first, then
+builds the locked source commit with readonly, checksum-authenticated modules.
 
 ## Inputs and outputs
 
@@ -26,7 +27,7 @@ Outputs:
 
 | Output | Contract |
 | --- | --- |
-| `go`, `node`, `syft`, `goreleaser`, `goreleaser-pro`, `gon`, `minisign` | Installed tool version, or source commit for gon; empty when not requested. Go includes its `go` prefix. |
+| `go`, `node`, `syft`, `goreleaser`, `goreleaser-pro`, `gon`, `govulncheck`, `minisign` | Installed tool version, or source commit for gon/govulncheck; empty when not requested. Go includes its `go` prefix. |
 | `versions` | JSON per-tool map of the installed versions/source commits. |
 | `lock_sha256` | SHA256 of the exact reviewed lock used throughout preparation, installation and output publication. |
 | `lock_path` | Absolute path of that same existing lock file. Action-local by default; the resolved reviewed override when explicitly supplied. Native Windows form on Windows. |
@@ -55,7 +56,7 @@ or any other checkout copy:
 ```
 
 The same environment applies to `verify-locked-go.sh version`. Request `go`
-(or `gon`, which adds it) to obtain a nonempty expected Go version.
+(or `gon`/`govulncheck`, which add it) to obtain a nonempty expected Go version.
 
 All three expectation variables are required. The gate validates their shape,
 requires an absolute readable `LOCK_PATH`, and hashes its bytes to assert the

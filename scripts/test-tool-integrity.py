@@ -35,7 +35,7 @@ class IntegrityTests(unittest.TestCase):
         self.scripts.mkdir()
         self.action_dir = self.root / ".github/actions/locked-tools"
         self.action_dir.mkdir(parents=True)
-        for name in ("install-tool.sh", "verify-locked-go.sh", "gon-source.sh"):
+        for name in ("install-tool.sh", "verify-locked-go.sh", "gon-source.sh", "govulncheck-source.sh"):
             shutil.copyfile(ACTION / name, self.action_dir / name)
         shutil.copyfile(ACTION / "locked-tools.sh", self.action_dir / "locked-tools.sh")
         shutil.copyfile(ACTION / "install-tool.ps1", self.action_dir / "install-tool.ps1")
@@ -394,6 +394,37 @@ esac
         self.run_script("gon-source.sh", "build", self.repo, self.root / "new-gon", ok=False)
         self.assertFalse(self.calls.exists(), "mismatched gon commit must fail before invoking Go")
 
+    def test_govulncheck_source_gates_and_build(self) -> None:
+        commit = self.init_repo()
+        text = self.lock.read_text()
+        old_commit = next(line.split()[1] for line in text.splitlines() if line.startswith("govulncheck "))
+        self.lock.write_text(text.replace(old_commit, commit))
+        self.go_contract()
+        self.run_script("govulncheck-source.sh", "ref")
+        self.assertEqual(self.output_file.read_text(), f"ref={commit}\n")
+        self.env.update(GOFLAGS="-mod=readonly", GOPROXY="https://proxy.golang.org", GOSUMDB="sum.golang.org")
+        self.executable("go", 'echo "go $*" >> "$CALLS"\ncase "$1" in version) echo "go version go1.27.3 linux/amd64";; list) awk \'$1 == "go" { print $2 }\' go.mod;; build) [ "$PWD" = "'+str(self.root)+'/repo" ]; [ "$1 $2 $3" = "build -trimpath -o" ]; [ "$5" = ./cmd/govulncheck ]; [ "$GOENV" = off ] && [ "$GOWORK" = off ] && [ -z "$GOPRIVATE$GONOPROXY$GONOSUMDB$GOINSECURE" ]; printf fixture > "$4"; chmod +x "$4";; *) exit 99;; esac\n')
+        module = self.repo / "go.mod"
+        module.write_text("module fixture\ngo 1.13\n")
+        (self.repo / "cmd/govulncheck").mkdir(parents=True)
+        dest = self.root / "govulncheck-bin"
+        self.run_script("govulncheck-source.sh", "build", self.repo, dest)
+        self.assertTrue((dest / "govulncheck").is_file())
+        self.assertTrue(os.access(dest / "govulncheck", os.X_OK))
+        self.assertEqual(self.path_file.read_text(), f"{dest}\n")
+        self.calls.unlink()
+        module.write_text("module fixture\ngo 1.28\n")
+        self.run_script("govulncheck-source.sh", "build", self.repo, self.root / "new-govulncheck", ok=False)
+        self.assertNotIn("build", self.calls.read_text())
+        self.env["GOSUMDB"] = "off"
+        self.calls.unlink()
+        self.run_script("govulncheck-source.sh", "build", self.repo, self.root / "new-govulncheck", ok=False)
+        self.assertFalse(self.calls.exists())
+        self.env["GOSUMDB"] = "sum.golang.org"
+        self.git("commit", "--allow-empty", "-qm", "changed source")
+        self.run_script("govulncheck-source.sh", "build", self.repo, self.root / "new-govulncheck", ok=False)
+        self.assertFalse(self.calls.exists(), "mismatched govulncheck commit must fail before invoking Go")
+
     def test_bundled_buildx_fails_without_downloading(self) -> None:
         self.executable("docker", 'echo "$*" >> "$CALLS"\nif [ "${FAIL_BUILDX:-}" = 1 ] && [ "$*" = "buildx version" ]; then exit 1; fi\n')
         self.run_script("setup-release-buildx.sh")
@@ -610,6 +641,29 @@ function Invoke-WebRequest {
             self.run_script("locked-tools.sh", "prepare", ok=False)
         self.assertFalse(self.calls.exists(), "preparation must not download or run tools")
 
+    def test_action_govulncheck_automatically_adds_go_and_prepares_source(self) -> None:
+        self.executable("uname", 'case "$1" in -s) echo "$TEST_OS";; -m) echo "$TEST_ARCH";; esac\n')
+        self.env.update(TEST_ARCH="x86_64", LOCKED_TOOLS="govulncheck", LOCKS_INPUT="", ACTION_DIR=str(self.action_dir))
+        self.run_script("locked-tools.sh", "prepare")
+        plan = self.phase_outputs()
+        locked_commit = next(line.split()[1] for line in self.lock.read_text().splitlines()
+                             if line.startswith("govulncheck "))
+        self.assertEqual(plan["tools"], "go,govulncheck")
+        self.assertEqual(plan["govulncheck_ref"], locked_commit)
+        self.assertTrue((self.workspace / plan["govulncheck_path"]).is_dir())
+        self.assertEqual(plan["gon_ref"], "")
+        self.assertFalse(self.calls.exists(), "preparation must not download or run tools")
+        self.env.update(LOCKED_TOOLS=plan["tools"], TOOL_LOCK_FILE=plan["lock_file"],
+                        LOCK_PATH=plan["lock_path"], EXPECTED_GO_VERSION=plan["go_version"],
+                        EXPECTED_LOCK_SHA256=plan["lock_sha256"])
+        self.output_file.unlink()
+        self.run_script("locked-tools.sh", "outputs")
+        outputs = self.phase_outputs()
+        self.assertEqual(outputs["govulncheck"], plan["govulncheck_ref"])
+        self.assertEqual(json.loads(outputs["versions"]), {
+            "go": plan["go_version"], "govulncheck": plan["govulncheck_ref"],
+        })
+
     def test_composite_metadata_and_single_canonical_lock(self) -> None:
         action = json.loads(subprocess.check_output(["yq", ".", str(ACTION / "action.yml")], text=True))
         self.assertEqual(action["runs"]["using"], "composite")
@@ -625,14 +679,19 @@ function Invoke-WebRequest {
                 self.assertIn("$GITHUB_ACTION_PATH/locked-tools.sh", step["run"])
             else:
                 self.assertRegex(step["uses"], r"@[0-9a-f]{40}$")
-                self.assertEqual(step["with"]["ref"], "${{ steps.prepare.outputs.gon_ref }}")
+                repository = step["with"]["repository"]
+                expected_refs = {
+                    "ConductorOne/gon": "${{ steps.prepare.outputs.gon_ref }}",
+                    "golang/vuln": "${{ steps.prepare.outputs.govulncheck_ref }}",
+                }
+                self.assertEqual(step["with"]["ref"], expected_refs[repository])
                 self.assertFalse(step["with"]["persist-credentials"])
-        for tool in ("go", "node", "syft", "goreleaser", "goreleaser-pro", "gon", "minisign", "versions", "lock_sha256", "lock_path"):
+        for tool in ("go", "node", "syft", "goreleaser", "goreleaser-pro", "gon", "govulncheck", "minisign", "versions", "lock_sha256", "lock_path"):
             self.assertIn(tool, action["outputs"])
         self.assertEqual(action["outputs"]["lock_path"]["value"], "${{ steps.result.outputs.lock_path }}")
         for step in action["runs"]["steps"]:
             if step.get("name") in ("Install verified artifacts", "Build locked gon source",
-                                    "Report installed tool versions and lock hash"):
+                                    "Build locked govulncheck source", "Report installed tool versions and lock hash"):
                 self.assertEqual(step["env"]["LOCK_PATH"], "${{ steps.prepare.outputs.lock_path }}")
                 self.assertEqual(step["env"]["EXPECTED_GO_VERSION"], "${{ steps.prepare.outputs.go_version }}")
 
@@ -656,7 +715,7 @@ function Invoke-WebRequest {
         expected_tools = {
             "validate-inputs": "",
             "determine-workflows-ref": "",
-            "release-preflight": "go",
+            "release-preflight": "${{ inputs.go_vulnerability_scan == true && 'go,govulncheck' || 'go' }}",
             "goreleaser-binaries": "go,gon,syft,goreleaser",
             "goreleaser-windows": "go,syft,goreleaser-pro",
             "goreleaser-docker": "go,goreleaser",
@@ -666,6 +725,12 @@ function Invoke-WebRequest {
             "notify-release-failure": "",
         }
         self.assertEqual(set(jobs), set(expected_tools))
+        scan = next(step for step in jobs["release-preflight"]["steps"]
+                    if step.get("name") == "Check for known vulnerabilities")
+        self.assertEqual(scan["if"], "inputs.go_vulnerability_scan == true")
+        self.assertIn('GOOS="$goos" govulncheck ./...', scan["run"])
+        self.assertNotIn("go install", scan["run"])
+        self.assertNotIn("go env", scan["run"])
         checkout_count = guard_count = tool_count = gate_count = 0
         for job_name, job in jobs.items():
             with self.subTest(job=job_name):
@@ -763,7 +828,7 @@ function Invoke-WebRequest {
                 ids = [step["id"] for step in steps if "id" in step]
                 self.assertEqual(len(ids), len(set(ids)))
         self.assertEqual((checkout_count, guard_count, tool_count, gate_count), (9, 9, 6, 6))
-        for wrapper in ("install-tool.sh", "install-tool.ps1", "gon-source.sh", "verify-locked-go.sh"):
+        for wrapper in ("install-tool.sh", "install-tool.ps1", "gon-source.sh", "govulncheck-source.sh", "verify-locked-go.sh"):
             self.assertFalse((ROOT / "scripts" / wrapper).exists())
 
 

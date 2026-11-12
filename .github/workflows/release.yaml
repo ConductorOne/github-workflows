@@ -289,7 +289,7 @@ jobs:
         if: inputs.go_source_hygiene == true || inputs.go_vulnerability_scan == true
         uses: ./_workflows/.github/actions/locked-tools
         with:
-          tools: go
+          tools: ${{ inputs.go_vulnerability_scan == true && 'go,govulncheck' || 'go' }}
 
       - name: Checkout caller repo
         if: inputs.go_source_hygiene == true || inputs.go_vulnerability_scan == true
@@ -382,13 +382,8 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          go install golang.org/x/vuln/cmd/govulncheck@v1.7.0
-          # locked-tools does not put GOBIN or GOPATH/bin on PATH.
-          gopath="$(go env GOPATH)"
-          bin="$(go env GOBIN)"
-          bin="${bin:-${gopath%%:*}/bin}"
           for goos in linux darwin windows; do
-            GOOS="$goos" "$bin/govulncheck" ./...
+            GOOS="$goos" govulncheck ./...
           done
 
   goreleaser-binaries:

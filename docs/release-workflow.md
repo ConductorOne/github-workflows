@@ -47,7 +47,7 @@ on `determine-workflows-ref`. No job dependencies or permissions change.
 Runs opted-in source integrity checks against the exact tagged caller source before any build job:
 
 - `go_source_hygiene` runs `go generate ./...` and `go mod tidy`, then rejects a changed tree.
-- `go_vulnerability_scan` runs `govulncheck` for Linux, macOS, and Windows.
+- `go_vulnerability_scan` runs govulncheck for Linux, macOS, and Windows. The scanner is built from its locked source commit with the verified Go toolchain before caller checkout and release credentials.
 
 `verify_module_version` checks a generated binary after GoReleaser and before provenance or artifact upload. It requires the embedded Go module version to equal the release tag.
 
@@ -260,7 +260,7 @@ the guard but no locked-tools installation.
 
 | Tool-using job | `locked-tools` input |
 | --- | --- |
-| release-preflight | `go` |
+| release-preflight | `go`, plus `govulncheck` when `go_vulnerability_scan` is enabled |
 | goreleaser-binaries | `go,gon,syft,goreleaser` |
 | goreleaser-windows | `go,syft,goreleaser-pro` |
 | goreleaser-docker | `go,goreleaser` |
@@ -274,7 +274,8 @@ optional checks does not download a Go toolchain.
 Tool-using jobs set `GOTOOLCHAIN=local` at job scope. Caller builds do not override
 `GOFLAGS`, `GOPROXY`, or `GOSUMDB` at workflow/job scope, preserving Go's default
 vendor/readonly mode selection and caller proxy configuration. The trusted gon
-build retains its separate step-local module and checksum requirements.
+and govulncheck source builds retain their separate step-local module and
+checksum requirements.
 Cosign and bundled-buildx/QEMU setup run after trust/tool bootstrap and before
 their signing or AWS credentials.
 
@@ -284,8 +285,8 @@ their signing or AWS credentials.
 URLs and committed SHA256 values. The action-local Bash and PowerShell installers
 fetch the selected URL, verify its hash **before extraction**, and check the
 expected executable leaf before publishing PATH. They do not execute downloaded
-binaries during extraction. The action's Go assertion and native gon build run
-after verified installation. Release credentials are configured only after
+binaries during extraction. The action's Go assertion and native gon/govulncheck
+builds run after verified installation. Release credentials are configured only after
 tool installation and checks. Helper code checkouts use `job.workflow_sha`.
 
 Artifact downloads use five retries with a two-second delay; curl retries all
@@ -321,10 +322,11 @@ composite action accepts a comma-separated `tools` list, an optional reviewed
 `locks` file (default: the action's canonical lock), and `dest` (default:
 `${{ runner.temp }}/locked-tools`). Invoke it before configuring release
 credentials. Supported tools are `go`, `node`, `syft`, `goreleaser`,
-`goreleaser-pro`, `gon`, and `minisign`; missing platform locks and unknown or
-duplicate tool names fail closed. Requesting `gon` automatically adds Go,
-installs/verifies it first, then builds the SHA-checked-out gon source with the
-existing readonly-module/proxy/checksum-database constraints.
+`goreleaser-pro`, `gon`, `govulncheck`, and `minisign`; missing platform locks
+and unknown or duplicate tool names fail closed. Requesting `gon` or
+`govulncheck` automatically adds Go, installs/verifies it first, then builds the
+SHA-checked-out source with the existing readonly-module/proxy/checksum-database
+constraints. Govulncheck source builds currently have a Linux amd64 lock.
 Node is supported on Linux amd64, macOS arm64, and Windows amd64. The Windows
 installer verifies the ZIP hash before extraction, checks the nested
 `node-v26.12.1-win-x64/node.exe` leaf, and publishes that package directory to PATH.
@@ -333,8 +335,9 @@ An empty `locks` input selects the action-local canonical lock inside prepare.
 `dest` keeps its `runner.temp` metadata default: that context is available in
 the caller on Linux, macOS, and Windows.
 
-Outputs include each installed tool's version (`gon` reports its source commit),
-a `versions` JSON object, `lock_sha256`, and absolute `lock_path` for provenance.
+Outputs include each installed tool's version (`gon` and `govulncheck` report
+their source commits), a `versions` JSON object, `lock_sha256`, and absolute
+`lock_path` for provenance.
 The path identifies the action-local canonical lock by default, or the actual
 reviewed override used. The action verifies that lock bytes have not changed
 between preparation, installation, and output publication; internal Go gates
@@ -353,6 +356,7 @@ wrappers under `scripts/` are not supported.
 | goreleaser v2.13.3 | darwin/arm64 | `5516c37779efb3935d5b213cda3b0b9025ae94ddbcb51df6919acbcdef4194b0` | [Universal Darwin archive](https://github.com/goreleaser/goreleaser/releases/download/v2.13.3/goreleaser_Darwin_all.tar.gz) |
 | goreleaser-pro v2.13.3 | windows/amd64 | `8f65fca431ae6aa083805c9287d4b98b7937d54649712f1185b0590ae02001de` | [Windows archive](https://github.com/goreleaser/goreleaser-pro/releases/download/v2.13.3/goreleaser-pro_Windows_x86_64.zip) |
 | gon v0.2.10 | darwin/* | `f4c3f2be10a2ee8d50067d2c8a8828a14c83977c` (Git commit, not SHA256) | [Pinned source](https://github.com/ConductorOne/gon/commit/f4c3f2be10a2ee8d50067d2c8a8828a14c83977c) |
+| govulncheck v1.7.0 | linux/amd64 | `617f44b718537dccdea1915395650e0529e3b72e` (Git commit, not SHA256) | [Pinned source](https://github.com/golang/vuln/commit/617f44b718537dccdea1915395650e0529e3b72e) |
 | syft v1.42.3 | linux/amd64 | `0d6be741479eddd2c8644a288990c04f3df0d609bbc1599a005532a9dff63509` | [Linux archive](https://github.com/anchore/syft/releases/download/v1.42.3/syft_1.42.3_linux_amd64.tar.gz) |
 | syft v1.42.3 | darwin/arm64 | `d71ee7db2be0fe2e96f679fd9d69ef04274cc86c8604707797080a21070b3f32` | [Darwin archive](https://github.com/anchore/syft/releases/download/v1.42.3/syft_1.42.3_darwin_arm64.tar.gz) |
 | syft v1.42.3 | windows/amd64 | `e1b9f4945aa64c2b34970bec617623d7f803d0661b48a50b966768b363322e2d` | [Windows archive](https://github.com/anchore/syft/releases/download/v1.42.3/syft_1.42.3_windows_amd64.zip) |
@@ -365,10 +369,12 @@ wrappers under `scripts/` are not supported.
 | node v26.12.1 | windows/amd64 | `b3efd5c70cba3308ed46e7e699a9b8aac075bbc6b027fcb39c84c31acc25e2b4` | [Windows package](https://nodejs.org/dist/v26.12.1/node-v26.12.1-win-x64.zip) |
 | minisign 0.12 | darwin/arm64 | `89000b19535765f9cffc65a65d64a820f433ef6db8020667f7570e06bf6aac63` | [macOS ZIP](https://github.com/jedisct1/minisign/releases/download/0.12/minisign-0.12-macos.zip) |
 
-Gon builds natively from a pinned source commit with the verified Go toolchain.
-The action checks out the exact source object, checks its Go requirement, and
-requires `GOFLAGS=-mod=readonly`, `GOPROXY=https://proxy.golang.org` and
-`GOSUMDB=sum.golang.org`. It records the resulting binary's SHA256.
+Gon and govulncheck build natively from pinned source commits with the verified
+Go toolchain. The action checks out the exact source object, checks its Go
+requirement, and requires `GOFLAGS=-mod=readonly`,
+`GOPROXY=https://proxy.golang.org` and `GOSUMDB=sum.golang.org`. It records each
+resulting binary's SHA256. Govulncheck builds also disable Go environment files
+and workspace discovery and clear private/insecure module overrides.
 
 Cosign v2.5.2 is installed by
 `sigstore/cosign-installer@398d4b0eeef1380460a10c8013a76f728fb906ac`.

@@ -130,7 +130,7 @@ class UpdateConfigTest(unittest.TestCase):
     def test_binary_tool_proposals_preserve_go_prefix(self):
         for manager in self.config["customManagers"]:
             dep = manager.get("depNameTemplate")
-            if not dep or dep == "ConductorOne/gon":
+            if not dep or dep in {"ConductorOne/gon", "golang/vuln"}:
                 continue
             tool = {"anchore/syft": "syft", "go": "go"}.get(dep, dep.split("/")[-1])
             version = "go9.8.7" if tool == "go" else "v9.8.7"
@@ -152,12 +152,13 @@ class UpdateConfigTest(unittest.TestCase):
             "goreleaser/goreleaser": "github-releases",
             "goreleaser/goreleaser-pro": "github-releases",
             "ConductorOne/gon": "github-tags",
+            "golang/vuln": "github-tags",
             "anchore/syft": "github-releases",
             "go": "golang-version",
             "nodejs/node": "github-releases",
             "jedisct1/minisign": "github-releases",
         }
-        self.assertEqual(len(managers), 7)
+        self.assertEqual(len(managers), len(expected_sources))
         self.assertEqual({manager["depNameTemplate"] for manager in managers}, set(expected_sources))
         self.assertFalse(self.config["automerge"])
         for manager in managers:
